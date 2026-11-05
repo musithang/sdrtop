@@ -92,4 +92,24 @@ typedef struct {
     sdrplay_api_RxChannelParamsT *rxChannelB;
 } sdrplay_api_DeviceParamsT;
 
+typedef struct {
+    unsigned int firstSampleNum; int grChanged; int rfChanged; int fsChanged; unsigned int numSamples;
+} sdrplay_api_StreamCbParamsT;
+typedef struct { unsigned int gRdB; unsigned int lnaGRdB; double currGain; } sdrplay_api_GainCbParamT;
+typedef struct { int powerOverloadChangeType; } sdrplay_api_PowerOverloadCbParamT;
+typedef struct { int modeChangeType; } sdrplay_api_RspDuoModeCbParamT;
+typedef union {
+    sdrplay_api_GainCbParamT gainParams;
+    sdrplay_api_PowerOverloadCbParamT powerOverloadParams;
+    sdrplay_api_RspDuoModeCbParamT rspDuoModeParams;
+} sdrplay_api_EventParamsT;
+typedef void (*sdrplay_api_StreamCallback_t)(short *xi, short *xq, sdrplay_api_StreamCbParamsT *params,
+                                             unsigned int numSamples, unsigned int reset, void *cbContext);
+typedef void (*sdrplay_api_EventCallback_t)(int eventId, int tuner, sdrplay_api_EventParamsT *params, void *cbContext);
+typedef struct {
+    sdrplay_api_StreamCallback_t StreamACbFn;
+    sdrplay_api_StreamCallback_t StreamBCbFn;
+    sdrplay_api_EventCallback_t EventCbFn;
+} sdrplay_api_CallbackFnsT;
+
 #endif

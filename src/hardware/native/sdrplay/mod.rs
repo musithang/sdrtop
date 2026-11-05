@@ -27,6 +27,7 @@ pub mod device;
 pub mod ffi;
 pub mod layout;
 pub mod model;
+pub mod stream;
 
 use std::ffi::CStr;
 use std::sync::Mutex;

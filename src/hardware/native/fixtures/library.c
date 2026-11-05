@@ -543,6 +543,89 @@ int sdrplay_api_GetDevices(sdrplay_api_DeviceT *devices, unsigned int *count, un
     *count = 1;
     return 0;
 }
+// The stream: Init starts a thread that calls back as the API does, with
+// blocks of 4 samples (I = n, Q = -n). Default: two blocks from position 254,
+// an overload detected (to be acknowledged), then a block 4 samples late, then
+// a block of 1008 samples (the API's own length) every millisecond, each where
+// the last ended, until Uninit. Mode 46:
+// two blocks, then the block the API sends as the radio leaves (position 0, no
+// reset, full length) and DeviceRemoved, then nothing. Mode 47: a block ending
+// at 2^32 - 1, then one 4 samples past the wrap, then a block of 1008 every
+// millisecond. Mode 48: Init fails.
+static struct {
+    sdrplay_api_CallbackFnsT fns;
+    void *ctx;
+    pthread_t thread;
+    int running;
+} sdrplay_stream;
+static _Atomic int sdrplay_stop;
+// 7 Inits, 8 Uninits, 9 overload acknowledgements, 10 the last reason given
+// to Update other than an acknowledgement.
+static int sdrplay_counts[4];
+int fixture_sdrplay_count(int field) { return sdrplay_counts[field - 7]; }
+static void sdrplay_block_of(unsigned int first, unsigned int reset, short base, unsigned int len) {
+    short xi[1008], xq[1008];
+    for (unsigned int n = 0; n < len; n++) { xi[n] = (short)(base + n); xq[n] = (short)-(base + n); }
+    sdrplay_api_StreamCbParamsT p = {first, 0, 0, 0, len};
+    sdrplay_stream.fns.StreamACbFn(xi, xq, &p, len, reset, sdrplay_stream.ctx);
+}
+static void sdrplay_block(unsigned int first, unsigned int reset, short base) {
+    sdrplay_block_of(first, reset, base, 4);
+}
+static void sdrplay_event(int event, int type) {
+    sdrplay_api_EventParamsT p;
+    memset(&p, 0, sizeof p);
+    p.powerOverloadParams.powerOverloadChangeType = type;
+    sdrplay_stream.fns.EventCbFn(event, 1, &p, sdrplay_stream.ctx);
+}
+static void *sdrplay_run(void *arg) {
+    (void)arg;
+    unsigned int next = 0;
+    if (mode == 47) {
+        sdrplay_block(4294967291u, 1, 1);
+        sdrplay_block(3u, 0, 5);
+        next = 7;
+    } else {
+        sdrplay_block(254, 1, 1);
+        sdrplay_block(258, 0, 5);
+        if (mode == 46) {
+            sdrplay_block(0, 0, 900);
+            sdrplay_event(2, 0);
+        } else {
+            sdrplay_event(1, 0);
+            sdrplay_block(266, 0, 9);
+            next = 270;
+        }
+    }
+    short base = 13;
+    while (!sdrplay_stop) {
+        struct timespec pause = {0, 1000000};
+        nanosleep(&pause, NULL);
+        if (mode != 46) { sdrplay_block_of(next, 0, base, 1008); next += 1008; base = (short)(base + 1008); }
+    }
+    return NULL;
+}
+int sdrplay_api_Init(void *dev, sdrplay_api_CallbackFnsT *fns, void *ctx) {
+    if (dev != &sdrplay_handle || mode == 48 || sdrplay_stream.running) return 1;
+    sdrplay_counts[0]++;
+    sdrplay_stream.fns = *fns;
+    sdrplay_stream.ctx = ctx;
+    sdrplay_stop = 0;
+    sdrplay_stream.running = pthread_create(&sdrplay_stream.thread, NULL, sdrplay_run, NULL) == 0;
+    return sdrplay_stream.running ? 0 : 1;
+}
+int sdrplay_api_Uninit(void *dev) {
+    (void)dev;
+    sdrplay_counts[1]++;
+    sdrplay_stop = 1;
+    if (sdrplay_stream.running) { pthread_join(sdrplay_stream.thread, NULL); sdrplay_stream.running = 0; }
+    return 0;
+}
+int sdrplay_api_Update(void *dev, int tuner, unsigned int reason, unsigned int ext) {
+    (void)dev; (void)tuner; (void)ext;
+    if (reason == 0x04000000u) sdrplay_counts[2]++; else sdrplay_counts[3] = (int)reason;
+    return 0;
+}
 #ifndef OMIT_LAST_SYMBOL
 const char *sdrplay_api_GetErrorString(int err) {
     switch (err) {

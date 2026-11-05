@@ -274,6 +274,59 @@ pub struct DeviceParamsT {
     pub rx_channel_b: *mut RxChannelParamsT,
 }
 
+/// `sdrplay_api_StreamCbParamsT`: what the API says about one block.
+#[repr(C)]
+pub struct StreamCbParamsT {
+    /// The position of the block's first sample in the API's own count,
+    /// which wraps at 2^32 and starts again (from an arbitrary origin) at
+    /// every reset.
+    pub first_sample_num: u32,
+    /// Set in the block where a gain change took effect: not a boolean
+    /// (measured 1, 2, 4 and 8), its meaning unpublished.
+    pub gr_changed: c_int,
+    pub rf_changed: c_int,
+    pub fs_changed: c_int,
+    pub num_samples: u32,
+}
+
+/// `sdrplay_api_GainCbParamT`, with a `GainChange` event.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct GainCbParamT {
+    pub gr_db: u32,
+    pub lna_gr_db: u32,
+    pub curr_gain: f64,
+}
+
+/// `sdrplay_api_EventParamsT`: one of three, by the event. The overload
+/// and RSPduo variants are a single C `int` each.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union EventParamsT {
+    pub gain_params: GainCbParamT,
+    /// `sdrplay_api_PowerOverloadCbEventIdT`: 0 detected, 1 corrected.
+    pub power_overload_change_type: c_int,
+    pub rsp_duo_mode_change_type: c_int,
+}
+
+/// `sdrplay_api_StreamCallback_t`.
+pub type StreamCallback =
+    unsafe extern "C" fn(*mut i16, *mut i16, *mut StreamCbParamsT, u32, u32, *mut c_void);
+
+/// `sdrplay_api_EventCallback_t`: the event (`sdrplay_api_EventT`: 0 gain
+/// change, 1 overload, 2 device removed, 3 RSPduo mode, 4 device failure),
+/// the tuner, its parameters.
+pub type EventCallback = unsafe extern "C" fn(c_int, c_int, *mut EventParamsT, *mut c_void);
+
+/// `sdrplay_api_CallbackFnsT`: tuner A's stream, tuner B's (none on an
+/// RSP1B), the events.
+#[repr(C)]
+pub struct CallbackFnsT {
+    pub stream_a: Option<StreamCallback>,
+    pub stream_b: Option<StreamCallback>,
+    pub event: Option<EventCallback>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,6 +493,41 @@ mod tests {
             s!("sdrplay_api_Rsp2TunerParamsT", Rsp2TunerParamsT),
             s!("sdrplay_api_RspDuoTunerParamsT", RspDuoTunerParamsT),
             s!("sdrplay_api_RspDxTunerParamsT", RspDxTunerParamsT),
+            s!("sdrplay_api_StreamCbParamsT", StreamCbParamsT),
+            o!(
+                "sdrplay_api_StreamCbParamsT",
+                "grChanged",
+                StreamCbParamsT,
+                gr_changed
+            ),
+            o!(
+                "sdrplay_api_StreamCbParamsT",
+                "numSamples",
+                StreamCbParamsT,
+                num_samples
+            ),
+            s!("sdrplay_api_GainCbParamT", GainCbParamT),
+            o!(
+                "sdrplay_api_GainCbParamT",
+                "lnaGRdB",
+                GainCbParamT,
+                lna_gr_db
+            ),
+            o!(
+                "sdrplay_api_GainCbParamT",
+                "currGain",
+                GainCbParamT,
+                curr_gain
+            ),
+            s!("sdrplay_api_EventParamsT", EventParamsT),
+            s!("sdrplay_api_CallbackFnsT", CallbackFnsT),
+            o!(
+                "sdrplay_api_CallbackFnsT",
+                "StreamBCbFn",
+                CallbackFnsT,
+                stream_b
+            ),
+            o!("sdrplay_api_CallbackFnsT", "EventCbFn", CallbackFnsT, event),
         ]
     }
 

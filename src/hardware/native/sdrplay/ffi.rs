@@ -23,7 +23,7 @@ use crate::hardware::runtime_lib;
 use crate::host::Host;
 
 use super::super::loader::{load, symbol};
-use super::layout::{DeviceParamsT, DeviceT};
+use super::layout::{CallbackFnsT, DeviceParamsT, DeviceT};
 
 /// `sdrplay_api_ErrT`: success.
 pub const SUCCESS: c_int = 0;
@@ -76,6 +76,17 @@ pub struct SdrplayApi {
     /// caller reads and writes in place and the API applies at `Init`.
     pub get_device_params:
         unsafe extern "C" fn(*mut libc::c_void, *mut *mut DeviceParamsT) -> c_int,
+    /// Starts the stream with the parameters in the block: the API's thread
+    /// then calls the stream and event callbacks with `ctx`.
+    pub init:
+        unsafe extern "C" fn(*mut libc::c_void, *mut CallbackFnsT, *mut libc::c_void) -> c_int,
+    /// Stops the stream; the callbacks are not called after it returns
+    /// (about 0.8 s, measured).
+    pub uninit: unsafe extern "C" fn(*mut libc::c_void) -> c_int,
+    /// Applies what changed in the block while streaming, by reason flags
+    /// (`sdrplay_api_ReasonForUpdateT`, tuner A is 1); also how an overload
+    /// event is acknowledged.
+    pub update: unsafe extern "C" fn(*mut libc::c_void, c_int, u32, u32) -> c_int,
     /// The error's name, from a static table: never freed.
     pub get_error_string: unsafe extern "C" fn(c_int) -> *const c_char,
 }
@@ -135,6 +146,9 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<SdrplayApi, String> {
         select_device: sym!("sdrplay_api_SelectDevice"),
         release_device: sym!("sdrplay_api_ReleaseDevice"),
         get_device_params: sym!("sdrplay_api_GetDeviceParams"),
+        init: sym!("sdrplay_api_Init"),
+        uninit: sym!("sdrplay_api_Uninit"),
+        update: sym!("sdrplay_api_Update"),
         get_error_string: sym!("sdrplay_api_GetErrorString"),
         _lib: lib,
     })

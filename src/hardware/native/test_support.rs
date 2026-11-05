@@ -137,6 +137,16 @@ impl TestLibrary {
         }
     }
 
+    /// The fixture's SDRplay stream counters, by field (see
+    /// `fixture_sdrplay_count` in the fixture).
+    pub fn sdrplay_count(&self, field: i32) -> i32 {
+        unsafe {
+            self.lib
+                .get::<unsafe extern "C" fn(i32) -> i32>(b"fixture_sdrplay_count\0")
+                .unwrap()(field)
+        }
+    }
+
     pub fn list_layout(&self, field: i32) -> usize {
         unsafe {
             self.lib
