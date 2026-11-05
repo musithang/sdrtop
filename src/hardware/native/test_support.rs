@@ -127,10 +127,12 @@ impl TestLibrary {
         }
     }
 
-    pub fn sdrplay_layout(&self, field: i32) -> usize {
+    /// One SDRplay parameter as the backend left it, by field (see
+    /// `fixture_sdrplay_param` in the fixture).
+    pub fn sdrplay_param(&self, field: i32) -> f64 {
         unsafe {
             self.lib
-                .get::<unsafe extern "C" fn(i32) -> usize>(b"fixture_sdrplay_layout\0")
+                .get::<unsafe extern "C" fn(i32) -> f64>(b"fixture_sdrplay_param\0")
                 .unwrap()(field)
         }
     }

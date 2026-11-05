@@ -30,7 +30,7 @@ pub enum DeviceKind {
     HackRf,
     RtlSdr,
     /// The SDRplay RSP1B, natively, asked for by name only while its backend
-    /// cannot open it.
+    /// cannot stream.
     Sdrplay,
     Soapy,
     TinySa,
@@ -259,7 +259,7 @@ pub fn list_all_devices(
     // it below; the other HF+ boards only when asked for by name (see
     // `airspyhf::offered`).
     out.extend(airspyhf::list(want == Some(DeviceKind::AirspyHf)));
-    // An RSP only when asked for by name, until its backend opens it.
+    // An RSP only when asked for by name, until its backend streams.
     out.extend(sdrplay::list(want == Some(DeviceKind::Sdrplay)));
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
@@ -345,7 +345,7 @@ pub fn open_device(
         )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
-        DeviceKind::Sdrplay => Err(sdrplay::not_yet(listing)),
+        DeviceKind::Sdrplay => Ok(Arc::new(sdrplay::device::SdrplayDevice::open(listing)?)),
         DeviceKind::Soapy => {
             let Some(args) = listing.args.as_deref() else {
                 anyhow::bail!("a SoapySDR listing with no device arguments cannot be opened");
@@ -491,6 +491,31 @@ mod tests {
             Some("644064DC3639AF31"),
             Some("driver=airspy, serial=644064DC3639AF31"),
         )
+    }
+
+    /// **The native RSP1B wins over SoapySDRPlay3's listing of it**: both
+    /// spell its serial as the API does (`2402040E60`), so the same radio is
+    /// one row.
+    #[test]
+    fn the_native_rsp1b_hides_soapysdrplays_listing_of_it() {
+        let native = vec![listing(
+            DeviceKind::Sdrplay,
+            "SDRplay RSP1B \u{00b7} 2402040E60",
+            Some("2402040E60"),
+            None,
+        )];
+        let soapy = vec![listing(
+            DeviceKind::Soapy,
+            "SoapySDR \u{00b7} sdrplay \u{00b7} SDRplay Dev0 RSP1B 2402040E60",
+            Some("2402040E60"),
+            Some("driver=sdrplay, serial=2402040E60"),
+        )];
+        assert!(offer_soapy(soapy.clone(), &native, None).is_empty());
+        assert_eq!(
+            offer_soapy(soapy, &[], None).len(),
+            1,
+            "alone, it is offered"
+        );
     }
 
     /// One radio, two backends, one row. The native path knows more about a

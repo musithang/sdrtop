@@ -492,7 +492,6 @@ impl StageSpec {
 
     /// A stage whose values are the radio's own settings `0..positions`, its
     /// decibels read per band from `bands` ([`Self::banded`]).
-    #[cfg(test)]
     pub fn banded(name: &str, positions: u32, bands: Vec<BandTable>) -> Self {
         Self {
             banded: bands,

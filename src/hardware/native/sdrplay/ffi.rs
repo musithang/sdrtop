@@ -23,7 +23,7 @@ use crate::hardware::runtime_lib;
 use crate::host::Host;
 
 use super::super::loader::{load, symbol};
-use super::layout::DeviceT;
+use super::layout::{DeviceParamsT, DeviceT};
 
 /// `sdrplay_api_ErrT`: success.
 pub const SUCCESS: c_int = 0;
@@ -65,6 +65,17 @@ pub struct SdrplayApi {
     /// Fills up to `max` entries and writes how many. A radio another program
     /// has selected is not among them at all.
     pub get_devices: unsafe extern "C" fn(*mut DeviceT, *mut u32, u32) -> c_int,
+    /// Takes the radio for this process: no other program can select it, or
+    /// see it in `GetDevices`, until it is released. Fills in `dev`.
+    pub select_device: unsafe extern "C" fn(*mut DeviceT) -> c_int,
+    /// Gives the radio back. A process that dies without it holds the radio
+    /// for about three more seconds, until the service's heartbeat notices
+    /// (measured).
+    pub release_device: unsafe extern "C" fn(*mut DeviceT) -> c_int,
+    /// Points at the API's parameter block for a selected radio, which the
+    /// caller reads and writes in place and the API applies at `Init`.
+    pub get_device_params:
+        unsafe extern "C" fn(*mut libc::c_void, *mut *mut DeviceParamsT) -> c_int,
     /// The error's name, from a static table: never freed.
     pub get_error_string: unsafe extern "C" fn(c_int) -> *const c_char,
 }
@@ -121,6 +132,9 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<SdrplayApi, String> {
         lock_device_api: sym!("sdrplay_api_LockDeviceApi"),
         unlock_device_api: sym!("sdrplay_api_UnlockDeviceApi"),
         get_devices: sym!("sdrplay_api_GetDevices"),
+        select_device: sym!("sdrplay_api_SelectDevice"),
+        release_device: sym!("sdrplay_api_ReleaseDevice"),
+        get_device_params: sym!("sdrplay_api_GetDeviceParams"),
         get_error_string: sym!("sdrplay_api_GetErrorString"),
         _lib: lib,
     })

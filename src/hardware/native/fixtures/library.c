@@ -447,34 +447,79 @@ int airspyhf_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
 }
 #endif
 
-// SDRplay's API 3.15 (sdrplay_api.h). Modes 40 and up are this library's:
-// 41 the service is not running (Open fails as the real one does, with
-// sdrplay_api_Fail), 42 an API that reports 3.14, 43 an RSP1A on the bus,
-// 44 no radio.
-typedef struct {
-    char SerNo[64];
-    unsigned char hwVer;
-    int tuner;
-    int rspDuoMode;
-    unsigned char valid;
-    double rspDuoSampleFreq;
-    void *dev;
-} sdrplay_api_DeviceT;
+// SDRplay's API 3.15, declared in sdrplay.h beside this file. Modes 40 and
+// up are this library's: 41 the service is not running (Open fails as the
+// real one does, with sdrplay_api_Fail), 42 an API that reports 3.14, 43 an
+// RSP1A on the bus, 44 no radio, 45 the radio will not be selected.
+#include "sdrplay.h"
 // What the backend did, by field (see fixture_sdrplay_state): 0 Opens, 1
-// Closes, 2 device locks, 3 unlocks, 4 the maxDevs GetDevices was given.
-static int sdrplay_state[5];
+// Closes, 2 device locks, 3 unlocks, 4 the maxDevs GetDevices was given, 5
+// selects, 6 releases.
+static int sdrplay_state[7];
 int fixture_sdrplay_state(int field) { return sdrplay_state[field]; }
-size_t fixture_sdrplay_layout(int field) {
+// The parameters the API hands out, at the API's own defaults (read from a
+// real RSP1B after SelectDevice): 2 MSPS, 200 kHz filter, zero IF, LO auto,
+// gRdB 50, LNA state 0, AGC at 50 Hz and -60 dBFS, DC and IQ correction on,
+// no decimation, bias tee and notches off, 200 MHz.
+static sdrplay_api_DevParamsT sdrplay_dev;
+static sdrplay_api_RxChannelParamsT sdrplay_rx;
+static sdrplay_api_DeviceParamsT sdrplay_params = {&sdrplay_dev, &sdrplay_rx, NULL};
+static void sdrplay_defaults(void) {
+    memset(&sdrplay_dev, 0, sizeof sdrplay_dev);
+    memset(&sdrplay_rx, 0, sizeof sdrplay_rx);
+    sdrplay_dev.fsFreq.fsHz = 2000000.0;
+    sdrplay_rx.tunerParams.bwType = 200;
+    sdrplay_rx.tunerParams.loMode = 1;
+    sdrplay_rx.tunerParams.gain.gRdB = 50;
+    sdrplay_rx.tunerParams.gain.minGr = 20;
+    sdrplay_rx.tunerParams.rfFreq.rfHz = 200000000.0;
+    sdrplay_rx.ctrlParams.dcOffset.DCenable = 1;
+    sdrplay_rx.ctrlParams.dcOffset.IQenable = 1;
+    sdrplay_rx.ctrlParams.decimation.decimationFactor = 1;
+    sdrplay_rx.ctrlParams.agc.enable = 2;
+    sdrplay_rx.ctrlParams.agc.setPoint_dBfs = -60;
+}
+// One parameter as the backend left it, by field: 0 fsHz, 1 rfHz, 2 gRdB,
+// 3 LNAstate, 4 AGC enable, 5 bias tee, 6 DCenable, 7 IQenable, 8 bwType,
+// 9 ifType, 10 decimation enable, 11 decimation factor, 12 AM/FM notch, 13
+// DAB notch, 14 transfer mode.
+double fixture_sdrplay_param(int field) {
     switch (field) {
-        case 0: return sizeof(sdrplay_api_DeviceT);
-        case 1: return offsetof(sdrplay_api_DeviceT, hwVer);
-        case 2: return offsetof(sdrplay_api_DeviceT, tuner);
-        case 3: return offsetof(sdrplay_api_DeviceT, rspDuoMode);
-        case 4: return offsetof(sdrplay_api_DeviceT, valid);
-        case 5: return offsetof(sdrplay_api_DeviceT, rspDuoSampleFreq);
-        case 6: return offsetof(sdrplay_api_DeviceT, dev);
+        case 0: return sdrplay_dev.fsFreq.fsHz;
+        case 1: return sdrplay_rx.tunerParams.rfFreq.rfHz;
+        case 2: return sdrplay_rx.tunerParams.gain.gRdB;
+        case 3: return sdrplay_rx.tunerParams.gain.LNAstate;
+        case 4: return sdrplay_rx.ctrlParams.agc.enable;
+        case 5: return sdrplay_rx.rsp1aTunerParams.biasTEnable;
+        case 6: return sdrplay_rx.ctrlParams.dcOffset.DCenable;
+        case 7: return sdrplay_rx.ctrlParams.dcOffset.IQenable;
+        case 8: return sdrplay_rx.tunerParams.bwType;
+        case 9: return sdrplay_rx.tunerParams.ifType;
+        case 10: return sdrplay_rx.ctrlParams.decimation.enable;
+        case 11: return sdrplay_rx.ctrlParams.decimation.decimationFactor;
+        case 12: return sdrplay_dev.rsp1aParams.rfNotchEnable;
+        case 13: return sdrplay_dev.rsp1aParams.rfDabNotchEnable;
+        case 14: return sdrplay_dev.mode;
         default: abort();
     }
+}
+static int sdrplay_handle;
+int sdrplay_api_SelectDevice(sdrplay_api_DeviceT *device) {
+    sdrplay_state[5]++;
+    if (mode == 45) return 1;
+    device->dev = &sdrplay_handle;
+    sdrplay_defaults();
+    return 0;
+}
+int sdrplay_api_ReleaseDevice(sdrplay_api_DeviceT *device) {
+    sdrplay_state[6]++;
+    device->dev = NULL;
+    return 0;
+}
+int sdrplay_api_GetDeviceParams(void *dev, sdrplay_api_DeviceParamsT **params) {
+    if (dev != &sdrplay_handle) return 10;
+    *params = &sdrplay_params;
+    return 0;
 }
 int sdrplay_api_Open(void) {
     sdrplay_state[0]++;

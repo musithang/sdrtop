@@ -3,9 +3,9 @@
 
 //! The SDRplay RSP1B, driven through SDRplay's API.
 //!
-//! Found and identified here; not yet opened. Asked for by name only
-//! (`--device sdrplay`), which finds the radio, says what it is and points at
-//! the SoapySDR road that streams it today ([`not_yet`]).
+//! Found and identified here, opened and described in [`device`] from the
+//! measured model in [`model`]; not streamed yet. Asked for by name only
+//! (`--device sdrplay`) until it streams.
 //!
 //! **A service sits between sdrtop and the radio.** SDRplay's API is a
 //! client of `sdrplay_apiService`, which owns the USB device. Without the
@@ -23,8 +23,10 @@
 //! here; the RSP1A is close kin, but its front end, LNA tables and rates would
 //! still be guesses, so every other RSP is named and left to SoapySDRPlay3.
 
+pub mod device;
 pub mod ffi;
 pub mod layout;
+pub mod model;
 
 use std::ffi::CStr;
 use std::sync::Mutex;
@@ -229,16 +231,6 @@ fn label(found: &Found) -> String {
     }
 }
 
-/// Why `--device sdrplay` does not open a radio yet, and the road that
-/// streams it meanwhile.
-pub fn not_yet(listing: &DeviceListing) -> anyhow::Error {
-    anyhow::anyhow!(
-        "{}: sdrtop's own SDRplay backend finds this radio but cannot open it yet. \
-         Open it through SoapySDR meanwhile: sdrtop --device soapy=driver=sdrplay",
-        listing.label
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::test_support::TestLibrary;
@@ -363,24 +355,6 @@ mod tests {
             "{}",
             label(&rsp1a)
         );
-    }
-
-    /// Until the backend opens the radio, asking for it by name says so and
-    /// names the road that works.
-    #[test]
-    fn opening_is_refused_with_the_soapy_road() {
-        let listing = DeviceListing {
-            kind: DeviceKind::Sdrplay,
-            index: 0,
-            label: "SDRplay RSP1B · 2402040E60".into(),
-            serial: Some("2402040E60".into()),
-            args: None,
-            path: None,
-            tiny_sa_input: None,
-        };
-        let why = not_yet(&listing).to_string();
-        assert!(why.starts_with("SDRplay RSP1B · 2402040E60: "), "{why}");
-        assert!(why.contains("--device soapy=driver=sdrplay"), "{why}");
     }
 
     /// Unasked, nothing is listed and the API is not even opened.
