@@ -176,7 +176,8 @@ fn chain_of(state: &SdrMetrics) -> Chain {
                 let under = match reading(i) {
                     Some(StageReading::Db(db)) => format!("{:+.0}", db + 0.0),
                     Some(StageReading::Position { at, of }) => format!("{at}/{of}"),
-                    Some(StageReading::Auto) => "AGC".to_string(),
+                    Some(StageReading::Auto(Some(db))) => format!("AGC {:+.0}", db + 0.0),
+                    Some(StageReading::Auto(None)) => "AGC".to_string(),
                     None => String::new(),
                 };
                 (s.name.clone(), under)

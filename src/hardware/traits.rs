@@ -446,8 +446,9 @@ pub enum StageReading {
     /// Where the setting sits among the stage's positions, `at` counted from
     /// 0 and `of` the last one, because its dB was not measured here.
     Position { at: u32, of: u32 },
-    /// Set by the device's own automatic gain, so sdrtop does not know it.
-    Auto,
+    /// Set by the device's own automatic gain: the dB it reports the stage
+    /// at, where the radio reports one, else nothing sdrtop knows.
+    Auto(Option<f64>),
 }
 
 impl StageReading {
@@ -460,7 +461,7 @@ impl StageReading {
             StageReading::Db(db) if db.round() < 0.0 => format!("{:3.0}dB", db),
             StageReading::Db(db) => format!("{:2.0} dB", db.max(0.0)),
             StageReading::Position { at, of } => format!("{at:2}/{of}"),
-            StageReading::Auto => "  AGC".to_string(),
+            StageReading::Auto(_) => "  AGC".to_string(),
         }
     }
 }
@@ -2058,6 +2059,14 @@ pub trait SdrDevice: Send + Sync {
                 .map_err(|e| anyhow::anyhow!("{}: {e}", spec.name))?;
         }
         Ok(())
+    }
+
+    /// The dB stage `index` is at under the device's own automatic gain, as
+    /// the radio reports it; `None` where it is not under it or the radio
+    /// does not say. Only a report: a figure worked out here would be a
+    /// guess at what the radio's loop did.
+    fn auto_stage_db(&self, _index: usize) -> Option<f64> {
+        None
     }
 
     /// Anything the backend refused or worked around while opening, for the

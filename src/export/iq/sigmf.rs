@@ -61,13 +61,13 @@ pub fn gain_text(caps: &DeviceCapabilities, gains: &[f64], boost: bool, hz: u64)
         .map(|(i, spec)| {
             let db = gains.get(i).copied().unwrap_or(spec.min_db);
             let reading = if boost && caps.gain.auto_governs(i) {
-                StageReading::Auto
+                StageReading::Auto(None)
             } else {
                 spec.reading(db, hz)
             };
             match reading {
                 StageReading::Position { at, of } => format!("{}=step {at}/{of}", spec.name),
-                StageReading::Auto => format!("{}=AGC", spec.name),
+                StageReading::Auto(_) => format!("{}=AGC", spec.name),
                 // The gain the stage gives here: for a stage stored as the
                 // radio's own setting, its band's dB, not the setting.
                 StageReading::Db(gain) => crate::hardware::gain::format_named(

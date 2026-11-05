@@ -99,8 +99,9 @@ pub(super) fn lines(
             Some(StageReading::Position { at, of }) => {
                 (at, of.max(1), StageReading::Position { at, of }.compact())
             }
-            // The tuner AGC's to set: no figure of ours to show.
-            Some(StageReading::Auto) => (0, 1, "AGC".to_string()),
+            // The AGC's to set: the figure the radio reports, where it does.
+            Some(StageReading::Auto(None)) => (0, 1, "AGC".to_string()),
+            Some(StageReading::Auto(Some(db))) => (0, 1, format!("AGC {db:.0}")),
             // The bar spans the stage's own range, as the header's does:
             // from zero on an amplifier, from its deepest setting on an
             // attenuator, whose gains are negative and read as such.

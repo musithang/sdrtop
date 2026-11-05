@@ -133,7 +133,8 @@ fn release_agc(ctx: &mut InputCtx<'_>, touched: &[usize]) -> bool {
 fn said(stage: &StageSpec, db: f64, hz: u64) -> String {
     match stage.reading(db, hz) {
         StageReading::Position { at, of } => format!("step {at}/{of}"),
-        StageReading::Auto => "AGC".to_string(),
+        StageReading::Auto(Some(db)) => format!("AGC {db:.0} dB"),
+        StageReading::Auto(None) => "AGC".to_string(),
         // The radio's own setting, and what it gives in this band.
         StageReading::Db(gain) if stage.is_banded() => {
             let text = format!("{gain:.2}");

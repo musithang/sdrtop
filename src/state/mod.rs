@@ -160,7 +160,9 @@ impl SdrMetrics {
     pub fn stage_reading(&self, index: usize) -> Option<crate::hardware::StageReading> {
         let spec = self.caps.gain.stages().into_iter().nth(index)?;
         if self.agc_sets(index) {
-            return Some(crate::hardware::StageReading::Auto);
+            return Some(crate::hardware::StageReading::Auto(
+                self.radio.auto_db.get(index).copied().flatten(),
+            ));
         }
         Some(spec.reading(self.radio.stage_gain(index), self.radio.frequency))
     }
@@ -192,6 +194,25 @@ impl SdrMetrics {
                     .map(|v| if v.is_finite() { v } else { 0.0 })
             })
             .sum::<Option<f64>>()
+    }
+
+    /// The chain's gain while the device's own AGC sets a stage: the dB the
+    /// radio reports for each stage it sets, the others' dB as ever. `None`
+    /// when no stage is under the AGC, or any figure is missing.
+    pub fn chain_total_under_agc(&self) -> Option<f64> {
+        let n = self.caps.gain.stages().len();
+        if !(0..n).any(|i| self.agc_sets(i)) {
+            return None;
+        }
+        (0..n)
+            .map(|i| {
+                if self.agc_sets(i) {
+                    self.radio.auto_db.get(i).copied().flatten()
+                } else {
+                    self.stage_db(i)
+                }
+            })
+            .sum()
     }
 
     /// How many bits the converter delivers now: the device's figure for the
@@ -517,8 +538,8 @@ mod stage_reading_tests {
         let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
         m.radio.frequency = 92_800_000;
         m.radio.amp_enabled = true;
-        assert_eq!(m.stage_reading(0), Some(StageReading::Auto));
-        assert_eq!(m.stage_reading(1), Some(StageReading::Auto));
+        assert_eq!(m.stage_reading(0), Some(StageReading::Auto(None)));
+        assert_eq!(m.stage_reading(1), Some(StageReading::Auto(None)));
         assert_eq!(m.stage_reading(2), Some(StageReading::Db(33.51)));
         assert!(!m.chain_db_holds());
         assert_eq!(m.curve_reading(), None);
@@ -530,11 +551,33 @@ mod stage_reading_tests {
         assert_eq!(m.stage_reading(0), Some(StageReading::Db(16.74)));
         let mut rtl = SdrMetrics::fixture().rtlsdr();
         rtl.radio.amp_enabled = true;
-        assert_eq!(rtl.stage_reading(0), Some(StageReading::Auto));
+        assert_eq!(rtl.stage_reading(0), Some(StageReading::Auto(None)));
         // A HackRF's amp is a switch, not an AGC: its stages keep their dB.
         let mut hackrf = SdrMetrics::fixture();
         hackrf.radio.amp_enabled = true;
         assert!(matches!(hackrf.stage_reading(0), Some(StageReading::Db(_))));
+    }
+
+    /// **Where the radio reports what its AGC set, it is read**: the IF
+    /// under the RSP1B's AGC reads its reported dB, and the chain's total
+    /// follows the AGC from it; with no report, `AGC` and no total.
+    #[test]
+    fn a_reported_agc_gain_is_read_and_totalled() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::native::sdrplay::model::gain_model();
+        m.caps = std::sync::Arc::new(caps);
+        m.radio.frequency = 150_000_000;
+        m.radio.gains = vec![3.0, 14.12];
+        assert_eq!(m.chain_total_under_agc(), None, "no AGC");
+        m.radio.amp_enabled = true;
+        assert_eq!(m.stage_reading(1), Some(StageReading::Auto(None)));
+        assert_eq!(m.chain_total_under_agc(), None, "no report yet");
+        m.radio.auto_db = vec![None, Some(27.98)];
+        assert_eq!(m.stage_reading(1), Some(StageReading::Auto(Some(27.98))));
+        assert_eq!(m.stage_reading(0), Some(StageReading::Db(49.32)));
+        let total = m.chain_total_under_agc().unwrap();
+        assert!((total - (49.32 + 27.98)).abs() < 1e-9, "{total}");
     }
 
     /// **The peak is judged against the radio's own ceiling**: on an R2 its

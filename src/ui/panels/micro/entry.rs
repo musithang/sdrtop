@@ -189,7 +189,10 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                     .to_string();
                 (at as f64 / of.max(1) as f64, text.clone(), text)
             }
-            Some(StageReading::Auto) => (0.0, "AGC".to_string(), "AGC".to_string()),
+            Some(StageReading::Auto(None)) => (0.0, "AGC".to_string(), "AGC".to_string()),
+            Some(StageReading::Auto(Some(db))) => {
+                (0.0, format!("AGC {db:.0} dB"), "AGC".to_string())
+            }
             None => (0.0, "\u{2014}".to_string(), "\u{2014}".to_string()),
         };
         (name.to_string(), fill, text, short)
@@ -232,7 +235,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
             _ => vec![cell(
                 "Gain",
                 if state.agc_sets(0) {
-                    Some(StageReading::Auto)
+                    Some(StageReading::Auto(None))
                 } else {
                     state
                         .chain_db_holds()

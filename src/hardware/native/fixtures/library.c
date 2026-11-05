@@ -482,7 +482,7 @@ static void sdrplay_defaults(void) {
 // One parameter as the backend left it, by field: 0 fsHz, 1 rfHz, 2 gRdB,
 // 3 LNAstate, 4 AGC enable, 5 bias tee, 6 DCenable, 7 IQenable, 8 bwType,
 // 9 ifType, 10 decimation enable, 11 decimation factor, 12 AM/FM notch, 13
-// DAB notch, 14 transfer mode.
+// DAB notch, 14 transfer mode, 15 AGC set point.
 double fixture_sdrplay_param(int field) {
     switch (field) {
         case 0: return sdrplay_dev.fsFreq.fsHz;
@@ -500,6 +500,7 @@ double fixture_sdrplay_param(int field) {
         case 12: return sdrplay_dev.rsp1aParams.rfNotchEnable;
         case 13: return sdrplay_dev.rsp1aParams.rfDabNotchEnable;
         case 14: return sdrplay_dev.mode;
+        case 15: return sdrplay_rx.ctrlParams.agc.setPoint_dBfs;
         default: abort();
     }
 }
@@ -552,7 +553,8 @@ int sdrplay_api_GetDevices(sdrplay_api_DeviceT *devices, unsigned int *count, un
 // reset, full length) and DeviceRemoved, then nothing. Mode 47: a block ending
 // at 2^32 - 1, then one 4 samples past the wrap, then a block of 1008 every
 // millisecond. Mode 48: Init fails. Mode 49: every Update but an overload
-// acknowledgement fails.
+// acknowledgement fails. The AGC turned on while streaming does what the API
+// does: its gRdB (31) goes into the block, and a GainChange reports it.
 static struct {
     sdrplay_api_CallbackFnsT fns;
     void *ctx;
@@ -560,6 +562,7 @@ static struct {
     int running;
 } sdrplay_stream;
 static _Atomic int sdrplay_stop;
+static _Atomic int sdrplay_agc_moves;
 // 7 Inits, 8 Uninits, 9 overload acknowledgements, 10 the last reason given
 // to Update other than an acknowledgement, 11 those Updates.
 static int sdrplay_counts[5];
@@ -578,6 +581,12 @@ static void sdrplay_event(int event, int type) {
     memset(&p, 0, sizeof p);
     p.powerOverloadParams.powerOverloadChangeType = type;
     sdrplay_stream.fns.EventCbFn(event, 1, &p, sdrplay_stream.ctx);
+}
+static void sdrplay_gain_event(unsigned int gr) {
+    sdrplay_api_EventParamsT p;
+    memset(&p, 0, sizeof p);
+    p.gainParams.gRdB = gr;
+    sdrplay_stream.fns.EventCbFn(0, 1, &p, sdrplay_stream.ctx);
 }
 static void *sdrplay_run(void *arg) {
     (void)arg;
@@ -600,6 +609,11 @@ static void *sdrplay_run(void *arg) {
     }
     short base = 13;
     while (!sdrplay_stop) {
+        if (sdrplay_agc_moves) {
+            sdrplay_agc_moves = 0;
+            sdrplay_rx.tunerParams.gain.gRdB = 31;
+            sdrplay_gain_event(31);
+        }
         struct timespec pause = {0, 1000000};
         nanosleep(&pause, NULL);
         if (mode != 46) { sdrplay_block_of(next, 0, base, 1008); next += 1008; base = (short)(base + 1008); }
@@ -628,6 +642,8 @@ int sdrplay_api_Update(void *dev, int tuner, unsigned int reason, unsigned int e
     if (mode == 49) return 1;
     sdrplay_counts[3] = (int)reason;
     sdrplay_counts[4]++;
+    if ((reason & 0x01000000u) && sdrplay_rx.ctrlParams.agc.enable && sdrplay_stream.running)
+        sdrplay_agc_moves = 1;
     return 0;
 }
 #ifndef OMIT_LAST_SYMBOL

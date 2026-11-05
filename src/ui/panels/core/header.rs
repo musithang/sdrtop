@@ -1055,7 +1055,12 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
                 (f64::from(max_db) - floor).round() as u32,
             ),
             Some(StageReading::Position { at, of }) => (at, of.max(1)),
-            Some(StageReading::Auto) | None => (0, 1),
+            // The AGC's setting where the radio reports it, on the same bar.
+            Some(StageReading::Auto(Some(db))) => (
+                (db - floor).max(0.0).round() as u32,
+                (f64::from(max_db) - floor).round() as u32,
+            ),
+            Some(StageReading::Auto(None)) | None => (0, 1),
         };
         let mut spans = gain_bar_spans(value, max, lo, hi);
         spans.push(Span::raw(" "));
@@ -1065,6 +1070,14 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
                 Span::styled("dB", Style::default().fg(theme.label)),
             ]),
             Some(StageReading::Db(db)) => spans.extend([
+                Span::styled(
+                    format!("{:2.0}", db.max(0.0)),
+                    Style::default().fg(val_color),
+                ),
+                Span::styled(" dB", Style::default().fg(theme.label)),
+            ]),
+            Some(StageReading::Auto(Some(db))) => spans.extend([
+                Span::styled("AGC ", Style::default().fg(theme.label)),
                 Span::styled(
                     format!("{:2.0}", db.max(0.0)),
                     Style::default().fg(val_color),
@@ -1119,7 +1132,12 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let agc = (0..gm.stages().len()).any(|i| state.agc_sets(i));
     let chain_form = match state.curve_reading() {
         Some(c) => Some((format!("{} ", c.short), c.step_text(), c.total_db)),
-        None if agc && !gm.curves().is_empty() => Some(("AGC".to_string(), String::new(), None)),
+        // The total follows the AGC, from what the radio reports it set.
+        None if agc && !gm.curves().is_empty() => Some((
+            "AGC".to_string(),
+            String::new(),
+            state.chain_total_under_agc(),
+        )),
         None => None,
     };
     if let Some((head, step, total_db)) = chain_form {
@@ -1136,7 +1154,15 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
             }
             right.push(Span::styled(format!("{} ", spec.name), label));
             if state.agc_sets(i) {
-                right.push(Span::styled("auto", value));
+                // What the radio reports its AGC set, where it does.
+                match state.radio.auto_db.get(i).copied().flatten() {
+                    Some(db) => right.extend([
+                        Span::styled("AGC ", label),
+                        Span::styled(format!("{db:.0}"), value),
+                        Span::styled(" dB", label),
+                    ]),
+                    None => right.push(Span::styled("auto", value)),
+                }
             } else {
                 let at = spec.position_of(state.radio.stage_gain(i)).unwrap_or(0);
                 right.push(Span::styled(at.to_string(), value));
@@ -1172,7 +1198,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
         state.stage_reading(0)
     } else if state.agc_sets(0) {
         // The tuner is setting it: not the last figure the key left behind.
-        Some(StageReading::Auto)
+        Some(StageReading::Auto(None))
     } else {
         state
             .chain_db_holds()
@@ -1635,6 +1661,32 @@ mod tests {
         rtl.radio.amp_enabled = true;
         let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &rtl).join("\n");
         assert!(out.contains("AGC") && !out.contains("29 dB"), "{out}");
+    }
+
+    /// **Where the radio reports what its AGC set, the header says it**: the
+    /// RSP1B's IF as `IF AGC 28 dB` and the chain's total following it;
+    /// before the first report, `auto` and a dash.
+    #[test]
+    fn the_header_shows_the_agc_as_the_radio_reports_it() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::native::sdrplay::model::gain_model();
+        m.caps = std::sync::Arc::new(caps);
+        m.radio.frequency = 150_000_000;
+        m.radio.gains = vec![3.0, 14.12];
+        m.radio.gain_curve = Some(1);
+        m.radio.amp_enabled = true;
+        let before = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(
+            before.contains("AGC \u{25b8} LNA 3 \u{00b7} IF auto   \u{2014}"),
+            "{before}"
+        );
+        m.radio.auto_db = vec![None, Some(27.98)];
+        let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(
+            out.contains("AGC \u{25b8} LNA 3 \u{00b7} IF AGC 28 dB   77 dB"),
+            "{out}"
+        );
     }
 
     /// A radio with a gap between its bands shows the gap on the dial where

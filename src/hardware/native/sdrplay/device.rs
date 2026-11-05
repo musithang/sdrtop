@@ -26,7 +26,7 @@ use crate::hardware::{
 };
 
 use super::layout::{DeviceParamsT, DeviceT, RxChannelParamsT, MAX_DEVICES};
-use super::stream::{Overload, StreamCtx, REASON_EXT1_NONE};
+use super::stream::{GainReport, Overload, StreamCtx, REASON_EXT1_NONE};
 use super::{ffi, model, serial_of, Model, Problem};
 
 /// `sdrplay_api_Tuner_A`, the RSP1B's one tuner.
@@ -44,6 +44,10 @@ struct Selected {
     mode: model::RateMode,
     /// The running stream's context, kept alive until `Uninit` returns.
     stream: Option<Arc<StreamCtx>>,
+    /// The IF set by hand while the AGC runs: the API keeps the AGC's own
+    /// gRdB in the block, and the radio stays at it when the AGC is turned
+    /// off (measured), so this is written back then.
+    hand_gr: Option<i32>,
 }
 
 /// An RSP1B, selected for this process until it is dropped.
@@ -55,6 +59,7 @@ pub struct SdrplayDevice {
     notes: Vec<String>,
     /// The radio's overload flag, as the last stream's events left it.
     overload: Arc<Overload>,
+    gain_report: Arc<GainReport>,
 }
 
 // SAFETY: the parameter block and the handle are only touched behind the
@@ -143,6 +148,7 @@ impl SdrplayDevice {
                 params,
                 mode,
                 stream: None,
+                hand_gr: None,
             }),
             caps: model::caps(),
             info: DeviceInfo {
@@ -158,6 +164,7 @@ impl SdrplayDevice {
                 }),
             },
             overload: Arc::new(Overload::default()),
+            gain_report: Arc::new(GainReport::default()),
             notes: vec![format!(
                 "SDRplay API {version_text}: bias tee off, AGC off, the API's DC and IQ \
                  correction on, both notches off"
@@ -198,6 +205,7 @@ impl SdrplayDevice {
             self.api,
             sel.device.dev,
             Arc::clone(&self.overload),
+            Arc::clone(&self.gain_report),
             sel.mode.output_hz(),
         ));
         // SAFETY: the radio is selected; the callbacks' context outlives the
@@ -220,9 +228,31 @@ impl SdrplayDevice {
         Ok(())
     }
 
-    /// The LNA state and gRdB together, unless the pair is in the mixer
-    /// trap, where the radio gives 9 to 15 dB less gain than one step down.
-    fn set_pair(&self, lna: u8, gr: i32) -> anyhow::Result<()> {
+    /// The LNA state and gRdB together (each `None` kept as it is), unless
+    /// the pair is in the mixer trap, where the radio gives 9 to 15 dB less
+    /// gain than one step down. While the AGC runs the IF is its own: a hand
+    /// IF is kept for when it stops, and the LNA keeps out of the states
+    /// whose trap the AGC would run into.
+    fn set_pair(&self, lna: Option<u8>, gr: Option<i32>) -> anyhow::Result<()> {
+        let mut sel = self.lock();
+        let hand = sel.hand_gr;
+        // SAFETY: the block is the selected radio's; the lock is held.
+        let rx = unsafe { Self::rx(&mut sel) };
+        let agc_on = rx.ctrl_params.agc.enable != 0;
+        let gain = &mut rx.tuner_params.gain;
+        let was = (gain.lna_state, gain.gr_db);
+        let lna = lna.unwrap_or(gain.lna_state);
+        let gr = gr.unwrap_or(if agc_on {
+            hand.unwrap_or(gain.gr_db)
+        } else {
+            gain.gr_db
+        });
+        if agc_on && model::TRAP_STATES.contains(&lna) {
+            anyhow::bail!(
+                "the RSP1B's AGC runs the IF into the mixer trap in LNA state {lna} \
+                 (measured): with the AGC on, LNA state 0 to 3 or 5; not set"
+            );
+        }
         if model::in_trap(lna, gr) {
             anyhow::bail!(
                 "LNA state {lna} with the IF over {:.1} dB is the RSP1B's mixer trap: the gain \
@@ -230,15 +260,17 @@ impl SdrplayDevice {
                 model::IF_DB[(59 - model::TRAP_GR_FLOOR) as usize]
             );
         }
-        let mut sel = self.lock();
-        // SAFETY: the block is the selected radio's; the lock is held.
-        let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
-        let was = (gain.lna_state, gain.gr_db);
-        (gain.lna_state, gain.gr_db) = (lna, gr);
+        if agc_on {
+            gain.lna_state = lna;
+            sel.hand_gr = Some(gr);
+        } else {
+            (gain.lna_state, gain.gr_db) = (lna, gr);
+        }
         if let Err(e) = self.apply(&sel, UPDATE_GR, "gain") {
             // SAFETY: as above.
             let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
             (gain.lna_state, gain.gr_db) = was;
+            sel.hand_gr = hand;
             return Err(e);
         }
         Ok(())
@@ -328,6 +360,7 @@ unsafe fn start(params: *mut DeviceParamsT, mode: model::RateMode, freq_hz: u64)
         dev.rsp1a_params.rf_dab_notch_enable = 0;
         rx.rsp1a_tuner_params.bias_t_enable = 0;
         rx.ctrl_params.agc.enable = 0;
+        rx.ctrl_params.agc.set_point_dbfs = model::AGC_SET_POINT_DBFS;
         rx.ctrl_params.dc_offset.dc_enable = 1;
         rx.ctrl_params.dc_offset.iq_enable = 1;
         rx.tuner_params.rf_freq.rf_hz = freq_hz as f64;
@@ -502,15 +535,9 @@ impl SdrDevice for SdrplayDevice {
     /// the IF by its dB from the measured table, written as the gRdB the API
     /// takes. A pair in the mixer trap is refused ([`model::in_trap`]).
     fn set_stage_gain(&self, index: usize, _name: &str, db: f64) -> anyhow::Result<()> {
-        let (lna, gr) = {
-            let mut sel = self.lock();
-            // SAFETY: the block is the selected radio's; the lock is held.
-            let gain = &unsafe { Self::rx(&mut sel) }.tuner_params.gain;
-            (gain.lna_state, gain.gr_db)
-        };
         match index {
-            0 => self.set_pair(lna_state_for(db), gr),
-            1 => self.set_pair(lna, model::grdb_for(db)),
+            0 => self.set_pair(Some(lna_state_for(db)), None),
+            1 => self.set_pair(None, Some(model::grdb_for(db))),
             _ => anyhow::bail!("the RSP1B has no gain stage {index}"),
         }
     }
@@ -521,21 +548,59 @@ impl SdrDevice for SdrplayDevice {
         let (Some(&lna), Some(&if_db)) = (gains.first(), gains.get(1)) else {
             anyhow::bail!("the RSP1B takes both its stages, LNA and IF");
         };
-        self.set_pair(lna_state_for(lna), model::grdb_for(if_db))
+        self.set_pair(Some(lna_state_for(lna)), Some(model::grdb_for(if_db)))
     }
 
-    /// The API's AGC on the IF, at its own 50 Hz loop and set point, or off.
+    /// The API's AGC on the IF, at its 50 Hz loop and a set point of
+    /// [`model::AGC_SET_POINT_DBFS`], or off with the hand IF written back.
+    /// Refused in an LNA state whose trap the AGC would run into.
     fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
         let mut sel = self.lock();
+        let hand = sel.hand_gr;
         // SAFETY: the block is the selected radio's; the lock is held.
-        let agc = &mut unsafe { Self::rx(&mut sel) }.ctrl_params.agc.enable;
-        let was = std::mem::replace(agc, if on { 2 } else { 0 });
-        if let Err(e) = self.apply(&sel, UPDATE_AGC, "AGC") {
+        let rx = unsafe { Self::rx(&mut sel) };
+        let was = (rx.ctrl_params.agc.enable, rx.tuner_params.gain.gr_db);
+        if (was.0 != 0) == on {
+            return Ok(());
+        }
+        let reason = if on {
+            let lna = rx.tuner_params.gain.lna_state;
+            if model::TRAP_STATES.contains(&lna) {
+                anyhow::bail!(
+                    "the RSP1B's AGC runs the IF into the mixer trap in LNA state {lna} \
+                     (measured: at LNA 8 it sat 5 to 10 dB short of its set point); choose LNA \
+                     state 0 to 3 or 5 first"
+                );
+            }
+            rx.ctrl_params.agc.set_point_dbfs = model::AGC_SET_POINT_DBFS;
+            rx.ctrl_params.agc.enable = 2;
+            sel.hand_gr = Some(was.1);
+            UPDATE_AGC
+        } else {
+            rx.ctrl_params.agc.enable = 0;
+            if let Some(gr) = hand {
+                rx.tuner_params.gain.gr_db = gr;
+            }
+            sel.hand_gr = None;
+            UPDATE_AGC | UPDATE_GR
+        };
+        if let Err(e) = self.apply(&sel, reason, "AGC") {
             // SAFETY: as above.
-            unsafe { Self::rx(&mut sel) }.ctrl_params.agc.enable = was;
+            let rx = unsafe { Self::rx(&mut sel) };
+            (rx.ctrl_params.agc.enable, rx.tuner_params.gain.gr_db) = was;
+            sel.hand_gr = hand;
             return Err(e);
         }
         Ok(())
+    }
+
+    /// The IF's dB under the AGC, from the gRdB the radio last reported.
+    fn auto_stage_db(&self, index: usize) -> Option<f64> {
+        let mut sel = self.lock();
+        // SAFETY: the block is the selected radio's; the lock is held.
+        let on = unsafe { Self::rx(&mut sel) }.ctrl_params.agc.enable != 0;
+        let gr = self.gain_report.gr_db.load(Ordering::Relaxed);
+        (index == 1 && on && (20..=59).contains(&gr)).then(|| model::IF_DB[(59 - gr) as usize])
     }
 
     fn open_notes(&self) -> &[String] {
@@ -585,6 +650,7 @@ mod tests {
     const DEC: i32 = 11;
     const NOTCH: i32 = 12;
     const DAB: i32 = 13;
+    const SET_POINT: i32 = 15;
     const OPENS: i32 = 0;
     const CLOSES: i32 = 1;
     const SELECTS: i32 = 5;
@@ -618,6 +684,7 @@ mod tests {
         let p = |f| fixture.sdrplay_param(f);
         assert_eq!((p(AGC), p(BIAS), p(DC), p(IQ)), (0.0, 0.0, 1.0, 1.0));
         assert_eq!((p(NOTCH), p(DAB)), (0.0, 0.0));
+        assert_eq!(p(SET_POINT), -30.0, "the AGC's set point, stated");
         assert_eq!(
             (p(FS), p(BW), p(IF), p(DEC_ON)),
             (2_000_000.0, 1536.0, 0.0, 0.0)
@@ -713,9 +780,9 @@ mod tests {
             device.set_sample_rate(666_667.0).is_err(),
             "a decimation of 3"
         );
-        device.set_stage_gain(0, "LNA", 7.0).unwrap();
+        device.set_stage_gain(0, "LNA", 5.0).unwrap();
         device.set_stage_gain(1, "IF", model::IF_DB[30]).unwrap();
-        assert_eq!((p(LNA), p(GR)), (7.0, 29.0));
+        assert_eq!((p(LNA), p(GR)), (5.0, 29.0));
         device.set_tuner_agc(true).unwrap();
         assert_eq!(p(AGC), 2.0);
         device.set_tuner_agc(false).unwrap();
@@ -802,6 +869,55 @@ mod tests {
     const LAST_REASON: i32 = 10;
     const UPDATES: i32 = 11;
 
+    /// **The AGC, as the radio runs it**: refused in an LNA state whose
+    /// trap it would run into; on, it reports the IF it set (gR 31, read
+    /// through the measured table), the LNA keys keep out of those states,
+    /// and an IF set by hand is kept; off, the hand IF goes back to the
+    /// radio with the AGC's update, since the radio stays where the AGC left
+    /// it.
+    #[test]
+    fn the_agc_keeps_out_of_the_trap_reports_its_if_and_gives_it_back() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let p = |f| fixture.sdrplay_param(f);
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        device.set_stage_gains(&[7.0, model::IF_DB[19]]).unwrap();
+        let refused = device.set_tuner_agc(true).unwrap_err().to_string();
+        assert!(
+            refused.contains("LNA state 7") && refused.contains("trap"),
+            "{refused}"
+        );
+        assert_eq!(p(AGC), 0.0);
+        device.set_stage_gain(0, "LNA", 3.0).unwrap();
+        assert_eq!(device.auto_stage_db(1), None, "no AGC, no report");
+        device.set_tuner_agc(true).unwrap();
+        assert_eq!((p(AGC), p(SET_POINT)), (2.0, -30.0));
+        let deadline = std::time::Instant::now() + WAIT;
+        while device
+            .auto_stage_db(1)
+            .is_none_or(|db| db != model::IF_DB[28])
+        {
+            assert!(std::time::Instant::now() < deadline, "no report");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(device.auto_stage_db(0), None, "the LNA is not the AGC's");
+        assert_eq!(p(GR), 31.0, "the API keeps the AGC's own gRdB");
+        assert!(device.set_stage_gain(0, "LNA", 8.0).is_err());
+        device.set_stage_gain(0, "LNA", 5.0).unwrap();
+        device.set_stage_gain(1, "IF", model::IF_DB[14]).unwrap();
+        assert_eq!((p(LNA), p(GR)), (5.0, 31.0), "the IF stays the AGC's");
+        device.set_tuner_agc(false).unwrap();
+        assert_eq!((p(AGC), p(GR)), (0.0, 45.0), "the hand IF back");
+        assert_eq!(
+            fixture.sdrplay_count(LAST_REASON),
+            0x0100_0000 | 0x0000_8000,
+            "Ctrl_Agc with Tuner_Gr"
+        );
+        assert_eq!(device.auto_stage_db(1), None);
+        device.stop_rx().unwrap();
+    }
+
     /// **The mixer trap is refused, by a stage or by a pair**, and the block
     /// keeps what it had; a pair is checked as a pair, so a step whose
     /// halfway point is in the trap (LNA 8 with the old IF) still lands, in
@@ -851,8 +967,8 @@ mod tests {
         device.set_frequency(14_074_000).unwrap();
         assert_eq!(fixture.sdrplay_param(RF), 14_074_000.0);
         assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0002_0000, "Tuner_Frf");
-        device.set_stage_gain(0, "LNA", 7.0).unwrap();
-        assert_eq!(fixture.sdrplay_param(LNA), 7.0);
+        device.set_stage_gain(0, "LNA", 5.0).unwrap();
+        assert_eq!(fixture.sdrplay_param(LNA), 5.0);
         assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0000_8000, "Tuner_Gr");
         device.set_stage_gain(1, "IF", model::IF_DB[30]).unwrap();
         assert_eq!(fixture.sdrplay_param(GR), 29.0);

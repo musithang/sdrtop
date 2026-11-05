@@ -61,6 +61,7 @@ impl SdrMetrics {
                 lo_offset_hz: 0,
                 converter_bits: None,
                 overload: None,
+                auto_db: Vec::new(),
             },
             signal: SignalState::default(),
             iq: IqState {

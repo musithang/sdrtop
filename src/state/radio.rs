@@ -64,6 +64,10 @@ pub struct RadioState {
     /// (`hardware::SdrDevice::radio_overload`); `None` for a radio that has
     /// no such flag.
     pub overload: Option<RadioOverload>,
+    /// Per stage, the dB the device's own automatic gain has it at, as the
+    /// radio reports it (`hardware::SdrDevice::auto_stage_db`); `None` for a
+    /// stage it does not set or does not report.
+    pub auto_db: Vec<Option<f64>>,
 }
 
 /// The radio's overload flag in the state: its last report, and when it was

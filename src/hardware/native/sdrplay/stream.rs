@@ -41,7 +41,7 @@
 //! (the API repeats `DeviceRemoved` every second until `Uninit`), and the
 //! stream then reads as stopped.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use libc::{c_int, c_void};
@@ -57,6 +57,7 @@ pub const REASON_OVERLOAD_ACK: u32 = 0x0400_0000;
 pub const REASON_EXT1_NONE: u32 = 0;
 
 /// `sdrplay_api_EventT`.
+const EVENT_GAIN_CHANGE: c_int = 0;
 const EVENT_POWER_OVERLOAD: c_int = 1;
 const EVENT_DEVICE_REMOVED: c_int = 2;
 const EVENT_DEVICE_FAILURE: c_int = 4;
@@ -69,6 +70,20 @@ pub const GATHER_MS: f64 = 20.0;
 /// The samples [`GATHER_MS`] holds at `output_hz`, and never less than one.
 pub fn gather_pairs(output_hz: f64) -> usize {
     ((output_hz * GATHER_MS / 1000.0) as usize).max(1)
+}
+
+/// The gRdB the radio last reported (`GainChange`), or -1 before any: what
+/// its AGC has the IF at, while the AGC runs. Shared like [`Overload`].
+pub struct GainReport {
+    pub gr_db: AtomicI32,
+}
+
+impl Default for GainReport {
+    fn default() -> Self {
+        Self {
+            gr_db: AtomicI32::new(-1),
+        }
+    }
 }
 
 /// The radio's overload flag as the events left it; shared by the device and
@@ -121,6 +136,7 @@ pub struct StreamCtx {
     /// one rate: a new rate is a new stream.
     gather: usize,
     pub overload: Arc<Overload>,
+    pub gain: Arc<GainReport>,
     /// The radio left the bus or failed; the stream is over.
     pub ended: AtomicBool,
     /// Samples in the last delivery: the gathered block the intake and the
@@ -138,9 +154,11 @@ impl StreamCtx {
         api: &'static ffi::SdrplayApi,
         handle: *mut c_void,
         overload: Arc<Overload>,
+        gain: Arc<GainReport>,
         output_hz: f64,
     ) -> Self {
         Self {
+            gain,
             rx,
             api,
             handle: handle as usize,
@@ -274,6 +292,13 @@ unsafe extern "C" fn event_callback(
         // SAFETY: as in the stream callback.
         let ctx = unsafe { &*(ctx as *const StreamCtx) };
         match event {
+            EVENT_GAIN_CHANGE if !params.is_null() => {
+                // SAFETY: a gain event carries the gain variant.
+                let gr = unsafe { (*params).gain_params.gr_db };
+                ctx.gain
+                    .gr_db
+                    .store(i32::try_from(gr).unwrap_or(-1), Ordering::Relaxed);
+            }
             EVENT_POWER_OVERLOAD => {
                 // SAFETY: an overload event carries the overload variant.
                 let detected = !params.is_null()

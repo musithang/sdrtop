@@ -305,6 +305,12 @@ const CURVE_STEP_MAX_DB: f64 = 3.0;
 const UNMEASURED_STATES: std::ops::RangeInclusive<u8> = 0..=4;
 const UNMEASURED_GR_FLOOR: i32 = 25;
 
+/// The AGC's set point, dBFS of the band's power. The API's own -60 sat
+/// under the noise of a quiet band (-56 with nothing at the input), and the
+/// AGC did nothing; at -30 it settled to 0.4 dB (S0) and keeps ~18 dB under
+/// the radio's overload flag (-12 dBFS peak).
+pub const AGC_SET_POINT_DBFS: i32 = -30;
+
 /// Where the knob starts on a first run, dB in all: noise some 15 dB over
 /// the converter's own floor, with room above it (live, 150 MHz: 63 dB
 /// read -28 dBFS rms, 25 dB read -61, the floor about -66).
