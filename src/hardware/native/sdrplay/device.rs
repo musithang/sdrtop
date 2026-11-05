@@ -220,6 +220,30 @@ impl SdrplayDevice {
         Ok(())
     }
 
+    /// The LNA state and gRdB together, unless the pair is in the mixer
+    /// trap, where the radio gives 9 to 15 dB less gain than one step down.
+    fn set_pair(&self, lna: u8, gr: i32) -> anyhow::Result<()> {
+        if model::in_trap(lna, gr) {
+            anyhow::bail!(
+                "LNA state {lna} with the IF over {:.1} dB is the RSP1B's mixer trap: the gain \
+                 falls by 9 to 15 dB there instead of rising (measured); not set",
+                model::IF_DB[(59 - model::TRAP_GR_FLOOR) as usize]
+            );
+        }
+        let mut sel = self.lock();
+        // SAFETY: the block is the selected radio's; the lock is held.
+        let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
+        let was = (gain.lna_state, gain.gr_db);
+        (gain.lna_state, gain.gr_db) = (lna, gr);
+        if let Err(e) = self.apply(&sel, UPDATE_GR, "gain") {
+            // SAFETY: as above.
+            let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
+            (gain.lna_state, gain.gr_db) = was;
+            return Err(e);
+        }
+        Ok(())
+    }
+
     fn lock(&self) -> MutexGuard<'_, Selected> {
         self.selected.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -232,6 +256,11 @@ impl SdrplayDevice {
         // SAFETY: checked non-null at open; the caller holds the lock.
         unsafe { &mut *(*sel.params).rx_channel_a }
     }
+}
+
+/// The LNA state a stage value names: its nearest whole state, 0 to 9.
+fn lna_state_for(value: f64) -> u8 {
+    value.round().clamp(0.0, 9.0) as u8
 }
 
 /// Finds `serial` among the radios the API lists and selects it, under the
@@ -470,24 +499,28 @@ impl SdrDevice for SdrplayDevice {
 
     /// The LNA by the radio's own state, 0 to 9 (its value is the state);
     /// the IF by its dB from the measured table, written as the gRdB the API
-    /// takes.
+    /// takes. A pair in the mixer trap is refused ([`model::in_trap`]).
     fn set_stage_gain(&self, index: usize, _name: &str, db: f64) -> anyhow::Result<()> {
-        let mut sel = self.lock();
-        // SAFETY: the block is the selected radio's; the lock is held.
-        let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
-        let was = (gain.lna_state, gain.gr_db);
+        let (lna, gr) = {
+            let mut sel = self.lock();
+            // SAFETY: the block is the selected radio's; the lock is held.
+            let gain = &unsafe { Self::rx(&mut sel) }.tuner_params.gain;
+            (gain.lna_state, gain.gr_db)
+        };
         match index {
-            0 => gain.lna_state = db.round().clamp(0.0, 9.0) as u8,
-            1 => gain.gr_db = model::grdb_for(db),
+            0 => self.set_pair(lna_state_for(db), gr),
+            1 => self.set_pair(lna, model::grdb_for(db)),
             _ => anyhow::bail!("the RSP1B has no gain stage {index}"),
         }
-        if let Err(e) = self.apply(&sel, UPDATE_GR, "gain") {
-            // SAFETY: as above.
-            let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
-            (gain.lna_state, gain.gr_db) = was;
-            return Err(e);
-        }
-        Ok(())
+    }
+
+    /// Both stages as one pair, checked as a pair and sent in one `Update`:
+    /// a curve's step never passes through a trap on its way.
+    fn set_stage_gains(&self, gains: &[f64]) -> anyhow::Result<()> {
+        let (Some(&lna), Some(&if_db)) = (gains.first(), gains.get(1)) else {
+            anyhow::bail!("the RSP1B takes both its stages, LNA and IF");
+        };
+        self.set_pair(lna_state_for(lna), model::grdb_for(if_db))
     }
 
     /// The API's AGC on the IF, at its own 50 Hz loop and set point, or off.
@@ -765,6 +798,43 @@ mod tests {
 
     const LAST_REASON: i32 = 10;
     const UPDATES: i32 = 11;
+
+    /// **The mixer trap is refused, by a stage or by a pair**, and the block
+    /// keeps what it had; a pair is checked as a pair, so a step whose
+    /// halfway point is in the trap (LNA 8 with the old IF) still lands, in
+    /// one `Update` while streaming.
+    #[test]
+    fn the_mixer_trap_is_refused_and_a_pair_goes_as_one() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let p = |f| fixture.sdrplay_param(f);
+        device.set_stage_gains(&[3.0, model::IF_DB[38]]).unwrap();
+        assert_eq!((p(LNA), p(GR)), (3.0, 21.0));
+        let refused = device
+            .set_stage_gain(0, "LNA", 8.0)
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("mixer trap"), "{refused}");
+        assert_eq!((p(LNA), p(GR)), (3.0, 21.0), "the block as it was");
+        assert!(device.set_stage_gains(&[9.0, model::IF_DB[37]]).is_err());
+        assert_eq!((p(LNA), p(GR)), (3.0, 21.0));
+
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        device.set_stage_gains(&[8.0, model::IF_DB[35]]).unwrap();
+        assert_eq!((p(LNA), p(GR)), (8.0, 24.0));
+        assert_eq!(fixture.sdrplay_count(UPDATES), 1, "one Update for the pair");
+        assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0000_8000);
+        assert!(
+            device.set_stage_gain(1, "IF", model::IF_DB[36]).is_ok(),
+            "gR 23 is free"
+        );
+        assert!(
+            device.set_stage_gain(1, "IF", model::IF_DB[37]).is_err(),
+            "gR 22 is not"
+        );
+        device.stop_rx().unwrap();
+    }
 
     /// **While it streams, every setting reaches the radio through an
     /// `Update` naming what changed**; stopped, none is sent, since `Init`

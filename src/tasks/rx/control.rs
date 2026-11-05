@@ -201,13 +201,10 @@ pub(super) fn track_gain(
     }
 
     // Device sets run with no lock held.
-    let mut failed = None;
-    for (i, spec) in stages.iter().enumerate() {
-        if let Err(e) = device.set_stage_gain(i, &spec.name, targets[i]) {
-            failed = Some(format!("{}: {e}", spec.name));
-            break;
-        }
-    }
+    let failed = device
+        .set_stage_gains(&targets)
+        .err()
+        .map(|e| e.to_string());
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
     match failed {
         None => {

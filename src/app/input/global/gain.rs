@@ -331,13 +331,7 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
     let values = c.values(step, &stages);
 
     // Device calls with no lock held, as everywhere else in this file.
-    let mut failed = None;
-    for (index, (value, spec)) in values.iter().zip(&stages).enumerate() {
-        if let Err(e) = device.set_stage_gain(index, &spec.name, *value) {
-            failed = Some(format!("{}: {e}", spec.name));
-            break;
-        }
-    }
+    let failed = device.set_stage_gains(&values).err().map(|e| e.to_string());
 
     let mut m = metrics(ctx.state);
     match failed {
@@ -462,13 +456,7 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
     let (values, achieved) = crate::hardware::gain::distribute(&stages, want, hz);
 
     // Device calls with no lock held, as everywhere else in this file.
-    let mut failed = None;
-    for (index, (value, spec)) in values.iter().zip(&stages).enumerate() {
-        if let Err(e) = device.set_stage_gain(index, &spec.name, *value) {
-            failed = Some(format!("{}: {e}", spec.name));
-            break;
-        }
-    }
+    let failed = device.set_stage_gains(&values).err().map(|e| e.to_string());
 
     let mut m = metrics(ctx.state);
     match failed {

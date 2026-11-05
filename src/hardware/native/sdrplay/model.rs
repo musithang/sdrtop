@@ -271,6 +271,28 @@ pub fn grdb_for(if_db: f64) -> i32 {
     59 - at as i32
 }
 
+/// The LNA states that bring the mixer's reduction in when the IF has little
+/// left to give: SDRplay's table footnotes them ("includes LNA GR plus mixer
+/// GR"), and on the cable, with gRdB under 22 or 21, the gain fell by 9 to
+/// 15 dB instead of rising by one. Measured in 4 and 6 under 50 MHz, 8 from
+/// 50 to 420 MHz and from 1 to 2 GHz, 9 from 420 MHz to 1 GHz. 7 is here
+/// because under 50 MHz the radio has seven states and takes a higher one
+/// as its last, 6.
+///
+/// **One rule for every band.** A rule per band would let a retune carry a
+/// setting legal in one band into another's trap, and the radio is retuned
+/// from many places (the sweep, NET, the keys, the prompt); no band's trap
+/// can be reached from a setting that keeps out of all of them.
+pub const TRAP_STATES: [u8; 5] = [4, 6, 7, 8, 9];
+
+/// The least gRdB a trap state is given: the trap began at 22 or 21.
+pub const TRAP_GR_FLOOR: i32 = 23;
+
+/// Whether LNA `state` with `gr_db` is in the mixer trap ([`TRAP_STATES`]).
+pub fn in_trap(state: u8, gr_db: i32) -> bool {
+    TRAP_STATES.contains(&state) && gr_db < TRAP_GR_FLOOR
+}
+
 /// The two stages, front to back: the LNA, stored as the radio's state with
 /// its dB per band, and the IF, in dB from its measured table. The API's AGC
 /// moves the IF only (measured: the LNA's reduction stayed put in every
@@ -334,6 +356,18 @@ pub fn caps() -> DeviceCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The trap as measured, held in every band: the footnoted states (and
+    /// 7, which is 6 under 50 MHz) under gRdB 23; every other pair is free.
+    #[test]
+    fn the_mixer_trap_is_kept_out_of_in_every_band() {
+        for state in 0..=9u8 {
+            for gr in 20..=59 {
+                let trap = [4, 6, 7, 8, 9].contains(&state) && gr <= 22;
+                assert_eq!(in_trap(state, gr), trap, "LNA {state} gR {gr}");
+            }
+        }
+    }
 
     /// Every offered rate is made one way, and each way is one the API does
     /// what it says with: zero IF at 2 to 10 MSPS, decimation of 2 MSPS by a

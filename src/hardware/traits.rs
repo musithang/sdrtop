@@ -1961,6 +1961,24 @@ pub trait SdrDevice: Send + Sync {
         }
     }
 
+    /// Set every stage, front to back, to `gains` (one per stage of
+    /// `capabilities().gain.stages()`): a curve's step, a start, an auto-gain
+    /// target. Stops at the first refusal, which names its stage.
+    ///
+    /// **A combination, where the radio needs one.** Stage by stage, a chain
+    /// passes through every halfway setting between two steps, and on a radio
+    /// where some pairs of settings are not to be had (the RSP1B's mixer
+    /// trap) a halfway pair would be refused on the way to a legal one. Such
+    /// a backend overrides this to check and write the pair as one.
+    fn set_stage_gains(&self, gains: &[f64]) -> anyhow::Result<()> {
+        let stages = self.capabilities().gain.stages();
+        for (index, (spec, &db)) in stages.iter().zip(gains).enumerate() {
+            self.set_stage_gain(index, &spec.name, db)
+                .map_err(|e| anyhow::anyhow!("{}: {e}", spec.name))?;
+        }
+        Ok(())
+    }
+
     /// Anything the backend refused or worked around while opening, for the
     /// startup log.
     ///
@@ -2064,6 +2082,59 @@ pub trait SdrDevice: Send + Sync {
 mod tests {
     use super::*;
     use crate::hardware::native::{hackrf, rtlsdr};
+
+    /// A radio whose second stage refuses, recording what it was given.
+    struct TwoStages {
+        caps: DeviceCapabilities,
+        set: std::sync::Mutex<Vec<(usize, f64)>>,
+    }
+
+    impl SdrDevice for TwoStages {
+        fn capabilities(&self) -> &DeviceCapabilities {
+            &self.caps
+        }
+        fn info(&self) -> DeviceInfo {
+            DeviceInfo::default()
+        }
+        fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn stop_rx(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn is_streaming(&self) -> bool {
+            false
+        }
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
+            Ok(hz)
+        }
+        fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
+            Ok(RateSet::new(hz, None, 0))
+        }
+        fn set_lna_gain(&self, db: u32) -> anyhow::Result<()> {
+            self.set.lock().unwrap().push((0, f64::from(db)));
+            Ok(())
+        }
+        fn set_vga_gain(&self, _db: u32) -> anyhow::Result<()> {
+            anyhow::bail!("not now")
+        }
+    }
+
+    /// By default every stage is set in turn, front to back, and the first
+    /// refusal stops it and names its stage.
+    #[test]
+    fn stages_are_set_in_turn_and_a_refusal_names_its_stage() {
+        let device = TwoStages {
+            caps: hackrf::caps(),
+            set: Default::default(),
+        };
+        let err = device
+            .set_stage_gains(&[24.0, 20.0])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(*device.set.lock().unwrap(), [(0, 24.0)]);
+        assert_eq!(err, "VGA: not now");
+    }
 
     // ── What the FFT feed did with a block ──────────────────────────────────
 

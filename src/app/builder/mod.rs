@@ -88,10 +88,12 @@ impl App {
             tuning.frequency_hz = tuned;
         });
         let mut startup_results = vec![freq_result, sr_result];
-        for (index, spec) in stages.iter().enumerate() {
-            let db = tuning.gains.get(index).copied().unwrap_or(spec.min_db);
-            startup_results.push(device.set_stage_gain(index, &spec.name, db));
-        }
+        let gains: Vec<f64> = stages
+            .iter()
+            .enumerate()
+            .map(|(index, spec)| tuning.gains.get(index).copied().unwrap_or(spec.min_db))
+            .collect();
+        startup_results.push(device.set_stage_gains(&gains));
         let boost = cfg.radio.boost_for(&info.board_name);
         startup_results.push(device.set_amp_enable(boost));
         startup_results.push(device.set_tuner_agc(boost));

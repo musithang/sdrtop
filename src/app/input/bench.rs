@@ -213,13 +213,10 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 // Off-optimal → one-shot jump, one call per stage, through the
                 // same per-stage path the manual keys use.
                 if let Some(device) = device {
-                    let mut failed = None;
-                    for (i, spec) in stages.iter().enumerate() {
-                        if let Err(e) = device.set_stage_gain(i, &spec.name, targets[i]) {
-                            failed = Some(format!("{}: {e}", spec.name));
-                            break;
-                        }
-                    }
+                    let failed = device
+                        .set_stage_gains(&targets)
+                        .err()
+                        .map(|e| e.to_string());
                     let mut m = metrics(state);
                     match failed {
                         None => {

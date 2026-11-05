@@ -36,7 +36,6 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
     // Every stage the device has, by position, where a first run would put
     // it: a radio with three stages is not reset in two of them, and one
     // whose knob starts on a vendor curve goes back onto it.
-    let stages = caps.gain.stages();
     let curve = caps.gain.default_curve();
     let gains = caps.gain.start_gains(curve);
 
@@ -51,12 +50,7 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
             crate::hardware::native::hackrf::compute_bb_filter_bw(def_sr),
         ),
     };
-    let mut results: Vec<anyhow::Result<()>> = stages
-        .iter()
-        .zip(&gains)
-        .enumerate()
-        .map(|(index, (spec, &db))| device.set_stage_gain(index, &spec.name, db))
-        .collect();
+    let mut results = vec![device.set_stage_gains(&gains)];
     // Where the radio tuned, which a receiver on a tuning grid may round.
     let mut tuned_freq = def_freq;
     results.extend([
