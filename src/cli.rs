@@ -47,7 +47,7 @@ pub struct Cli {
     /// Pick the backend, optionally with a tinySA path/input or SoapySDR device args
     #[arg(
         long,
-        value_name = "hackrf|rtlsdr|airspy|airspyhf|tinysa[=PATH[?input=low|high]]|soapy[=args]"
+        value_name = "hackrf|rtlsdr|airspy|airspyhf|sdrplay|tinysa[=PATH[?input=low|high]]|soapy[=args]"
     )]
     pub device: Option<String>,
 

@@ -92,7 +92,7 @@ fn open_log(path: &std::path::Path) -> Result<std::fs::File, String> {
 /// log rather than the terminal.
 fn no_device_message(hint: &str, log: Option<&std::path::Path>) -> String {
     let mut message = format!(
-        "No device found. Connect a HackRF, RTL-SDR, Airspy R2 or tinySA and try again.{hint}"
+        "No device found. Connect a HackRF, RTL-SDR, Airspy R2 or HF+, SDRplay RSP1B or tinySA and try again.{hint}"
     );
     if let Some(log) = log {
         message.push_str(&format!(

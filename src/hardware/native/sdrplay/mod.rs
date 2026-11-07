@@ -194,10 +194,10 @@ pub fn last_problem() -> Option<String> {
         .map(Problem::text)
 }
 
-/// The device selector's entries: every RSP the API lists, but only when
-/// `--device sdrplay` named this backend, until it can open the radio.
-pub fn list(asked_by_name: bool) -> Vec<DeviceListing> {
-    if !asked_by_name {
+/// The device selector's entries: every RSP the API lists, when the search
+/// is unasked or names this backend (`offered`).
+pub fn list(offered: bool) -> Vec<DeviceListing> {
+    if !offered {
         return Vec::new();
     }
     let Ok(api) = ffi::api() else {

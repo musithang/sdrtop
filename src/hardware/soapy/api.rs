@@ -134,6 +134,14 @@ pub struct SoapyApi {
     kwargs_list_clear: unsafe extern "C" fn(*mut SoapySDRKwargs, usize),
 
     enumerate: unsafe extern "C" fn(*const SoapySDRKwargs, *mut usize) -> *mut SoapySDRKwargs,
+
+    // `SoapySDR/Modules.h`, read in 0.8.1's header; 0.9's is reasoned to
+    // keep them (not read here: no 0.9 on the desk).
+    load_modules: unsafe extern "C" fn(),
+    list_modules: unsafe extern "C" fn(*mut usize) -> *mut *mut c_char,
+    get_loader_result: unsafe extern "C" fn(*const c_char) -> SoapySDRKwargs,
+    unload_module: unsafe extern "C" fn(*const c_char) -> *mut c_char,
+    kwargs_clear: unsafe extern "C" fn(*mut SoapySDRKwargs),
     make_str_args: unsafe extern "C" fn(*const c_char) -> *mut SoapySDRDevice,
     unmake: unsafe extern "C" fn(*mut SoapySDRDevice) -> c_int,
 
@@ -230,6 +238,48 @@ impl SoapyApi {
     /// says "it did not work" is not.
     pub fn last_error(&self) -> String {
         unsafe { cstr_to_string((self.last_error)()) }
+    }
+
+    /// Leaves out of every search to come the module that registers the
+    /// driver `key`, and returns the modules left out. Every module is loaded
+    /// first, which on its own starts nothing (measured with SoapySDRPlay3:
+    /// loaded, it opens no session of SDRplay's API; searched, it does), each
+    /// module's loader result names the keys it registered, and the one that
+    /// registered `key` is unloaded. A search after it does not load it again
+    /// (measured). Must come before the first search in the process.
+    pub fn leave_out_driver(&self, key: &str) -> Vec<String> {
+        let mut left_out = Vec::new();
+        // Safety: loading takes no arguments; the list is freed with its own
+        // clear; each loader result is a by-value map freed with its clear;
+        // an unload's error string is freed with SoapySDR_free.
+        unsafe {
+            (self.load_modules)();
+            let mut n = 0usize;
+            let mut mods = (self.list_modules)(&mut n);
+            if mods.is_null() {
+                return left_out;
+            }
+            for i in 0..n {
+                let path = *mods.add(i);
+                if path.is_null() {
+                    continue;
+                }
+                let mut result = (self.get_loader_result)(path);
+                let registers = kwargs_to_vec(&result).iter().any(|(k, _)| k == key);
+                (self.kwargs_clear)(&mut result);
+                if registers {
+                    let err = (self.unload_module)(path);
+                    if err.is_null() || *err == 0 {
+                        left_out.push(cstr_to_string(path));
+                    }
+                    if !err.is_null() {
+                        (self.free)(err.cast());
+                    }
+                }
+            }
+            (self.strings_clear)(&mut mods, n);
+        }
+        left_out
     }
 
     /// Every device SoapySDR can see, as key/value maps, optionally queried
@@ -784,6 +834,11 @@ fn resolve(lib: libloading::Library) -> Result<SoapyApi, &'static str> {
         strings_clear: sym!("SoapySDRStrings_clear"),
         kwargs_list_clear: sym!("SoapySDRKwargsList_clear"),
         enumerate: sym!("SoapySDRDevice_enumerate"),
+        load_modules: sym!("SoapySDR_loadModules"),
+        list_modules: sym!("SoapySDR_listModules"),
+        get_loader_result: sym!("SoapySDR_getLoaderResult"),
+        unload_module: sym!("SoapySDR_unloadModule"),
+        kwargs_clear: sym!("SoapySDRKwargs_clear"),
         make_str_args: sym!("SoapySDRDevice_makeStrArgs"),
         unmake: sym!("SoapySDRDevice_unmake"),
         get_driver_key: sym!("SoapySDRDevice_getDriverKey"),

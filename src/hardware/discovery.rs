@@ -207,13 +207,12 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         "airspyhf" => DeviceKind::AirspyHf,
         "hackrf" => DeviceKind::HackRf,
         "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
-        // Not in the list below until it opens the radio: asked for by name only.
         "sdrplay" => DeviceKind::Sdrplay,
         "soapy" | "soapysdr" => DeviceKind::Soapy,
         "tinysa" | "tiny-sa" => DeviceKind::TinySa,
         other => anyhow::bail!(
             "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', 'airspy', 'airspyhf', \
-             'tinysa', or 'soapy'; tinysa and soapy accept '=selector')"
+             'sdrplay', 'tinysa', or 'soapy'; tinysa and soapy accept '=selector')"
         ),
     };
     if kind == DeviceKind::TinySa {
@@ -244,17 +243,17 @@ pub fn no_device_hint(want: Option<DeviceKind>) -> String {
             }
         }
     }
-    // SDRplay's API only when its backend was asked for: unasked it offers
-    // nothing yet, so its absence is no reason the search came back empty.
-    // Its library loaded but the API itself refused (no service, a version
-    // whose layout is unchecked): what the search found is said, without
-    // opening the API again.
-    if want == Some(DeviceKind::Sdrplay) {
+    // SDRplay's API: asked for by name, a missing library is said; unasked
+    // it is the common case and not a reason. Its library loaded but the API
+    // itself refused (no service, a version whose layout is unchecked): what
+    // the search found is said either way, without opening the API again.
+    if matches!(want, None | Some(DeviceKind::Sdrplay)) {
         match DeviceKind::Sdrplay.check_available() {
-            Err(err) => {
+            Err(err) if want.is_some() => {
                 hint.push('\n');
                 hint.push_str(&err.to_string());
             }
+            Err(_) => {}
             Ok(()) => {
                 if let Some(problem) = sdrplay::last_problem() {
                     hint.push('\n');
@@ -309,13 +308,16 @@ pub fn list_all_devices(
     // it below; the other HF+ boards only when asked for by name (see
     // `airspyhf::offered`).
     out.extend(airspyhf::list(want == Some(DeviceKind::AirspyHf)));
-    // An RSP only when asked for by name, until its backend streams.
-    out.extend(sdrplay::list(want == Some(DeviceKind::Sdrplay)));
+    // An RSP natively, unasked or by name; never beside `--device soapy`,
+    // whose SoapySDRPlay3 holds its own session of SDRplay's API.
+    let rsp = matches!(want, None | Some(DeviceKind::Sdrplay));
+    out.extend(sdrplay::list(rsp));
     // A radio another program holds through SDRplay's service is not in the
-    // API's list at all. Asked for by name, an RSP1B on the bus that the API
-    // answered for without listing is offered as held, so its open fails
-    // into observer mode as any held radio's does.
-    if want == Some(DeviceKind::Sdrplay)
+    // API's list at all. An RSP1B on the bus that the API answered for
+    // without listing is offered as held, so its open fails into observer
+    // mode as any held radio's does.
+    if rsp
+        && sdrplay::ffi::api().is_ok()
         && sdrplay::last_problem().is_none()
         && !out.iter().any(|l| l.kind == DeviceKind::Sdrplay)
     {
@@ -339,6 +341,11 @@ pub fn list_all_devices(
         &out[..]
     };
     if asks_soapy(want) {
+        if let Some(key) = soapy_leaves_out(want, sdrplay::ffi::api().is_ok()) {
+            if let Some(api) = soapy::api::api() {
+                api.leave_out_driver(key);
+            }
+        }
         let soapy = offer_soapy(soapy::device::list(soapy_filter), native, soapy_filter);
         out.extend(soapy);
     }
@@ -361,6 +368,19 @@ pub fn list_all_devices(
 /// that by then may be someone else's.
 fn asks_soapy(want: Option<DeviceKind>) -> bool {
     matches!(want, None | Some(DeviceKind::Soapy))
+}
+
+/// The SoapySDR driver to leave out of a search, if any: SoapySDRPlay3's
+/// (`sdrplay`) whenever the native SDRplay backend shares the process, which
+/// is an unasked search with SDRplay's API installed. Searched, SoapySDRPlay3
+/// opens its own session of SDRplay's API and keeps it to the process's end;
+/// beside the native backend's session, SDRplay's one state per process is
+/// closed twice (measured: "munmap: Invalid argument", "close: Bad file
+/// descriptor", and with every driver searched "corrupted double-linked
+/// list"; loaded but not searched, none). `--device soapy` keeps it: there
+/// the native backend is not asked.
+fn soapy_leaves_out(want: Option<DeviceKind>, sdrplay_native: bool) -> Option<&'static str> {
+    (want.is_none() && sdrplay_native).then_some("sdrplay")
 }
 
 /// Which Soapy listings to actually show, given what the native backends already
@@ -578,6 +598,21 @@ mod tests {
     /// SoapySDR is asked when nothing was named or SoapySDR was, never when
     /// another backend was: its modules (SoapySDRPlay3's API session among
     /// them) would share the process with that backend for nothing.
+    #[test]
+    fn soapysdr_leaves_out_sdrplay_beside_the_native_backend() {
+        assert_eq!(soapy_leaves_out(None, true), Some("sdrplay"));
+        assert_eq!(
+            soapy_leaves_out(None, false),
+            None,
+            "no SDRplay API: nothing to collide with"
+        );
+        assert_eq!(
+            soapy_leaves_out(Some(DeviceKind::Soapy), true),
+            None,
+            "--device soapy keeps SoapySDRPlay3; the native backend is not asked"
+        );
+    }
+
     #[test]
     fn soapysdr_is_asked_only_unasked_or_by_name() {
         assert!(asks_soapy(None));
@@ -819,11 +854,11 @@ mod tests {
         );
         assert!(parse_device_arg("rsp1b").is_err(), "not a backend name");
         assert!(
-            !parse_device_arg("rsp1b")
+            parse_device_arg("rsp1b")
                 .unwrap_err()
                 .to_string()
-                .contains("sdrplay"),
-            "not offered in the list until it opens the radio"
+                .contains("'sdrplay'"),
+            "the backends it lists include it"
         );
         assert!(parse_device_arg("").is_err(), "nor is nothing");
         let why = parse_device_arg("airspyhfplus").unwrap_err().to_string();
