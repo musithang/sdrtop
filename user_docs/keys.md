@@ -181,7 +181,7 @@ On an **RTL-SDR** there's a single tuner gain that steps through a fixed table o
 values (the `↑`/`↓` keys walk it), and no VGA, so `[`/`]` simply do nothing.
 Instead of a VGA you have tuner **AGC**, toggled with `a`.
 
-On a device reached through [SoapySDR](hardware.md#soapysdr-the-honest-version),
+On a device reached through [SoapySDR](soapysdr.md),
 `↑`/`↓` move the **whole chain**, and sdrtop decides where the gain goes: it
 fills the front stage first, up to its ceiling, then the next one. That is the
 arrangement with the best noise figure, and it is not the one most drivers pick

@@ -165,7 +165,7 @@ SoapySDRPlay3 out whenever the native backend is there.
 
 The other RSPs (RSP1A, RSP2, RSPduo, RSPdx) are listed by name and not driven
 natively: nobody here has held one. SoapySDR is the road to them, with the
-[usual honesty](hardware.md#soapysdr-the-honest-version) about what that means.
+[usual honesty](soapysdr.md) about what that means.
 
 ## macOS
 
@@ -184,6 +184,10 @@ and the service is running, and tells you what to do if not. Then:
 sudo systemctl start sdrplay     # now
 sudo systemctl enable sdrplay    # and at every boot
 ```
+
+sdrtop looks for `libsdrplay_api.so.3` and `libsdrplay_api.so`. On macOS
+SDRplay's installer uses the same `.so` names, looked for bare and under the
+Homebrew and MacPorts prefixes.
 
 ---
 

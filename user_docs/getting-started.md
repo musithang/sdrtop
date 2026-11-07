@@ -136,7 +136,7 @@ Everything below is the same job done by hand.
 ## What you need
 
 - **Host:** A Linux machine. A Mac works too, unofficially: see
-  [macOS, unofficially](hardware.md#macos-unofficially).
+  [macOS, unofficially](platforms.md#macos-unofficially).
 - **Radio:** A HackRF One, RTL-SDR or a supported SoapySDR device.
 - **Source builds:** Rust 1.88+ and a C compiler/linker. Install Rust with
   [rustup](https://rustup.rs). Runtime-loading releases need no SDR development
@@ -186,7 +186,7 @@ HackRF requires libhackrf 2023.01.1+ with all required symbols. RTL-SDR supports
 `librtlsdr.so.0`, `librtlsdr.so.2` and `librtlsdr.so`. HackRF supports
 `libhackrf.so.0` and `libhackrf.so`. The Airspy R2 supports `libairspy.so.0` and
 `libairspy.so`. The HF+ Discovery supports `libairspyhf.so.0`,
-`libairspyhf.so.1` and `libairspyhf.so`. See [hardware](hardware.md#host-platforms)
+`libairspyhf.so.1` and `libairspyhf.so`. See [host platforms](platforms.md)
 for the runtime contract. Custom library locations must be on the dynamic
 loader's search path, for example through `LD_LIBRARY_PATH`.
 

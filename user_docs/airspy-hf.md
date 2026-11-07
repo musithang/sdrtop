@@ -208,9 +208,14 @@ refusal.
 ## Installing the library
 
 `sh install.sh --airspyhf`, or your distribution's package from
-[Getting started](getting-started.md#what-you-need). Which library versions and
-file names sdrtop accepts is under
-[host platforms](hardware.md#host-platforms).
+[Getting started](getting-started.md#what-you-need).
+
+The Airspy HF+ Discovery needs libairspyhf 1.6.8 or newer (1.8.1 is what it was
+rehearsed with). Linux candidates are `libairspyhf.so.0`, `libairspyhf.so.1`
+(Debian and Ubuntu rename it) and `libairspyhf.so`. Runtime packages include
+`libairspyhf1` on Debian and Ubuntu and `airspyhf` on Fedora, openSUSE and
+Homebrew. Arch has no official package, only the AUR's `airspyhf-git`.
+Ubuntu 20.04's 1.1.5 is too old and is refused whole.
 
 ---
 

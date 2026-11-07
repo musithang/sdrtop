@@ -86,7 +86,7 @@ Explicit tinySA or SoapySDR selection produces no native-library diagnostics.
 Everything else on this page assumes a radio sdrtop drives itself (a HackRF, an
 RTL-SDR, an Airspy R2 or an HF+ Discovery). If you are here for an Airspy Mini, an RSP, a
 Pluto or anything else reached through
-[SoapySDR](hardware.md#soapysdr-the-honest-version), the ladder is different and
+[SoapySDR](soapysdr.md), the ladder is different and
 it is short.
 
 1. **Ask SoapySDR first.**
@@ -117,10 +117,10 @@ it is short.
 5. **Your HackRF, RTL-SDR, Airspy R2 or HF+ Discovery appears once, not
    twice.** Deliberate: the native backend wins. `--device soapy` forces the
    other path (an HF+ is refused there, its driver delivers `CF32`). An Airspy
-   Mini stays on the SoapySDR path; see [Airspy R2](hardware.md#airspy-r2).
+   Mini stays on the SoapySDR path; see [Airspy R2](airspy-r2.md).
 6. **Is the radio on another machine?** That is SoapyRemote, and it has its own
    short checklist in
-   [Supported hardware](hardware.md#a-radio-on-another-machine-soapyremote).
+   [Supported hardware](soapysdr.md#a-radio-on-another-machine-soapyremote).
 7. **Still nothing?** Please [open an issue](../../../issues) with the full
    `SoapySDRUtil --find` output and anything in the log starting `SoapySDR:`.
    That backend was written from the API rather than from owning the hardware, so

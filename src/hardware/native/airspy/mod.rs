@@ -19,7 +19,7 @@
 //! register positions, 0..14 or 0..15, and says nothing about decibels; the
 //! tables in [`gain_model`] are what each position gave on this bench, with
 //! the LNA's valid only over the VHF band it was measured in (see
-//! `user_docs/hardware.md`).
+//! `user_docs/airspy-r2.md`).
 //!
 //! **The R2, and only the R2.** The Airspy Mini answers on the same USB id
 //! and board id; the rates its firmware lists tell them apart (R2: 10 and 2.5

@@ -170,7 +170,7 @@ At the right edge sits the **converter's window**, the one place where every
 line is measured:
 
 - where this radio clips (red): 0 dBFS at the ADC on a HackRF, about −3 dBFS at
-  the tuner's output on an [Airspy R2](hardware.md#airspy-r2), which flattens
+  the tuner's output on an [Airspy R2](airspy-r2.md), which flattens
   the signal before the converter's own rails;
 - the signal (`●`), and the **headroom** between it and the clip;
 - the **floor** the FFT measured, with the bandwidth it was measured in in the
@@ -204,7 +204,7 @@ How much of the converter the signal actually uses:
 - **The axis** is dBFS, the same scale as every other level on the bench. The
   green stretch is where the staging verdict wants the peak, `▲` is the peak and
   `△` the rms. On a radio that clips before its converter (an
-  [Airspy R2](hardware.md#airspy-r2), at about −3 dBFS in its tuner) a red line
+  [Airspy R2](airspy-r2.md), at about −3 dBFS in its tuner) a red line
   runs through the ladder where it clips, so a band past it is plainly past it.
 - **The verdict** and how far the peak sits from where the radio clips, then the
   **loading**: `peak` in dBFS and in the converter's counts, `rms` and the
@@ -348,7 +348,7 @@ the hardware, not the terminal's cells. It is **zoomed to the cloud**: the outer
 ring sits about 5 dB above the signal's rms, on a 3 dB step, and the rings inside
 it are 6 dB apart, each labelled in dBFS. Full scale is drawn in red when it is in
 view, and so is the clip of a radio that clips before its converter (an
-[Airspy R2](hardware.md#airspy-r2) at about −3 dBFS, dashed). The zoom follows a
+[Airspy R2](airspy-r2.md) at about −3 dBFS, dashed). The zoom follows a
 growing signal at once but waits a second before zooming in on a fading one, so
 the picture does not flicker between two scales, and it holds still while the
 cloud is frozen with `F`. A weak signal on an 8-bit radio, zoomed this far, shows
@@ -728,7 +728,7 @@ exist on a pull backend.
   **budget** is the radio's slack, and the nameplate says which: a slice of one
   block where the driver holds its USB transfer until the callback returns (the
   HackRF, an RTL-SDR), and the depth of the driver's queue less one block where it
-  queues blocks before calling back (an [Airspy R2](hardware.md#airspy-r2):
+  queues blocks before calling back (an [Airspy R2](airspy-r2.md):
   libairspy keeps eight, so a callback may come seven blocks late, about 46 ms at
   10 Msps, before anything is lost).
 - **Read loop** (pull): the share of the read loop spent working rather than
