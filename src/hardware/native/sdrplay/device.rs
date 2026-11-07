@@ -54,6 +54,12 @@ struct Selected {
     /// gRdB in the block, and the radio stays at it when the AGC is turned
     /// off (measured), so this is written back then.
     hand_gr: Option<i32>,
+    /// The LNA state last asked for. Tuned where the band has fewer states,
+    /// the radio holds the band's last instead (the API refuses a state the
+    /// band lacks), and gets this back where the band has it again.
+    wanted_lna: Option<u8>,
+    /// An LNA state a retune moved the radio to, not yet told.
+    moved_lna: Option<u8>,
 }
 
 /// An RSP1B, selected for this process until it is dropped.
@@ -196,6 +202,8 @@ impl SdrplayDevice {
                 mode,
                 stream: None,
                 hand_gr: None,
+                wanted_lna: None,
+                moved_lna: None,
             }),
             caps: model::caps(),
             info: DeviceInfo {
@@ -286,9 +294,19 @@ impl SdrplayDevice {
         // SAFETY: the block is the selected radio's; the lock is held.
         let rx = unsafe { Self::rx(&mut sel) };
         let agc_on = rx.ctrl_params.agc.enable != 0;
+        let tuned_hz = rx.tuner_params.rf_freq.rf_hz;
         let gain = &mut rx.tuner_params.gain;
         let was = (gain.lna_state, gain.gr_db);
+        let asked = lna;
         let lna = lna.unwrap_or(gain.lna_state);
+        let states = model::lna_states_at(tuned_hz as u64);
+        if lna >= states {
+            anyhow::bail!(
+                "the RSP1B has {states} LNA states at {:.3} MHz (0 to {}); not set",
+                tuned_hz / 1e6,
+                states - 1
+            );
+        }
         let gr = gr.unwrap_or(if agc_on {
             hand.unwrap_or(gain.gr_db)
         } else {
@@ -313,11 +331,18 @@ impl SdrplayDevice {
         } else {
             (gain.lna_state, gain.gr_db) = (lna, gr);
         }
+        let wanted_was = sel.wanted_lna;
+        if asked.is_some() {
+            sel.wanted_lna = Some(lna);
+        }
+        // A setting made now is newer than anything a retune moved.
+        sel.moved_lna = None;
         if let Err(e) = self.apply(&sel, UPDATE_GR, "gain") {
             // SAFETY: as above.
             let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
             (gain.lna_state, gain.gr_db) = was;
             sel.hand_gr = hand;
+            sel.wanted_lna = wanted_was;
             return Err(e);
         }
         Ok(())
@@ -514,13 +539,36 @@ impl SdrDevice for SdrplayDevice {
             );
         }
         let mut sel = self.lock();
+        let asked = sel.wanted_lna;
         // SAFETY: the block is the selected radio's; the lock is held.
         let rx = unsafe { Self::rx(&mut sel) };
-        let was = std::mem::replace(&mut rx.tuner_params.rf_freq.rf_hz, hz as f64);
-        if let Err(e) = self.apply(&sel, UPDATE_FRF, "frequency") {
+        let wanted = asked.unwrap_or(rx.tuner_params.gain.lna_state);
+        // The band's last state where it has fewer than the one asked for,
+        // the one asked for again where it has it.
+        let lna = wanted.min(model::lna_states_at(hz) - 1);
+        let was = (
+            rx.tuner_params.rf_freq.rf_hz,
+            rx.tuner_params.gain.lna_state,
+        );
+        rx.tuner_params.rf_freq.rf_hz = hz as f64;
+        rx.tuner_params.gain.lna_state = lna;
+        let reason = if lna == was.1 {
+            UPDATE_FRF
+        } else {
+            UPDATE_FRF | UPDATE_GR
+        };
+        if let Err(e) = self.apply(&sel, reason, "frequency") {
             // SAFETY: as above.
-            unsafe { Self::rx(&mut sel) }.tuner_params.rf_freq.rf_hz = was;
+            let rx = unsafe { Self::rx(&mut sel) };
+            (
+                rx.tuner_params.rf_freq.rf_hz,
+                rx.tuner_params.gain.lna_state,
+            ) = was;
             return Err(e);
+        }
+        sel.wanted_lna = Some(wanted);
+        if lna != was.1 {
+            sel.moved_lna = Some(lna);
         }
         Ok(hz)
     }
@@ -731,6 +779,13 @@ impl SdrDevice for SdrplayDevice {
         } else {
             None
         }
+    }
+
+    /// The LNA state a retune moved the radio to: onto the band's last
+    /// where the band has fewer states than the one set, back to it where
+    /// it has it again.
+    fn take_moved_stage(&self) -> Option<(usize, f64)> {
+        self.lock().moved_lna.take().map(|lna| (0, f64::from(lna)))
     }
 
     /// The IF's dB under the AGC, from the gRdB the radio last reported.
@@ -1010,6 +1065,55 @@ mod tests {
     const LAST_REASON: i32 = 10;
     const UPDATES: i32 = 11;
 
+    /// **A retune where the band lacks the LNA state set** puts the band's
+    /// last state on the radio with the frequency (SDRplay's API refuses a
+    /// state the band lacks, at Update and at Init), says so once, and gives
+    /// the set state back where the band has it; by hand such a state is
+    /// refused, and a setting made by hand drops a move not yet told.
+    #[test]
+    fn a_band_without_the_lna_state_set_gets_its_last() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let p = |f| fixture.sdrplay_param(f);
+        device.set_frequency(150_000_000).unwrap();
+        device.set_stage_gains(&[8.0, model::IF_DB[20]]).unwrap();
+        assert_eq!(device.take_moved_stage(), None);
+        device.set_frequency(14_000_000).unwrap();
+        assert_eq!(p(LNA), 6.0, "the band's last");
+        assert_eq!(device.take_moved_stage(), Some((0, 6.0)));
+        assert_eq!(device.take_moved_stage(), None, "told once");
+        let refused = device
+            .set_stage_gain(0, "LNA", 7.0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("7 LNA states at 14.000 MHz (0 to 6)"),
+            "{refused}"
+        );
+        device.set_frequency(150_000_000).unwrap();
+        assert_eq!(p(LNA), 8.0, "the state set, back");
+        assert_eq!(device.take_moved_stage(), Some((0, 8.0)));
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        device.set_frequency(1_200_000_000).unwrap();
+        assert_eq!(p(LNA), 8.0, "L-band has nine states, 8 is its last");
+        device.set_stage_gain(0, "LNA", 9.0).unwrap_err();
+        device.set_frequency(14_000_000).unwrap();
+        assert_eq!(p(LNA), 6.0);
+        assert_eq!(
+            fixture.sdrplay_count(LAST_REASON),
+            0x0002_0000 | 0x0000_8000,
+            "Frf with Gr"
+        );
+        device.set_stage_gain(0, "LNA", 3.0).unwrap();
+        assert_eq!(
+            device.take_moved_stage(),
+            None,
+            "a setting made since is newer"
+        );
+        device.stop_rx().unwrap();
+    }
+
     /// **The switches**: `[sdrplay]`'s kept ones go into the block at open;
     /// each option reaches the radio through its own `Update` while it
     /// streams, and a refused one is put back; the config keeps all but the
@@ -1192,7 +1296,14 @@ mod tests {
         device.start_rx(Arc::clone(&ctx)).unwrap();
         device.set_frequency(14_074_000).unwrap();
         assert_eq!(fixture.sdrplay_param(RF), 14_074_000.0);
-        assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0002_0000, "Tuner_Frf");
+        // From 100 MHz (LNA 8, the knob's start) into a band of seven
+        // states: the frequency with the band's last LNA state.
+        assert_eq!(
+            fixture.sdrplay_count(LAST_REASON),
+            0x0002_8000,
+            "Tuner_Frf | Tuner_Gr"
+        );
+        assert_eq!(fixture.sdrplay_param(LNA), 6.0);
         device.set_stage_gain(0, "LNA", 5.0).unwrap();
         assert_eq!(fixture.sdrplay_param(LNA), 5.0);
         assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0000_8000, "Tuner_Gr");

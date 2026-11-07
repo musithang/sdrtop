@@ -276,14 +276,29 @@ pub fn grdb_for(if_db: f64) -> i32 {
 /// GR"), and on the cable, with gRdB under 22 or 21, the gain fell by 9 to
 /// 15 dB instead of rising by one. Measured in 4 and 6 under 50 MHz, 8 from
 /// 50 to 420 MHz and from 1 to 2 GHz, 9 from 420 MHz to 1 GHz. 7 is here
-/// because under 50 MHz the radio has seven states and takes a higher one
-/// as its last, 6.
+/// because under 50 MHz the radio has seven states, and a retune there puts
+/// a higher one on the band's last, 6 ([`lna_states_at`]).
 ///
 /// **One rule for every band.** A rule per band would let a retune carry a
 /// setting legal in one band into another's trap, and the radio is retuned
 /// from many places (the sweep, NET, the keys, the prompt); no band's trap
 /// can be reached from a setting that keeps out of all of them.
 pub const TRAP_STATES: [u8; 5] = [4, 6, 7, 8, 9];
+
+/// How many LNA states the radio has tuned to `hz`: seven under 50 MHz
+/// (under the first measured band, 2 MHz, as well), ten up to 1 GHz, nine
+/// above. SDRplay's API refuses a state the band does not have, at an
+/// `Update` ("parameter out of range ... LNAstate=7" retuning from 150 to
+/// 40, 14, 2, 1 MHz and 10 kHz; LNAstate=9 to 1200 and 1900 MHz) and at
+/// `Init` (measured).
+pub fn lna_states_at(hz: u64) -> u8 {
+    let bands = lna_bands();
+    bands
+        .iter()
+        .find(|b| b.band.contains(&hz))
+        .or_else(|| bands.first())
+        .map_or(10, |b| b.db.len() as u8)
+}
 
 /// The least gRdB a trap state is given: the trap began at 22 or 21.
 pub const TRAP_GR_FLOOR: i32 = 23;
@@ -553,6 +568,20 @@ mod tests {
             (landed - 32.1).abs() < CURVE_STEP_MAX_DB,
             "{landed} at step {step}"
         );
+    }
+
+    /// Seven LNA states under 50 MHz and under the first measured band, ten
+    /// to 1 GHz, nine above: what SDRplay's API accepted and refused.
+    #[test]
+    fn the_lna_states_follow_the_band() {
+        assert_eq!(lna_states_at(1_000), 7);
+        assert_eq!(lna_states_at(1_000_000), 7);
+        assert_eq!(lna_states_at(14_000_000), 7);
+        assert_eq!(lna_states_at(49_999_999), 7);
+        assert_eq!(lna_states_at(50_000_000), 10);
+        assert_eq!(lna_states_at(999_999_999), 10);
+        assert_eq!(lna_states_at(1_200_000_000), 9);
+        assert_eq!(lna_states_at(2_000_000_000), 9);
     }
 
     /// The trap as measured, held in every band: the footnoted states (and

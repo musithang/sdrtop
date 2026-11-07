@@ -226,6 +226,18 @@ pub(super) fn write_back(
     }
     m.radio.lo_offset_hz = device.lo_offset_hz();
     m.radio.converter_bits = device.converter_bits();
+    // A stage the backend moved by itself (a retune where the band lacks the
+    // state set): the screen says what the radio is at, and the log why.
+    if let Some((i, held)) = device.take_moved_stage() {
+        let stages = device.capabilities().gain.stages();
+        if let (Some(spec), Some(&set)) = (stages.get(i), m.radio.gains.get(i)) {
+            if held != set {
+                m.radio.gains[i] = held;
+                let note = held_note(spec, set, held, m.radio.frequency);
+                m.push_log(note);
+            }
+        }
+    }
     m.radio.upstream_correction = device.upstream_correction();
     m.radio.filter_in = device.filter_in(m.radio.frequency);
     m.radio.auto_db = (0..device.capabilities().gain.stages().len())
@@ -236,6 +248,24 @@ pub(super) fn write_back(
         .map(|report| crate::state::RadioOverload::after(m.radio.overload, report, Instant::now()));
 
     m.radio.rx_enabled
+}
+
+/// The log line for a stage the radio holds at another value than was set.
+fn held_note(spec: &crate::hardware::StageSpec, set: f64, held: f64, hz: u64) -> String {
+    let say = |v: f64| {
+        if spec.is_banded() {
+            format!("state {v:.0}")
+        } else {
+            format!("{v:.1} dB")
+        }
+    };
+    format!(
+        "{}: {} at {:.3} MHz, as the radio holds it ({} before)",
+        spec.name,
+        say(held),
+        hz as f64 / 1e6,
+        say(set)
+    )
 }
 
 /// The measured rate into the state: a new figure when the baseline has one,
@@ -312,6 +342,15 @@ mod tests {
     /// **The last measured rate is kept only at its own rate.** While the
     /// baseline is short the last figure stands; when the rate changes it
     /// goes, so the clock is not 768 kS/s measured against 192 configured.
+    #[test]
+    fn a_stage_the_radio_moved_is_said_with_where() {
+        let lna = &crate::hardware::native::sdrplay::model::gain_model().stages()[0];
+        assert_eq!(
+            held_note(lna, 8.0, 6.0, 14_000_000),
+            "LNA: state 6 at 14.000 MHz, as the radio holds it (state 8 before)"
+        );
+    }
+
     #[test]
     fn the_measured_rate_does_not_outlive_its_rate() {
         let mut m = SdrMetrics::fixture().streaming();

@@ -2075,6 +2075,15 @@ pub trait SdrDevice: Send + Sync {
         None
     }
 
+    /// A stage the backend moved by itself since last asked, as `(index,
+    /// value)`, told once: the RSP1B, retuned where the band has fewer LNA
+    /// states than the one set, holds the band's last (SDRplay's API refuses
+    /// a state the band lacks), and the set one again where the band has it.
+    /// `None` for a backend whose stages hold what they were set to.
+    fn take_moved_stage(&self) -> Option<(usize, f64)> {
+        None
+    }
+
     /// The dB stage `index` is at under the device's own automatic gain, as
     /// the radio reports it; `None` where it is not under it or the radio
     /// does not say. Only a report: a figure worked out here would be a
