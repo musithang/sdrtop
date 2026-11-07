@@ -2075,6 +2075,13 @@ pub trait SdrDevice: Send + Sync {
         None
     }
 
+    /// Why the stream ended by itself, where the backend can say: the radio
+    /// removed, or the service between sdrtop and the radio gone. `None`
+    /// for a backend that cannot tell, which the app words generally.
+    fn stream_end_reason(&self) -> Option<String> {
+        None
+    }
+
     /// A stage the backend moved by itself since last asked, as `(index,
     /// value)`, told once: the RSP1B, retuned where the band has fewer LNA
     /// states than the one set, holds the band's last (SDRplay's API refuses

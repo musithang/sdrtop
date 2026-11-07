@@ -340,6 +340,7 @@ mod power_control_tests {
         streaming: AtomicBool,
         fail_start: AtomicBool,
         fail_stop: AtomicBool,
+        end_reason: Mutex<Option<String>>,
         starts: AtomicUsize,
         stops: AtomicUsize,
     }
@@ -353,6 +354,7 @@ mod power_control_tests {
                 streaming: AtomicBool::new(false),
                 fail_start: AtomicBool::new(false),
                 fail_stop: AtomicBool::new(false),
+                end_reason: Mutex::new(None),
                 starts: AtomicUsize::new(0),
                 stops: AtomicUsize::new(0),
             }
@@ -400,6 +402,10 @@ mod power_control_tests {
 
         fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
             Ok(())
+        }
+
+        fn stream_end_reason(&self) -> Option<String> {
+            self.end_reason.lock().unwrap().clone()
         }
     }
 
@@ -538,5 +544,29 @@ mod power_control_tests {
             false
         ));
         assert!(!ctx.record.armed(), "stopped on its own");
+
+        // The device's own account of why, where it has one.
+        let last = |state: &Arc<Mutex<SdrMetrics>>| {
+            state
+                .lock()
+                .unwrap()
+                .ui
+                .log
+                .back()
+                .map(|e| e.text.clone())
+                .unwrap_or_default()
+        };
+        assert!(
+            last(&state).contains("stopped unexpectedly"),
+            "{}",
+            last(&state)
+        );
+        *device.end_reason.lock().unwrap() = Some("the service stopped answering".into());
+        state.lock().unwrap().radio.rx_enabled = true;
+        control::note_unexpected_stop(&state, &dyn_device, &ctx, true, false);
+        assert_eq!(
+            &*last(&state),
+            "WARNING: Streaming stopped: the service stopped answering"
+        );
     }
 }

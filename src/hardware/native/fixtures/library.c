@@ -553,7 +553,8 @@ int sdrplay_api_GetDevices(sdrplay_api_DeviceT *devices, unsigned int *count, un
 // reset, full length) and DeviceRemoved, then nothing. Mode 47: a block ending
 // at 2^32 - 1, then one 4 samples past the wrap, then a block of 1008 every
 // millisecond. Mode 48: Init fails. Mode 49: every Update but an overload
-// acknowledgement fails. The AGC turned on while streaming does what the API
+// acknowledgement fails. Mode 50: the stream falls silent after its first
+// blocks, as it does when SDRplay's service goes away. The AGC turned on while streaming does what the API
 // does: its gRdB (31) goes into the block, and a GainChange reports it.
 static struct {
     sdrplay_api_CallbackFnsT fns;
@@ -616,6 +617,7 @@ static void *sdrplay_run(void *arg) {
         }
         struct timespec pause = {0, 1000000};
         nanosleep(&pause, NULL);
+        if (mode == 50 && next > 20000) continue;
         if (mode != 46) { sdrplay_block_of(next, 0, base, 1008); next += 1008; base = (short)(base + 1008); }
     }
     return NULL;

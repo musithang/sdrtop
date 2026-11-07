@@ -139,6 +139,12 @@ pub struct StreamCtx {
     pub gain: Arc<GainReport>,
     /// The radio left the bus or failed; the stream is over.
     pub ended: AtomicBool,
+    /// Why it ended: [`ENDED_REMOVED`], [`ENDED_FAILED`], or
+    /// [`ENDED_SILENT`] when the device found it silent.
+    pub ended_by: std::sync::atomic::AtomicU8,
+    /// When the stream started, and the last block came, ms after it.
+    born: std::time::Instant,
+    last_block_ms: AtomicU64,
     /// Samples in the last delivery: the gathered block the intake and the
     /// timing bench see.
     pub block: AtomicU32,
@@ -166,6 +172,9 @@ impl StreamCtx {
             gather: gather_pairs(output_hz),
             overload,
             ended: AtomicBool::new(false),
+            ended_by: std::sync::atomic::AtomicU8::new(0),
+            born: std::time::Instant::now(),
+            last_block_ms: AtomicU64::new(0),
             block: AtomicU32::new(0),
             junk: AtomicU64::new(0),
             fns: CallbackFnsT {
@@ -174,6 +183,21 @@ impl StreamCtx {
                 event: Some(event_callback),
             },
         }
+    }
+}
+
+/// Why a stream ended (`StreamCtx::ended_by`).
+pub const ENDED_REMOVED: u8 = 1;
+pub const ENDED_FAILED: u8 = 2;
+pub const ENDED_SILENT: u8 = 3;
+
+impl StreamCtx {
+    /// How long since the last block came, or since the stream began.
+    pub fn silent_for(&self) -> std::time::Duration {
+        let since = self.born.elapsed();
+        since.saturating_sub(std::time::Duration::from_millis(
+            self.last_block_ms.load(Ordering::Relaxed),
+        ))
     }
 }
 
@@ -244,6 +268,10 @@ unsafe extern "C" fn stream_callback(
                 (*params).first_sample_num,
             )
         };
+        ctx.last_block_ms.store(
+            now.saturating_duration_since(ctx.born).as_millis() as u64,
+            Ordering::Relaxed,
+        );
         let mut pos = ctx.position.lock().unwrap_or_else(|e| e.into_inner());
         let placed = place(pos.expected, first, reset != 0);
         let Placed::Deliver { lost, new_run } = placed else {
@@ -318,6 +346,12 @@ unsafe extern "C" fn event_callback(
                 };
             }
             EVENT_DEVICE_REMOVED | EVENT_DEVICE_FAILURE => {
+                let by = if event == EVENT_DEVICE_REMOVED {
+                    ENDED_REMOVED
+                } else {
+                    ENDED_FAILED
+                };
+                ctx.ended_by.store(by, Ordering::Relaxed);
                 ctx.ended.store(true, Ordering::Relaxed);
             }
             _ => {}

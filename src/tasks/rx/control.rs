@@ -75,7 +75,12 @@ pub(super) fn note_unexpected_stop(
     m.radio.rx_enabled = false;
     m.radio.hw_streaming = false;
     m.radio.rx_start_time = None;
-    m.push_log("WARNING: Streaming stopped unexpectedly \u{2014} press [Space] to restart");
+    match device.stream_end_reason() {
+        Some(why) => m.push_log(format!("WARNING: Streaming stopped: {why}")),
+        None => {
+            m.push_log("WARNING: Streaming stopped unexpectedly \u{2014} press [Space] to restart")
+        }
+    }
     false
 }
 

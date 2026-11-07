@@ -26,7 +26,7 @@ use crate::hardware::{
 };
 
 use super::layout::{DeviceParamsT, DeviceT, RxChannelParamsT, MAX_DEVICES};
-use super::stream::{GainReport, Overload, StreamCtx, REASON_EXT1_NONE};
+use super::stream::{self, GainReport, Overload, StreamCtx, REASON_EXT1_NONE};
 use super::{ffi, model, serial_of, Model, Problem};
 
 /// `sdrplay_api_Tuner_A`, the RSP1B's one tuner.
@@ -60,7 +60,23 @@ struct Selected {
     wanted_lna: Option<u8>,
     /// An LNA state a retune moved the radio to, not yet told.
     moved_lna: Option<u8>,
+    /// SDRplay's service stopped answering under a stream. Its API sends no
+    /// event for that; it falls silent, two of its threads spin, and
+    /// `ReleaseDevice` never returns (measured, restarting the service). The
+    /// session is not called again: not to stop, release or close, nor to
+    /// start once more.
+    service_lost: bool,
 }
+
+/// How long a stream may bring nothing before SDRplay's service is taken as
+/// gone: blocks come at least every 70 ms at every rate (the service's
+/// longest hold), and they stopped within a second of a restart.
+const SERVICE_SILENCE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// What is said when the service is gone.
+const SERVICE_LOST: &str =
+    "SDRplay's service stopped answering (restarted or stopped): its API cannot \
+     be used again in this run; quit sdrtop and start it again";
 
 /// An RSP1B, selected for this process until it is dropped.
 pub struct SdrplayDevice {
@@ -204,6 +220,7 @@ impl SdrplayDevice {
                 hand_gr: None,
                 wanted_lna: None,
                 moved_lna: None,
+                service_lost: false,
             }),
             caps: model::caps(),
             info: DeviceInfo {
@@ -233,6 +250,9 @@ impl SdrplayDevice {
     /// says so and the caller puts the old value back, so the block never
     /// holds a setting the radio is not at.
     fn apply(&self, sel: &Selected, reason: u32, what: &str) -> anyhow::Result<()> {
+        if sel.service_lost {
+            anyhow::bail!(SERVICE_LOST);
+        }
         let streaming = sel
             .stream
             .as_ref()
@@ -255,6 +275,9 @@ impl SdrplayDevice {
     /// `Init` with the block as it stands, into a new stream context kept
     /// in `sel` until `Uninit`.
     fn begin(&self, sel: &mut Selected, ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        if sel.service_lost {
+            anyhow::bail!(SERVICE_LOST);
+        }
         let stream = Arc::new(StreamCtx::new(
             ctx,
             self.api,
@@ -467,6 +490,12 @@ fn write_mode(
 /// reach it once `Uninit` has returned.
 fn stop_locked(api: &ffi::SdrplayApi, sel: &mut Selected) {
     if let Some(stream) = sel.stream.take() {
+        if sel.service_lost {
+            // The API's threads may still hold the context; with the
+            // service gone nothing stops them, so it is never freed.
+            std::mem::forget(stream);
+            return;
+        }
         // SAFETY: the radio is selected and its stream was started here.
         unsafe { (api.uninit)(sel.device.dev) };
         drop(stream);
@@ -506,11 +535,44 @@ impl SdrDevice for SdrplayDevice {
     }
 
     /// Streaming until stopped, or until the radio left the bus or failed.
+    /// Streaming until stopped, until the radio left the bus or failed, or
+    /// until the stream fell silent for [`SERVICE_SILENCE`], which is
+    /// SDRplay's service gone.
     fn is_streaming(&self) -> bool {
-        self.lock()
-            .stream
-            .as_ref()
-            .is_some_and(|s| !s.ended.load(Ordering::Relaxed))
+        let mut sel = self.lock();
+        let Some(stream) = sel.stream.as_ref() else {
+            return false;
+        };
+        if stream.ended.load(Ordering::Relaxed) {
+            return false;
+        }
+        if stream.silent_for() >= SERVICE_SILENCE {
+            stream
+                .ended_by
+                .store(stream::ENDED_SILENT, Ordering::Relaxed);
+            stream.ended.store(true, Ordering::Relaxed);
+            sel.service_lost = true;
+            return false;
+        }
+        true
+    }
+
+    /// Why the stream ended by itself: the radio removed, failed, or the
+    /// service gone.
+    fn stream_end_reason(&self) -> Option<String> {
+        let sel = self.lock();
+        if sel.service_lost {
+            return Some(SERVICE_LOST.to_string());
+        }
+        let by = sel.stream.as_ref()?.ended_by.load(Ordering::Relaxed);
+        match by {
+            stream::ENDED_REMOVED => Some(
+                "the RSP1B left the bus (SDRplay's API said so); plug it in and press [Space]"
+                    .into(),
+            ),
+            stream::ENDED_FAILED => Some("SDRplay's API reported the RSP1B failed".into()),
+            _ => None,
+        }
     }
 
     fn samples_per_transfer(&self) -> u64 {
@@ -814,6 +876,11 @@ impl Drop for SdrplayDevice {
     fn drop(&mut self) {
         let sel = self.selected.get_mut().unwrap_or_else(|e| e.into_inner());
         stop_locked(self.api, sel);
+        if sel.service_lost {
+            // `ReleaseDevice` never returns once the service is gone: the
+            // process's end gives everything back instead.
+            return;
+        }
         // SAFETY: the radio this device selected, released once.
         unsafe {
             (self.api.release_device)(&mut sel.device);
@@ -1112,6 +1179,43 @@ mod tests {
             "a setting made since is newer"
         );
         device.stop_rx().unwrap();
+    }
+
+    /// **SDRplay's service gone under a stream**: its API sends no event,
+    /// the stream falls silent, and `ReleaseDevice` would never return. After
+    /// [`SERVICE_SILENCE`] of silence the stream reads as ended, the reason
+    /// says the service stopped answering, and the session is not called
+    /// again: no `Uninit`, no new start, no update, and the drop releases
+    /// and closes nothing.
+    #[test]
+    fn a_silent_stream_is_the_service_gone_and_the_api_is_left_alone() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        fixture.mode(50);
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        assert!(device.is_streaming());
+        std::thread::sleep(SERVICE_SILENCE + std::time::Duration::from_millis(300));
+        assert!(!device.is_streaming(), "silent past the limit");
+        let why = device.stream_end_reason().unwrap();
+        assert!(
+            why.contains("stopped answering") && why.contains("start it again"),
+            "{why}"
+        );
+        let uninits = fixture.sdrplay_count(UNINITS);
+        device.stop_rx().unwrap();
+        assert_eq!(fixture.sdrplay_count(UNINITS), uninits, "no Uninit");
+        let refused = device.start_rx(Arc::clone(&ctx)).unwrap_err().to_string();
+        assert!(refused.contains("stopped answering"), "{refused}");
+        assert_eq!(fixture.sdrplay_count(INITS), 1, "no new start");
+        let state = |f| fixture.sdrplay_state(f);
+        let (releases, closes) = (state(6), state(1));
+        drop(device);
+        assert_eq!(
+            (state(6), state(1)),
+            (releases, closes),
+            "nothing released or closed"
+        );
     }
 
     /// **The switches**: `[sdrplay]`'s kept ones go into the block at open;
@@ -1446,6 +1550,8 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(!device.is_streaming(), "the stream ended with the radio");
+        let why = device.stream_end_reason().unwrap();
+        assert!(why.contains("left the bus"), "{why}");
         assert!(
             net.recv_timeout(std::time::Duration::from_millis(100))
                 .is_err(),
