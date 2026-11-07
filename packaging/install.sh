@@ -38,6 +38,7 @@ WANT_RTLSDR=0
 WANT_AIRSPY=0
 WANT_AIRSPYHF=0
 WANT_SOAPY=0
+WANT_SDRPLAY=0
 RAW_DEPS_ONLY=0
 FROM_SOURCE=0
 FROM_GIT=0
@@ -66,8 +67,10 @@ sdrtop installer
   --airspyhf      also install the optional libairspyhf runtime (HF+ Discovery)
   --soapy         also install libSoapySDR and its driver modules (optional)
                   (on macOS these five come from Homebrew)
+  --sdrplay       check SDRplay's API and its service (RSP1B); SDRplay's own
+                  installer provides both, so this installs nothing
   --deps-only     install only runtimes selected by --hackrf, --rtlsdr,
-                  --airspy, --airspyhf, --soapy
+                  --airspy, --airspyhf, --soapy, --sdrplay
   --uninstall     remove what a previous run installed
   --help          this
 
@@ -92,6 +95,7 @@ while [ $# -gt 0 ]; do
         --airspy)      WANT_AIRSPY=1; shift ;;
         --airspyhf)    WANT_AIRSPYHF=1; shift ;;
         --soapy)       WANT_SOAPY=1; shift ;;
+        --sdrplay)     WANT_SDRPLAY=1; shift ;;
         --deps-only)   RAW_DEPS_ONLY=1; shift ;;
         --uninstall)   UNINSTALL=1; shift ;;
         --help|-h)     usage; exit 0 ;;
@@ -101,9 +105,10 @@ done
 
 if [ "$RAW_DEPS_ONLY" -eq 1 ] && [ "$WANT_HACKRF" -eq 0 ] \
    && [ "$WANT_RTLSDR" -eq 0 ] && [ "$WANT_AIRSPY" -eq 0 ] \
-   && [ "$WANT_AIRSPYHF" -eq 0 ] && [ "$WANT_SOAPY" -eq 0 ]; then
+   && [ "$WANT_AIRSPYHF" -eq 0 ] && [ "$WANT_SOAPY" -eq 0 ] \
+   && [ "$WANT_SDRPLAY" -eq 0 ]; then
     usage >&2
-    die "--deps-only requires --hackrf, --rtlsdr, --airspy, --airspyhf or --soapy"
+    die "--deps-only requires --hackrf, --rtlsdr, --airspy, --airspyhf, --soapy or --sdrplay"
 fi
 
 OS=$(uname -s)
@@ -394,6 +399,43 @@ install_soapy() {
     done
 }
 
+# SDRplay's API is in no distribution's archive: SDRplay ships it as an
+# installer that also sets up the root service the API talks to (Arch carries
+# it in the AUR as libsdrplay). So this looks and says; it installs nothing.
+# On macOS SDRplay's installer puts .so names under /usr/local/lib.
+have_sdrplay() {
+    have_lib libsdrplay_api && return 0
+    if [ "$OS" = Darwin ]; then
+        for d in /usr/local/lib /opt/homebrew/lib /opt/local/lib; do
+            [ -e "$d/libsdrplay_api.so.3" ] && return 0
+        done
+    fi
+    return 1
+}
+
+check_sdrplay() {
+    step "SDRplay's API (RSP1B)"
+    if ! have_sdrplay; then
+        warn "SDRplay's API is not installed"
+        say "  It comes from SDRplay's installer: https://www.sdrplay.com/api/"
+        [ "$PM" = pacman ] && say "  On Arch: libsdrplay from the AUR."
+        return 0
+    fi
+    say "libsdrplay_api is present"
+    if [ "$OS" = Linux ]; then
+        if systemctl is-active --quiet sdrplay 2>/dev/null; then
+            say "SDRplay's service is running"
+        else
+            warn "SDRplay's service is not running; sdrtop cannot open an RSP without it"
+            say "    sudo systemctl start sdrplay"
+            say "  and to start it at every boot:"
+            say "    sudo systemctl enable sdrplay"
+        fi
+    else
+        say "  SDRplay's installer sets up its service on macOS; not checked here"
+    fi
+}
+
 install_runtime_deps() {
     if [ "$WANT_HACKRF" -eq 0 ] && [ "$WANT_RTLSDR" -eq 0 ] \
        && [ "$WANT_AIRSPY" -eq 0 ] && [ "$WANT_AIRSPYHF" -eq 0 ]; then
@@ -449,6 +491,7 @@ install_runtime_deps() {
 
 install_runtime_deps
 [ "$WANT_SOAPY" -eq 1 ] && install_soapy
+[ "$WANT_SDRPLAY" -eq 1 ] && check_sdrplay
 if [ "$RAW_DEPS_ONLY" -eq 1 ]; then
     exit 0
 fi
@@ -810,6 +853,7 @@ esac
 
 say ""
 say "For a HackRF, RTL-SDR, Airspy R2 or HF+ Discovery, re-run this installer"
-say "with --hackrf, --rtlsdr, --airspy or --airspyhf."
+say "with --hackrf, --rtlsdr, --airspy or --airspyhf; for an SDRplay RSP1B,"
+say "--sdrplay checks SDRplay's API and its service."
 say "Run 'sdrtop'. It opens on its menu: Enter takes a layout, Space starts"
 say "receiving, Esc brings the menu back, q quits and saves."

@@ -32,6 +32,7 @@
   <a href="https://www.rtl-sdr.com/"><img src="https://img.shields.io/badge/RTL--SDR-brightgreen" alt="RTL-SDR"></a>
   <a href="user_docs/hardware.md#airspy-r2"><img src="https://img.shields.io/badge/Airspy%20R2-brightgreen" alt="Airspy R2"></a>
   <a href="user_docs/airspy-hf.md"><img src="https://img.shields.io/badge/Airspy%20HF%2B%20Discovery-brightgreen" alt="Airspy HF+ Discovery"></a>
+  <a href="user_docs/sdrplay.md"><img src="https://img.shields.io/badge/SDRplay%20RSP1B-brightgreen" alt="SDRplay RSP1B"></a>
   <a href="https://github.com/portapack-mayhem/mayhem-firmware"><img src="https://img.shields.io/badge/PortaPack%20H4M-brightgreen" alt="PortaPack H4M"></a>
   <a href="user_docs/hardware.md#tinysa"><img src="https://img.shields.io/badge/tinySA%20Ultra-brightgreen" alt="tinySA Ultra"></a>
 </p>
@@ -158,7 +159,7 @@ curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/ins
 
 The installer tries the prebuilt binary on your machine. It compiles from source if the binary cannot run there. Native SDR libraries are optional runtime dependencies.
 
-Add `--hackrf`, `--rtlsdr`, `--airspy` or `--airspyhf` to install the runtime for your radio. `--soapy` adds SoapySDR and its driver modules. A plain install adds none of these libraries.
+Add `--hackrf`, `--rtlsdr`, `--airspy` or `--airspyhf` to install the runtime for your radio. `--soapy` adds SoapySDR and its driver modules. `--sdrplay` checks SDRplay's API and its service, which come from SDRplay's own installer. A plain install adds none of these libraries.
 
 <details>
 <summary>Every flag it takes, and installing without root</summary>
@@ -176,6 +177,7 @@ sh install.sh --rtlsdr              # add the RTL-SDR runtime
 sh install.sh --airspy              # add the Airspy R2 runtime
 sh install.sh --airspyhf            # add the Airspy HF+ Discovery runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
+sh install.sh --sdrplay             # check SDRplay's API and service (RSP1B)
 sh install.sh --deps-only --hackrf  # only the selected runtime, no sdrtop
 sh install.sh --uninstall           # remove what a previous run installed
 sh install.sh --help                # this list, from the script itself
@@ -302,9 +304,9 @@ Native support for the HackRF One, the RTL-SDR, the Airspy R2, the Airspy HF+ Di
 | RTL-SDR (R820T, E4000, R828D) | ✅ Full support | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
 | Airspy R2 | ✅ Full support | Natively: measured LNA, mixer and VGA tables, Airspy's Linearity and Sensitivity curves on the knob, tuner AGC; no BB filter, no Friis NF. [Details](user_docs/hardware.md#airspy-r2) |
 | Airspy HF+ Discovery | ✅ Full support | Natively: both bands and the gap between them, all seven rates, ATT and LNA drawn as the digital gain they are, the radio's hold at about −12 dBFS; no BB filter, no Friis NF. [Details](user_docs/airspy-hf.md) |
+| SDRplay RSP1B | ✅ Full support | Natively through SDRplay's API: gain measured per band, Sensitivity and Linearity curves, the mixer trap kept out of, the AGC with the IF it picked, SDRplay's correction and notches as switches; no BB filter, no Friis NF. [Details](user_docs/sdrplay.md) |
 | tinySA / Ultra / Ultra+ | ✅ Spectrum support | ZS405 verified; calibrated dBm spectrum, waterfall and native band sweeps |
-| **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy Mini, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF and an Airspy R2 |
-| SDRplay RSP1B | 🔲 Planned | On my desk; native backend in the queue |
+| **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy Mini, other SDRplay RSPs, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF and an Airspy R2 |
 | HackRF Pro | 🔲 Planned | Needs hardware |
 
 **Hardware from the people who make it:** the RSP1B came from [SDRplay](https://www.sdrplay.com/), the R2 and the HF+ Discovery from [Airspy](https://airspy.com/). Thank you both.

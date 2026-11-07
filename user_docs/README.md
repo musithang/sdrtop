@@ -49,6 +49,8 @@ Welcome. This is the plain-language guide to using sdrtop.
   differ
 - **[Airspy HF+ Discovery](airspy-hf.md)**: the radio that manages its own
   levels, and what that changes on the benches
+- **[SDRplay RSP1B](sdrplay.md)**: the radio behind a service, its measured
+  gain, the mixer trap and the curves
 
 ## Updates
 

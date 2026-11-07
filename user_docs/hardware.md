@@ -12,12 +12,13 @@
 | RTL-SDR (R820T / R828D / E4000) | Fully supported: the whole spectrum, waterfall and lab stack, with a single tuner gain plus AGC |
 | Airspy R2 | Fully supported natively: spectrum, waterfall, every diagnostic, with measured gain tables and Airspy's own gain curves. See [below](#airspy-r2) |
 | Airspy HF+ Discovery | Fully supported natively: both bands, every rate, every diagnostic, with its digital gain drawn as digital. See [its page](airspy-hf.md) |
+| SDRplay RSP1B | Fully supported natively through SDRplay's API: every rate, every diagnostic, with measured gain tables and SDRplay-style curves. See [its page](sdrplay.md) |
 | tinySA / tinySA Ultra / Ultra+ | Spectrum, waterfall and native band sweeps in calibrated dBm. ZS405 is verified on hardware |
 | **Anything with a SoapySDR driver** | Supported, **and not yet confirmed on hardware other than a HackRF**. See [below](#soapysdr-the-honest-version) |
 | PortaPack H4M (Mayhem) | Fully supported (HackRF mode) |
 
-HackRF One, RTL-SDR, the Airspy R2, the Airspy HF+ Discovery and the tinySA Ultra
-ZS405 are tested on real hardware.
+HackRF One, RTL-SDR, the Airspy R2, the Airspy HF+ Discovery, the SDRplay RSP1B
+and the tinySA Ultra ZS405 are tested on real hardware.
 
 The third row is a deliberate exception, and it gets its own section rather than
 a footnote, because you deserve to know which kind of "supported" you are
@@ -27,20 +28,20 @@ looking at.
 
 The UI adapts rather than showing you fields that can't mean anything:
 
-| | HackRF One | RTL-SDR | Airspy R2 | Airspy HF+ Discovery |
-|---|---|---|---|---|
-| Frequency range | 1 MHz to 6 GHz | By tuner: 24 MHz to 1.766 GHz on R820T / R828D, 52 MHz to 2.2 GHz on E4000 | 24 MHz to 1.8 GHz | 9 kHz to 31 MHz and 60 to 260 MHz |
-| Sample rate | 2 to 20 Msps | 0.9 to 3.2 Msps | 2.5 or 10 Msps | Seven, 192 to 912 kS/s |
-| Gain stages | LNA (0–40, step 8) and VGA (0–62, step 2) | One tuner gain, stepping a table the device reports | LNA, mixer and VGA, each a measured table; the knob walks Airspy's curves | ATT (0 to 48 dB, step 6) and LNA (0 or 6), both digital, after the converter |
-| Front-end boost | RF amplifier (`a`) | Tuner AGC (`a`) | Tuner AGC on the LNA and mixer (`a`) | The radio's AGC setting, which hands it the ATT (`a`) |
-| Baseband filter | Tunable, follows the sample rate | None, so the panel reads N/A | None, so the panel reads N/A | None, so the panel reads N/A |
-| Friis noise figure | Computed per stage | N/A: the dongle doesn't expose per-stage gains | N/A: nobody publishes each stage's noise figure | N/A: its stages are digital |
-| Clip ceiling | The converter's 0 dBFS | The converter's 0 dBFS | The tuner's, about −3 dBFS | None: the radio holds peaks at about −12 dBFS |
-| Sample format | Signed 8-bit | Unsigned 8-bit, biased at 127.5 | 12 bits, delivered as 16-bit I/Q | 16-bit USB word, carried in 32 bits with 8 below it |
+| | HackRF One | RTL-SDR | Airspy R2 | Airspy HF+ Discovery | SDRplay RSP1B |
+|---|---|---|---|---|---|
+| Frequency range | 1 MHz to 6 GHz | By tuner: 24 MHz to 1.766 GHz on R820T / R828D, 52 MHz to 2.2 GHz on E4000 | 24 MHz to 1.8 GHz | 9 kHz to 31 MHz and 60 to 260 MHz | 1 kHz to 2 GHz |
+| Sample rate | 2 to 20 Msps | 0.9 to 3.2 Msps | 2.5 or 10 Msps | Seven, 192 to 912 kS/s | 62.5 kS/s to 10 Msps |
+| Gain stages | LNA (0–40, step 8) and VGA (0–62, step 2) | One tuner gain, stepping a table the device reports | LNA, mixer and VGA, each a measured table; the knob walks Airspy's curves | ATT (0 to 48 dB, step 6) and LNA (0 or 6), both digital, after the converter | LNA (measured per band) and IF (39 dB, measured); the knob walks two curves |
+| Front-end boost | RF amplifier (`a`) | Tuner AGC (`a`) | Tuner AGC on the LNA and mixer (`a`) | The radio's AGC setting, which hands it the ATT (`a`) | SDRplay's AGC on the IF (`a`) |
+| Baseband filter | Tunable, follows the sample rate | None, so the panel reads N/A | None, so the panel reads N/A | None, so the panel reads N/A | The IF filter follows the rate; the panel reads N/A |
+| Friis noise figure | Computed per stage | N/A: the dongle doesn't expose per-stage gains | N/A: nobody publishes each stage's noise figure | N/A: its stages are digital | N/A: nobody publishes each stage's noise figure |
+| Clip ceiling | The converter's 0 dBFS | The converter's 0 dBFS | The tuner's, about −3 dBFS | None: the radio holds peaks at about −12 dBFS | The converter's 0 dBFS; the radio flags overload at about -12 dBFS |
+| Sample format | Signed 8-bit | Unsigned 8-bit, biased at 127.5 | 12 bits, delivered as 16-bit I/Q | 16-bit USB word, carried in 32 bits with 8 below it | 16-bit I/Q, 14, 12 or 8 bits by rate |
 
 Everything else, including every lab bench, the demodulator and the sweep scanner,
-works the same on all four, apart from what the
-[HF+ page](airspy-hf.md) spells out.
+works the same on all five, apart from what the
+[HF+ page](airspy-hf.md) and the [RSP1B page](sdrplay.md) spell out.
 
 ## tinySA
 
@@ -214,6 +215,18 @@ clipping. sdrtop draws it that way, and that changes what several benches say.
 It has **[a page of its own](airspy-hf.md)**: the bands and the gap, the rates and
 what 0 dBFS means, the hold, the LO and the Library DSP switch, timing and
 observer mode.
+
+## SDRplay RSP1B
+
+SDRplay sent this one. It reaches sdrtop through SDRplay's closed API and a
+service that runs as root, so the service has to be running
+(`sudo systemctl start sdrplay`), and a few things are said about the service
+itself: how long it holds the stream, and what happens when it goes away.
+Its gain is measured per band rather than taken from SDRplay's table, which it
+differs from by up to 6 dB, and some LNA states hide a mixer trap that sdrtop
+keeps out of. It has **[a page of its own](sdrplay.md)**: the gain and the
+trap, the curves, the AGC, the corrections and notches, the rates, timing,
+observer mode and installing SDRplay's API.
 
 ## SoapySDR: the honest version
 
@@ -406,7 +419,7 @@ which is the honest answer rather than a guess dressed as two.
 | ARM / Android (Termux) | Builds and runs; needs a root-capable USB stack to reach the device |
 | macOS (Homebrew) | Unofficial, tested by the people who run it: [macOS, unofficially](#macos-unofficially) |
 
-sdrtop loads libhackrf, librtlsdr, libairspy and libairspyhf at runtime. None of them is
+sdrtop loads libhackrf, librtlsdr, libairspy, libairspyhf and libsdrplay_api at runtime. None of them is
 required to build sdrtop. A missing or incompatible library disables only
 its backend.
 
@@ -430,6 +443,13 @@ rehearsed with). Linux candidates are `libairspyhf.so.0`, `libairspyhf.so.1`
 `libairspyhf1` on Debian and Ubuntu and `airspyhf` on Fedora, openSUSE and
 Homebrew. Arch has no official package, only the AUR's `airspyhf-git`.
 Ubuntu 20.04's 1.1.5 is too old and is refused whole.
+
+The SDRplay RSP1B needs SDRplay's API 3.15 (3.14 is refused by name: its
+parameter layout was never checked) and SDRplay's service running. Linux
+candidates are `libsdrplay_api.so.3` and `libsdrplay_api.so`; on macOS SDRplay's
+installer uses the same `.so` names, looked for bare and under the Homebrew and
+MacPorts prefixes. No distribution packages it: it comes from
+[SDRplay](https://www.sdrplay.com/api/), on Arch from the AUR's `libsdrplay`.
 
 Library loading results are cached for the process lifetime. Unavailable-backend
 diagnostics appear on explicit selection or when automatic discovery finds no devices.
@@ -481,16 +501,14 @@ differently there, an issue is how I find out.
 
 | Device | Status | Notes |
 |--------|--------|-------|
-| SDRplay RSP1B | Planned | On the desk, sent by SDRplay |
 | Airspy Mini | Planned | Needs hardware to test |
 | HackRF Pro | Planned | Needs hardware to test |
-| LimeSDR / bladeRF / SDRplay / PlutoSDR | Try SoapySDR | These should already work through the SoapySDR backend. Nobody has told me yet |
+| LimeSDR / bladeRF / other SDRplay RSPs / PlutoSDR | Try SoapySDR | These should already work through the SoapySDR backend. Nobody has told me yet |
 
 **Native** device support means physically owning and testing the hardware, and
-development here runs on a HackRF One and a PortaPack H4M, with an RSP1B from
-SDRplay on the desk, waiting for its native backend. The Airspy R2 and the
-HF+ Discovery that Airspy sent have their own now ([R2](#airspy-r2),
-[HF+](airspy-hf.md)). That is the whole bottleneck: the list moves at exactly the speed
+development here runs on a HackRF One and a PortaPack H4M. The Airspy R2 and the
+HF+ Discovery that Airspy sent, and the RSP1B that SDRplay sent, have their own
+now ([R2](#airspy-r2), [HF+](airspy-hf.md), [RSP1B](sdrplay.md)). That is the whole bottleneck: the list moves at exactly the speed
 of a hobby budget. The SoapySDR backend exists precisely because that speed was
 not good enough.
 

@@ -35,7 +35,9 @@ An incompatible architecture or libc triggers a source build through
 Runtime installation is opt-in. `--hackrf` adds libhackrf. `--rtlsdr` adds
 librtlsdr. `--airspy` adds libairspy, for an Airspy R2. `--airspyhf` adds libairspyhf, for
 an Airspy HF+ Discovery. `--soapy` adds SoapySDR
-and its driver modules. These flags can be
+and its driver modules. `--sdrplay` installs nothing: SDRplay's API and its
+service come from SDRplay's own installer, and this checks both are there and
+running ([RSP1B](sdrplay.md#installing-the-api)). These flags can be
 combined. A plain install of a runtime-loading release adds none of these libraries.
 Missing or incompatible libraries disable only their respective backends.
 
@@ -69,6 +71,7 @@ sh install.sh --rtlsdr              # Install the RTL-SDR runtime
 sh install.sh --airspy              # Install the Airspy R2 runtime
 sh install.sh --airspyhf            # Install the Airspy HF+ Discovery runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
+sh install.sh --sdrplay             # check SDRplay's API and its service
 sh install.sh --deps-only --rtlsdr   # Install only the selected runtime
 sh install.sh --uninstall           # remove what a previous run installed
 sh install.sh --help                # this list, from the script itself
@@ -79,7 +82,7 @@ higher up. `--help` is the authority here: the script prints its own flags, and
 that list cannot drift out of date the way this page can.
 
 `--deps-only` installs only the runtimes selected by `--hackrf`, `--rtlsdr`,
-`--airspy`, `--airspyhf` and `--soapy`. It never installs sdrtop or build tools. Without a runtime flag
+`--airspy`, `--airspyhf` and `--soapy` (and runs the `--sdrplay` check). It never installs sdrtop or build tools. Without a runtime flag
 it exits with a usage error.
 
 `--no-verify` earns a warning of its own. It turns off the checksum check on a
