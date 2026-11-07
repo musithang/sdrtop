@@ -446,6 +446,48 @@ fn us(to: std::time::Instant, from: std::time::Instant) -> u64 {
     to.saturating_duration_since(from).as_micros() as u64
 }
 
+/// The log's account of lost samples: each loss said with when it was, at
+/// most once a second, the driver's part and sdrtop's apart. The counters on
+/// the timing bench say how many; only the log says when, and a loss that
+/// came once in minutes is found by its time or not at all.
+///
+/// Clockless, like the rest of this module: the instant is handed in.
+#[derive(Debug, Default)]
+pub(super) struct LossLog {
+    /// The session's totals at the last window, `(all, driver)`.
+    seen: Option<(u64, u64)>,
+    /// Lost since the last line, `(all, driver)`.
+    pending: (u64, u64),
+    said_at: Option<std::time::Instant>,
+}
+
+impl LossLog {
+    /// Fold in a window's session totals; the line to log, when one is due.
+    /// Totals that went down were cleared (`[C]`, a new session): they start
+    /// the account again rather than reading as a loss.
+    pub(super) fn window(&mut self, totals: (u64, u64), now: std::time::Instant) -> Option<String> {
+        if let Some(seen) = self.seen {
+            if totals.0 >= seen.0 && totals.1 >= seen.1 {
+                self.pending.0 += totals.0 - seen.0;
+                self.pending.1 += totals.1 - seen.1;
+            }
+        }
+        self.seen = Some(totals);
+        let due = self.said_at.is_none_or(|at| {
+            now.saturating_duration_since(at) >= std::time::Duration::from_secs(1)
+        });
+        if self.pending.0 == 0 || !due {
+            return None;
+        }
+        let (all, driver) = std::mem::take(&mut self.pending);
+        self.said_at = Some(now);
+        Some(format!(
+            "Lost {all} samples: driver {driver} \u{00b7} sdrtop {}",
+            all.saturating_sub(driver)
+        ))
+    }
+}
+
 /// One poll window of the radio's own drop count.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct DropWindow {
@@ -536,6 +578,33 @@ impl ConstellationScale {
 mod tests {
     use super::*;
     use crate::hardware::SampleFormat;
+
+    /// **Each loss is said with its time, at most once a second**, the
+    /// driver's part apart; what comes in between is gathered into the next
+    /// line; a cleared count starts again, not as a loss.
+    #[test]
+    fn losses_are_logged_once_a_second_with_whose_they_were() {
+        let t0 = std::time::Instant::now();
+        let at = |ms| t0 + std::time::Duration::from_millis(ms);
+        let mut log = LossLog::default();
+        assert_eq!(log.window((0, 0), at(0)), None, "nothing to say");
+        assert_eq!(
+            log.window((1000, 400), at(200)).as_deref(),
+            Some("Lost 1000 samples: driver 400 \u{00b7} sdrtop 600")
+        );
+        assert_eq!(log.window((1500, 400), at(400)), None, "within the second");
+        assert_eq!(log.window((1700, 450), at(800)), None);
+        assert_eq!(
+            log.window((1700, 450), at(1200)).as_deref(),
+            Some("Lost 700 samples: driver 50 \u{00b7} sdrtop 650"),
+            "what came between, gathered"
+        );
+        assert_eq!(log.window((0, 0), at(3000)), None, "cleared, not lost");
+        assert_eq!(
+            log.window((10, 0), at(3200)).as_deref(),
+            Some("Lost 10 samples: driver 0 \u{00b7} sdrtop 10")
+        );
+    }
 
     /// A relayed stream as SDRplay's service delivers it: 20 ms deliveries
     /// of a radio running `true_hz`, each held 0 to 60 ms by a fixed

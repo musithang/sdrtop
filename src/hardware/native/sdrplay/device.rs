@@ -13,7 +13,7 @@
 //! **Nothing is left to the API's defaults.** Its own start has the AGC on
 //! at 50 Hz (measured on this RSP1B after `SelectDevice`); the start written
 //! here states the AGC off, the bias tee off (and reads it back), the API's
-//! DC and IQ corrections on, both notches off and isochronous transfers.
+//! DC and IQ corrections on, both notches off and bulk transfers.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -391,7 +391,7 @@ fn select(api: &ffi::SdrplayApi, serial: &str, label: &str) -> anyhow::Result<De
 
 /// Writes the stated start into a radio's block: the rate `mode`, the
 /// frequency, the AGC off, the bias tee off, the corrections on, the notches
-/// off, isochronous transfers, the gains at the model's start. Returns the
+/// off, bulk transfers, the gains at the model's start. Returns the
 /// bias tee as read back, which must be 0.
 ///
 /// # Safety
@@ -402,7 +402,11 @@ unsafe fn start(params: *mut DeviceParamsT, mode: model::RateMode, freq_hz: u64)
     unsafe {
         let dev = &mut *(*params).dev_params;
         let rx = &mut *(*params).rx_channel_a;
-        dev.mode = 0;
+        // Bulk, not the API's isochronous default: over four minutes at 6
+        // MSPS isochronous transfers lost 7 runs of 252 to 756 samples (a
+        // quarter-block each, the API's positions skipping), bulk none, nor
+        // at 2 or 10 MSPS (measured); twenty seconds had shown no difference.
+        dev.mode = 1;
         dev.rsp1a_params.rf_notch_enable = 0;
         dev.rsp1a_params.rf_dab_notch_enable = 0;
         rx.rsp1a_tuner_params.bias_t_enable = 0;
@@ -785,6 +789,7 @@ mod tests {
     const DEC: i32 = 11;
     const NOTCH: i32 = 12;
     const DAB: i32 = 13;
+    const MODE: i32 = 14;
     const SET_POINT: i32 = 15;
     const OPENS: i32 = 0;
     const CLOSES: i32 = 1;
@@ -820,6 +825,7 @@ mod tests {
         assert_eq!((p(AGC), p(BIAS), p(DC), p(IQ)), (0.0, 0.0, 1.0, 1.0));
         assert_eq!((p(NOTCH), p(DAB)), (0.0, 0.0));
         assert_eq!(p(SET_POINT), -30.0, "the AGC's set point, stated");
+        assert_eq!(p(MODE), 1.0, "bulk transfers");
         assert_eq!(
             (p(FS), p(BW), p(IF), p(DEC_ON)),
             (2_000_000.0, 1536.0, 0.0, 0.0)

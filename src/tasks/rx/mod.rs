@@ -61,6 +61,8 @@ pub fn spawn_rx_task(
         let mut rate = metrics::RateTracker::default();
         // The same reading for a stream a service relays, with the hold.
         let mut relay = metrics::RelayClock::default();
+        // Each loss said in the log with its time.
+        let mut losses = metrics::LossLog::default();
         // Last reading of the pull backend's cumulative read-loop clock, so each
         // poll reports this window rather than the whole session.
         let mut last_loop_us: Option<(u64, u64)> = None;
@@ -140,6 +142,7 @@ pub fn spawn_rx_task(
                     rate.rate(device.capabilities().sample_geometry.bytes_per_pair())
                 },
                 relay_hold_us: relayed.then(|| relay.hold_us()).flatten(),
+                loss_note: losses.window(drained.lost_session, now),
                 rate_restarted,
                 read_occupancy: window_occupancy(device.read_loop_us(), &mut last_loop_us),
                 // Asked only of a running stream: the count is the stream's.
