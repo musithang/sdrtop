@@ -52,7 +52,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::{InputMode, MenuFocus, MenuState, MenuTile, SdrMetrics};
+use crate::state::{InputMode, MenuFocus, MenuPath, MenuState, MenuTile, SdrMetrics};
 use crate::ui::chrome;
 use crate::ui::LayoutEngine;
 
@@ -64,11 +64,18 @@ const BELOW_TILES: u16 = 18;
 /// terminal a few rows tall.
 const TILES_MIN_BODY: u16 = 8;
 
-/// The tree a tile opens, if it opens one.
-pub fn tree_of(tile: MenuTile) -> Option<tree::Tile> {
+/// The tree a tile opens, if it opens one. Resume opens the tree the deck's
+/// view is in: a Radio view's place means nothing in the Lab tree.
+pub fn tree_of(engine: &LayoutEngine, tile: MenuTile) -> Option<tree::Tile> {
     match tile {
         MenuTile::Radio => Some(tree::Tile::Radio),
-        MenuTile::Lab | MenuTile::Resume => Some(tree::Tile::Lab),
+        MenuTile::Lab => Some(tree::Tile::Lab),
+        MenuTile::Resume => Some(
+            engine
+                .menu_tree()
+                .locate(engine.active_preset())
+                .map_or(tree::Tile::Lab, |(tile, _)| tile),
+        ),
         _ => None,
     }
 }
@@ -84,11 +91,18 @@ pub fn path_in(engine: &LayoutEngine, state: &MenuState, tile: tree::Tile) -> Op
 
 /// The menu as it opens: on Resume when there is a view to resume and the
 /// deck is on one the menu lists, on Lab otherwise, the focus on the tiles,
-/// and the Lab tree already standing on the deck's view, so `Enter`
-/// resumes and `↓` goes in exactly there.
+/// and the tree that lists the deck's view already standing on it, so
+/// `Enter` resumes and `↓` goes in exactly there. The other tree starts at
+/// its top: a path is a place in one tree only.
 pub fn opening(engine: &LayoutEngine, resume: bool) -> MenuState {
     let located = engine.menu_tree().locate(engine.active_preset());
     let resume = resume && located.is_some();
+    let (mut radio, mut lab) = (MenuPath::default(), MenuPath::default());
+    match &located {
+        Some((tree::Tile::Radio, path)) => radio = path.into(),
+        Some((tree::Tile::Lab, path)) => lab = path.into(),
+        None => {}
+    }
     MenuState {
         tile: if resume {
             MenuTile::Resume
@@ -96,10 +110,8 @@ pub fn opening(engine: &LayoutEngine, resume: bool) -> MenuState {
             MenuTile::Lab
         },
         focus: MenuFocus::Tiles,
-        lab: located
-            .as_ref()
-            .map(|(_, path)| path.into())
-            .unwrap_or_default(),
+        radio,
+        lab,
         resume,
         ..MenuState::default()
     }
@@ -221,7 +233,7 @@ pub fn render(
         return;
     }
 
-    match tree_of(state.tile) {
+    match tree_of(engine, state.tile) {
         Some(tile) => below_tree(f, body, m, engine, state, tile, theme),
         None => below_pane(f, body, m, engine, state, controls, theme),
     }
@@ -476,7 +488,6 @@ fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::MenuPath;
     use ratatui::{backend::TestBackend, Terminal};
     use std::sync::Arc;
 

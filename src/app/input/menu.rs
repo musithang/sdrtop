@@ -57,7 +57,7 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     // A digit opens that slot in the group the Lab path stands in: the same
     // thing the digit does on the deck, so the two cannot disagree.
     if let KeyCode::Char(c @ '1'..='9') = key.code {
-        if menu::tree_of(state.tile) == Some(tree::Tile::Lab) {
+        if menu::tree_of(ctx.engine, state.tile) == Some(tree::Tile::Lab) {
             return open_slot(ctx, state, c as u8 - b'0');
         }
         return KeyAction::Continue;
@@ -153,21 +153,24 @@ fn by_letter(c: char) -> Option<MenuTile> {
     }
 }
 
-/// Going below Resume is going into the Lab tree, at the view Resume would
-/// open; any tree is entered on a real row.
+/// Going below Resume is going into the tree that lists the deck's view, at
+/// the view Resume would open; any tree is entered on a real row.
 fn enter(ctx: &InputCtx<'_>, state: MenuState) -> MenuState {
     if state.focus != MenuFocus::Below {
         return state;
     }
     let state = if state.tile == MenuTile::Resume {
         MenuState {
-            tile: MenuTile::Lab,
+            tile: match menu::tree_of(ctx.engine, MenuTile::Resume) {
+                Some(tree::Tile::Radio) => MenuTile::Radio,
+                _ => MenuTile::Lab,
+            },
             ..state
         }
     } else {
         state
     };
-    match menu::tree_of(state.tile) {
+    match menu::tree_of(ctx.engine, state.tile) {
         Some(tile) => with_path(state, tile, menu::path_in(ctx.engine, &state, tile)),
         None => state,
     }
@@ -190,7 +193,7 @@ fn with_path(state: MenuState, tile: tree::Tile, path: Option<tree::Path>) -> Me
 /// In a tree: up and down the column, right into what the row holds or the
 /// view it is, left back out, and out of the first column to the tiles.
 fn tree_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyAction {
-    let Some(tile) = menu::tree_of(state.tile) else {
+    let Some(tile) = menu::tree_of(ctx.engine, state.tile) else {
         return KeyAction::Continue;
     };
     let tree = ctx.engine.menu_tree();
@@ -1132,6 +1135,38 @@ mod tests {
         });
         h.key(KeyCode::Char('3'));
         assert_eq!(h.engine.active_preset(), "lab_timing");
+    }
+
+    /// **A view in the Radio tree is located in the Radio tree.** With the
+    /// deck on FT8 the opening menu stands on FT8 under Radio, leaves the
+    /// Lab tree on its first view rather than on whatever row FT8's
+    /// position names there, and Resume's Down goes in where FT8 is.
+    #[test]
+    fn a_radio_view_opens_the_menu_on_itself_not_on_a_lab_row() {
+        let mut h = Harness::new();
+        h.engine.set_preset("radio_ft8");
+        let opening = crate::ui::menu::opening(&h.engine, true);
+        // The preset the row at `path` opens, if it is a view.
+        fn opens(h: &Harness, tile: tree::Tile, path: crate::state::MenuPath) -> Option<String> {
+            h.engine
+                .menu_tree()
+                .trail(tile, &path.into())
+                .last()
+                .and_then(|n| n.view())
+                .map(|e| e.preset.clone())
+        }
+        assert_eq!(
+            opens(&h, tree::Tile::Radio, opening.radio).as_deref(),
+            Some("radio_ft8")
+        );
+        assert_eq!(opening.lab, crate::state::MenuState::default().lab);
+        h.state.lock().unwrap().ui.menu = Some(opening);
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().tile, MenuTile::Radio);
+        assert_eq!(
+            opens(&h, tree::Tile::Radio, h.menu().radio).as_deref(),
+            Some("radio_ft8")
+        );
     }
 
     /// Resume's Enter goes back to the deck's view; its Down goes into the
