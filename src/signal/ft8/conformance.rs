@@ -504,6 +504,108 @@ fn a_clean_cycle_decodes_every_message_once_with_its_physics() {
     }
 }
 
+/// Every candidate lands in exactly one place, the stages only narrow, and
+/// what the funnel calls new decodes is what the cycle reported.
+#[test]
+fn the_funnel_accounts_for_every_candidate() {
+    let mut rng = Rng::new(43);
+    let sent = readable(8, -12.0, &mut rng);
+    let x = cycle(&sent, &mut rng);
+    let settings = cycle::Settings {
+        max_candidates: 60,
+        ..cycle::Settings::DEFAULT
+    };
+    let report = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+    assert!(report.decodes.len() >= 7, "{} of 8", report.decodes.len());
+    assert_eq!(report.funnel.len(), report.passes);
+    let mut new = 0;
+    for f in &report.funnel {
+        assert!(f.candidates >= f.synced && f.synced >= f.coded, "{f:?}");
+        assert_eq!(
+            f.coded,
+            f.by_bp + f.by_osd + f.duplicates + f.refused_zero + f.refused_osd,
+            "{f:?}"
+        );
+        new += f.by_bp + f.by_osd;
+    }
+    assert_eq!(new, report.decodes.len() + report.malformed);
+    assert_eq!(
+        report.funnel.iter().map(|f| f.candidates).sum::<usize>(),
+        report.candidates
+    );
+}
+
+/// The floor under a band with signals in it, by the quantile it is read
+/// at: 0 to 40 transmissions at -5 to +20 dB on unit noise, whose true floor
+/// is 1 / RATE per hertz. Rows: quantile, then the error in dB at each
+/// crowding, mean of 6 cycles; then how many of the 6 `floor::read` gives,
+/// and its worst error among them.
+#[test]
+#[ignore]
+fn measure_the_floor_under_signals() {
+    use super::floor;
+    let want = 10.0 * (1.0 / RATE).log10();
+    let quantiles = [0.5, 0.3, 0.2, 0.1];
+    let crowds = [0usize, 4, 12, 24, 40];
+    let mut err = vec![vec![0.0f64; crowds.len()]; quantiles.len()];
+    let mut given = vec![(0usize, 0.0f64); crowds.len()];
+    for (ci, &n) in crowds.iter().enumerate() {
+        for seed in 0..6 {
+            let mut rng = Rng::new(900 + seed);
+            let mut sent = spread_apart(n, 0.0, 40.0, &mut rng);
+            for s in sent.iter_mut() {
+                s.snr_db = -5.0 + rng.unit() * 25.0;
+            }
+            let x = cycle(&sent, &mut rng);
+            for (qi, &q) in quantiles.iter().enumerate() {
+                err[qi][ci] += (floor::read_at(&x, q).unwrap() - want) / 6.0;
+            }
+            if let Some(f) = floor::read(&x) {
+                let e = f64::from(f) - want;
+                given[ci].0 += 1;
+                if e.abs() > given[ci].1.abs() {
+                    given[ci].1 = e;
+                }
+            }
+        }
+    }
+    println!("q      none    4      12     24     40");
+    for (qi, q) in quantiles.iter().enumerate() {
+        let row: Vec<String> = err[qi].iter().map(|e| format!("{e:+.2}")).collect();
+        println!("{q:<5}  {}", row.join("  "));
+    }
+    let row: Vec<String> = given
+        .iter()
+        .map(|(n, e)| format!("{n}/6 {e:+.2}"))
+        .collect();
+    println!("read   {}", row.join("  "));
+}
+
+/// The floor reads the noise the radio delivered, on its word's own scale,
+/// through the channel at the HF+'s rates: white noise of a known power over
+/// the whole capture is that power over the rate, per hertz.
+#[test]
+fn the_floor_reads_the_noise_the_radio_delivered() {
+    for rate in [192_000.0, 768_000.0, 912_000.0] {
+        let mut rng = Rng::new(47);
+        let power = 1e-6;
+        let x = rng.noise((rate * 3.0) as usize, power);
+        let mut ch = super::channel::Channel::new(rate).expect("a route");
+        let mut out = Vec::new();
+        for block in x.chunks(16_384) {
+            ch.push(block, &mut out);
+        }
+        // Past the filters' start and the DC mean's first estimate.
+        let settled = &out[RATE as usize / 2..];
+        let floor = super::floor::read(settled).expect("a floor");
+        let want = 10.0 * (power / rate).log10();
+        assert!(
+            (f64::from(floor) - want).abs() < 0.5,
+            "{rate}: read {floor} dB/Hz, sent {want}"
+        );
+    }
+}
+
 /// On a fading path the carrier's phase wanders through the transmission;
 /// the SNR must still be the power that arrived, not what a coherent sum of
 /// the 79 symbols keeps of it.

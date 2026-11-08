@@ -149,6 +149,45 @@ pub struct Report {
     /// Power across the band before anything was subtracted, dB over the
     /// cycle's median, in [`BAND_BIN_HZ`] bins from 0 to 3000 Hz.
     pub band: Vec<f32>,
+    /// What became of the candidates, pass by pass.
+    pub funnel: Vec<Funnel>,
+    /// The noise under the band before anything was subtracted, dB per Hz
+    /// on the samples' scale ([`super::floor::read`]); `None` on a band too
+    /// full to see it.
+    pub floor_db_hz: Option<f32>,
+}
+
+/// What became of one pass's candidates. Each candidate is counted once, at
+/// the furthest it got: `candidates >= synced >= coded`, and every coded
+/// candidate is exactly one of the last five.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Funnel {
+    /// Candidates the search offered and the pass examined.
+    pub candidates: usize,
+    /// Of them, strong enough at their fine place to be read.
+    pub synced: usize,
+    /// Of them, read to a codeword whose check passed.
+    pub coded: usize,
+    /// Of those, new decodes belief propagation found.
+    pub by_bp: usize,
+    /// New decodes ordered statistics finished.
+    pub by_osd: usize,
+    /// A message already decoded this cycle, found again.
+    pub duplicates: usize,
+    /// The all-zero codeword, never believed.
+    pub refused_zero: usize,
+    /// An OSD codeword without its sync visibly there, never believed.
+    pub refused_osd: usize,
+}
+
+/// How far one candidate got, as [`try_candidate`] goes.
+#[derive(Default)]
+struct Tally {
+    synced: bool,
+    coded: bool,
+    zero: bool,
+    unsynced_osd: bool,
+    duplicate: bool,
 }
 
 /// The width of a [`Report::band`] bin.
@@ -185,20 +224,37 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
         let spec = Spectrogram::new(&x);
         if pass == 1 {
             report.band = spec.band(BAND_BIN_HZ, 3000.0);
+            report.floor_db_hz = super::floor::read(&x);
         }
         let mut cands = search::candidates(&spec);
         cands.truncate(settings.max_candidates);
         report.candidates += cands.len();
         let bb = Baseband::new(&x);
         let mut new: Vec<Found> = Vec::new();
+        let mut funnel = Funnel {
+            candidates: cands.len(),
+            ..Funnel::default()
+        };
         for c in &cands {
             // A strong transmission raises many candidates around it, and
             // each decodes the same message: only the first is measured.
-            let Some(f) = try_candidate(&bb, c, pass as u8, settings, &mut seen) else {
-                continue;
-            };
-            new.push(f);
+            let mut tally = Tally::default();
+            let found = try_candidate(&bb, c, pass as u8, settings, &mut seen, &mut tally);
+            funnel.synced += usize::from(tally.synced);
+            funnel.coded += usize::from(tally.coded);
+            match &found {
+                Some(f) if f.decoded.osd.is_some() => funnel.by_osd += 1,
+                Some(_) => funnel.by_bp += 1,
+                None if tally.duplicate => funnel.duplicates += 1,
+                None if tally.zero => funnel.refused_zero += 1,
+                None if tally.unsynced_osd => funnel.refused_osd += 1,
+                None => {}
+            }
+            if let Some(f) = found {
+                new.push(f);
+            }
         }
+        report.funnel.push(funnel);
         if new.is_empty() {
             break;
         }
@@ -247,11 +303,13 @@ fn try_candidate(
     pass: u8,
     settings: &Settings,
     seen: &mut HashSet<u128>,
+    tally: &mut Tally,
 ) -> Option<Found> {
     let synced = search::refine(bb, c);
     if synced.power < settings.min_power {
         return None;
     }
+    tally.synced = true;
     let (y, at_zero) = bb.around(synced.f0);
     let first = (synced.start * DOWN_RATE, synced.f0 - at_zero);
     // The Costas arrays' place first; failing that, the place every symbol
@@ -284,10 +342,17 @@ fn try_candidate(
             let Some(decoded) = ldpc::decode(&llr, BP_ITERATIONS, OSD_ORDER) else {
                 continue;
             };
+            tally.coded = true;
             if !believed(&decoded, costas) {
+                if decoded.payload == 0 {
+                    tally.zero = true;
+                } else {
+                    tally.unsynced_osd = true;
+                }
                 continue;
             }
             if !seen.insert(decoded.payload) {
+                tally.duplicate = true;
                 return None;
             }
             let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);

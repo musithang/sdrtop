@@ -32,11 +32,12 @@ use crossbeam_channel::{Receiver, Sender, TrySendError};
 use num_complex::Complex;
 
 use super::channel::{Channel, RATE_HZ};
-use super::clock::StreamClock;
+use super::clock::{Lateness, StreamClock};
 use super::cycle::{self, Settings};
 use super::hash::HashBook;
 use crate::hardware::{SampleGeometry, TimedBlock};
 use crate::signal::stream::plan_block;
+use crate::state::ft8::Setting;
 use crate::state::{CycleEntry, CycleOutcome, SdrMetrics};
 
 /// How much one block moves the load reading.
@@ -57,6 +58,10 @@ struct Job {
     start_unix: f64,
     dial_hz: u64,
     samples: Vec<Complex<f32>>,
+    setting: Option<Setting>,
+    setting_changed: bool,
+    held: bool,
+    lateness: Option<Lateness>,
 }
 
 pub struct Ft8Worker {
@@ -136,6 +141,16 @@ fn decode_loop(rx: Receiver<Job>, state: Arc<Mutex<SdrMetrics>>, settings: Setti
             seconds,
             band: report.band,
             clock: None,
+            funnel: report.funnel,
+            // A level is comparable with another cycle's only at one setting
+            // and below the radio's hold.
+            floor_db_hz: report
+                .floor_db_hz
+                .filter(|_| !job.held && !job.setting_changed),
+            setting: job.setting,
+            setting_changed: job.setting_changed,
+            held: job.held,
+            lateness: job.lateness,
         };
         let now = Instant::now();
         let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -157,6 +172,12 @@ fn undecoded(start_unix: f64, dial_hz: u64, outcome: CycleOutcome) -> CycleEntry
         seconds: 0.0,
         band: Vec::new(),
         clock: None,
+        funnel: Vec::new(),
+        floor_db_hz: None,
+        setting: None,
+        setting_changed: false,
+        held: false,
+        lateness: None,
     }
 }
 
@@ -179,6 +200,16 @@ struct Session {
     next_cycle: Option<f64>,
     iq: Vec<Complex<f32>>,
     load: Option<f64>,
+    /// Per block: the channel samples it became (from, to, counted as
+    /// `buf_base` is) and its sample peak, the larger of |I| and |Q| over
+    /// full scale, as the ADC bench measures it.
+    peaks: VecDeque<(usize, usize, f32)>,
+    /// Where (as `buf_base` counts) the radio's setting was seen to change.
+    changes: VecDeque<usize>,
+    /// The setting as last read.
+    setting: Option<Setting>,
+    /// The radio's stated ceiling where it is tuned, dBFS, when it has one.
+    ceiling_dbfs: Option<f64>,
 }
 
 impl Session {
@@ -198,6 +229,10 @@ impl Session {
             next_cycle: None,
             iq: Vec::new(),
             load: None,
+            peaks: VecDeque::new(),
+            changes: VecDeque::new(),
+            setting: None,
+            ceiling_dbfs: None,
         }
     }
 
@@ -221,6 +256,10 @@ impl Session {
         self.buf.clear();
         self.buf_base = 0;
         self.next_cycle = None;
+        self.peaks.clear();
+        self.changes.clear();
+        // The first reading after a restart is not a change.
+        self.setting = None;
         cut
     }
 
@@ -254,7 +293,15 @@ impl Session {
             if self.pair0.is_none() {
                 self.pair0 = Some(b.first_pair);
             }
+            let from = self.buf_base + self.buf.len();
             ch.push(&self.iq, &mut self.buf);
+            let peak = self
+                .iq
+                .iter()
+                .map(|z| z.re.abs().max(z.im.abs()))
+                .fold(0f32, f32::max);
+            self.peaks
+                .push_back((from, self.buf_base + self.buf.len(), peak));
             (ready, lost) = self.take_cycles(b.centre_hz);
         }
         let spent = t0.elapsed().as_secs_f64();
@@ -290,6 +337,18 @@ impl Session {
         }
         f.feed.load = self.load;
         f.unreachable_rate = self.channel.is_none().then_some(b.rate_hz);
+        self.ceiling_dbfs = m.caps.gain.ceiling().map(|c| c.dbfs_at(b.centre_hz));
+        let still = self
+            .setting
+            .as_ref()
+            .is_some_and(|s| s.matches(&m.radio, b.centre_hz, b.rate_hz));
+        if !still {
+            if self.setting.is_some() {
+                self.changes.push_back(self.buf_base + self.buf.len());
+            }
+            self.setting = Some(Setting::of(&m.radio, b.centre_hz, b.rate_hz));
+        }
+        let f = &mut m.ft8;
         f.hearing = self.next_cycle;
         f.heard_until = heard_until;
         if let Some(start) = cut {
@@ -349,13 +408,30 @@ impl Session {
                 let drop = (keep_from - self.buf_base).min(self.buf.len());
                 self.buf.drain(..drop);
                 self.buf_base += drop;
+                let base = self.buf_base;
+                while self.peaks.front().is_some_and(|&(_, b, _)| b <= base) {
+                    self.peaks.pop_front();
+                }
+                while self.changes.front().is_some_and(|&c| c < base) {
+                    self.changes.pop_front();
+                }
                 break;
             }
             let from = i - self.buf_base;
+            let held = self.ceiling_dbfs.is_some_and(|ceiling| {
+                self.peaks
+                    .iter()
+                    .filter(|&&(a, b, _)| a < end && b > i)
+                    .any(|&(_, _, p)| p > 0.0 && 20.0 * f64::from(p).log10() >= ceiling)
+            });
             out.push(Job {
                 start_unix: start,
                 dial_hz,
                 samples: self.buf[from..from + CYCLE_SAMPLES].to_vec(),
+                setting: self.setting.clone(),
+                setting_changed: self.changes.iter().any(|&c| c > i && c <= end),
+                held,
+                lateness: self.clock.lateness(),
             });
             self.next_cycle = Some(start + 15.0);
         }
@@ -457,7 +533,11 @@ mod tests {
     }
 
     fn run(blocks: Vec<TimedBlock>) -> crate::state::Ft8State {
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        run_with(SdrMetrics::fixture(), blocks)
+    }
+
+    fn run_with(m: SdrMetrics, blocks: Vec<TimedBlock>) -> crate::state::Ft8State {
+        let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::bounded(blocks.len());
         for b in blocks {
             tx.send(b).unwrap();
@@ -607,5 +687,105 @@ mod tests {
             "{:?}",
             f.cycles
         );
+    }
+
+    /// [`stream`] 20 dB down: its noise peaks near -28 dBFS over a cycle,
+    /// under the HF+'s hold, where the full-level stream's peaks would
+    /// reach it (about -8 dBFS) and hold every cycle, as the radio would.
+    fn quiet(start_unix: f64, seconds: f64) -> Vec<Complex<f32>> {
+        stream(start_unix, seconds, 1200.0, EPOCH + 15.0 + 0.8, &cq())
+            .into_iter()
+            .map(|z| z * 0.1)
+            .collect()
+    }
+
+    fn the_decoded(f: &crate::state::Ft8State) -> &CycleEntry {
+        let decoded: Vec<_> = f
+            .cycles
+            .iter()
+            .filter(|c| c.outcome == CycleOutcome::Decoded)
+            .collect();
+        assert_eq!(decoded.len(), 1, "{:?}", f.cycles);
+        decoded[0]
+    }
+
+    /// One sample at -6 dBFS, 4 s into the cycle, on a radio whose hold
+    /// starts at -13.5: the cycle is held and its level refused, its decode
+    /// kept.
+    #[test]
+    fn a_peak_at_the_hold_marks_the_cycle_held() {
+        let start = EPOCH + 7.0;
+        let mut x = quiet(start, 24.0);
+        x[((EPOCH + 19.0 - start) * RADIO) as usize] = Complex::new(0.5, 0.0);
+        let f = run_with(
+            SdrMetrics::fixture().airspyhf(),
+            deliver(&x, start, 0.020, None),
+        );
+        let c = the_decoded(&f);
+        assert!(c.held);
+        assert_eq!(c.floor_db_hz, None);
+        assert_eq!(f.decodes.len(), 1);
+    }
+
+    /// The same sample on a radio that states no ceiling: nothing is held.
+    #[test]
+    fn a_radio_without_a_ceiling_is_never_held() {
+        let start = EPOCH + 7.0;
+        let mut x = stream(start, 24.0, 1200.0, EPOCH + 15.0 + 0.8, &cq());
+        x[((EPOCH + 19.0 - start) * RADIO) as usize] = Complex::new(0.5, 0.0);
+        let f = run(deliver(&x, start, 0.020, None));
+        let c = the_decoded(&f);
+        assert!(!c.held);
+        assert!(c.floor_db_hz.is_some());
+    }
+
+    /// A quiet cycle keeps its floor, read on the word's scale: the stream's
+    /// noise is 1e-4 of full scale squared over 192 kS/s.
+    #[test]
+    fn a_quiet_cycle_keeps_its_floor_and_its_setting() {
+        let start = EPOCH + 7.0;
+        let x = quiet(start, 24.0);
+        let f = run_with(
+            SdrMetrics::fixture().airspyhf(),
+            deliver(&x, start, 0.020, None),
+        );
+        let c = the_decoded(&f);
+        assert!(!c.held);
+        assert!(!c.setting_changed);
+        let want = 10.0 * (1e-4f64 / RADIO).log10();
+        let floor = f64::from(c.floor_db_hz.expect("a floor"));
+        assert!((floor - want).abs() < 0.5, "read {floor}, sent {want}");
+        let setting = c.setting.as_ref().expect("a setting");
+        assert_eq!((setting.dial_hz, setting.rate_hz), (14_074_000, RADIO));
+        assert_eq!(setting.gains, vec![0.0, 0.0]);
+        assert!(c.lateness.is_some());
+        assert!(!c.funnel.is_empty());
+    }
+
+    /// The attenuator steps 4 s into a cycle: that cycle says its setting
+    /// changed, the next one does not and carries the new setting.
+    #[test]
+    fn a_gain_change_inside_a_cycle_is_stamped_on_it() {
+        let start = EPOCH + 7.0;
+        let x = quiet(start, 40.0);
+        let state = Mutex::new(SdrMetrics::fixture().airspyhf());
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let mut session = Session::new(geometry(), tx);
+        for b in deliver(&x, start, 0.020, None) {
+            if start + b.block.first_pair as f64 / RADIO >= EPOCH + 19.0 {
+                state.lock().unwrap().radio.gains[0] = -6.0;
+            }
+            session.block(&b, &state);
+        }
+        drop(session);
+        let jobs: Vec<Job> = rx.try_iter().collect();
+        let at = |t: f64| {
+            jobs.iter()
+                .find(|j| j.start_unix == EPOCH + t)
+                .unwrap_or_else(|| panic!("no cycle at +{t}"))
+        };
+        assert!(at(15.0).setting_changed);
+        assert!(!at(30.0).setting_changed);
+        assert_eq!(at(30.0).setting.as_ref().unwrap().gains[0], -6.0);
     }
 }

@@ -905,6 +905,12 @@ pub(crate) mod tests {
             seconds: 1.8,
             band: Vec::new(),
             clock: None,
+            funnel: Vec::new(),
+            floor_db_hz: None,
+            setting: None,
+            setting_changed: false,
+            held: false,
+            lateness: None,
         });
         m.ft8.hearing = Some(NOW + 15.0);
         m

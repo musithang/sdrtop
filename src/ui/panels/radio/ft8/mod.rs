@@ -228,6 +228,12 @@ pub(crate) mod sample {
             seconds: 1.8,
             band,
             clock: None,
+            funnel: Vec::new(),
+            floor_db_hz: None,
+            setting: None,
+            setting_changed: false,
+            held: false,
+            lateness: None,
         }
     }
 

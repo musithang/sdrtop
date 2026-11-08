@@ -24,6 +24,7 @@
 //! - [`modulate`]: the codeword as 79 tones and the tones as a waveform.
 //! - [`search`]: where in a cycle transmissions start, and on what tone.
 //! - [`demod`]: a candidate to soft bits; a decode to what it measured.
+//! - [`floor`]: the noise under the band in one cycle.
 //! - [`cycle`]: one 15 s cycle to its decodes, subtracting and searching again.
 //! - [`trace`]: what one decoded transmission looked like on the way in.
 //! - [`bands`]: the conventional FT8 dial frequencies.
@@ -51,6 +52,7 @@ pub mod crc;
 pub mod cycle;
 pub mod demod;
 pub mod fields;
+pub mod floor;
 pub mod hash;
 pub mod ldpc;
 pub mod message;

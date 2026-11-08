@@ -27,6 +27,17 @@ use std::collections::VecDeque;
 /// (at 20 ppm, 30 s moves the estimate by 0.6 ms).
 const WINDOW_SECONDS: f64 = 30.0;
 
+/// How much later than the fastest delivery in the window the deliveries
+/// arrived: what the receive path adds on top of the delay every block
+/// shares, which this clock cannot see.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lateness {
+    /// Half the deliveries came later than the fastest by more, ms.
+    pub median_ms: f64,
+    /// One in ten came later than the fastest by more, ms.
+    pub p90_ms: f64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct StreamClock {
     rate: f64,
@@ -67,6 +78,36 @@ impl StreamClock {
             .map(|&(_, offset)| offset)
             .min_by(f64::total_cmp)?;
         Some(zero + pair / self.rate)
+    }
+
+    /// The window's deliveries against its fastest. `None` with fewer than
+    /// two.
+    pub fn lateness(&self) -> Option<Lateness> {
+        if self.seen.len() < 2 {
+            return None;
+        }
+        let min = self
+            .seen
+            .iter()
+            .map(|&(_, offset)| offset)
+            .min_by(f64::total_cmp)?;
+        let mut late: Vec<f64> = self
+            .seen
+            .iter()
+            .map(|&(_, offset)| (offset - min) * 1000.0)
+            .collect();
+        late.sort_by(f64::total_cmp);
+        let n = late.len();
+        let median = if n.is_multiple_of(2) {
+            (late[n / 2 - 1] + late[n / 2]) / 2.0
+        } else {
+            late[n / 2]
+        };
+        let p90 = late[((0.9 * n as f64).ceil() as usize).clamp(1, n) - 1];
+        Some(Lateness {
+            median_ms: median,
+            p90_ms: p90,
+        })
     }
 
     /// Forget everything: a break, a new stream, a retune.
@@ -127,5 +168,23 @@ mod tests {
     #[test]
     fn nothing_known_before_the_first_block() {
         assert_eq!(StreamClock::new(12_000.0).unix_of(0.0), None);
+    }
+
+    #[test]
+    fn lateness_is_measured_from_the_fastest_delivery() {
+        let rate = 12_000.0;
+        let mut clock = StreamClock::new(rate);
+        assert_eq!(clock.lateness(), None);
+        for (k, late_ms) in [10.0, 13.0, 11.0, 12.0].into_iter().enumerate() {
+            let k = k as u64;
+            clock.push(
+                k * 1200,
+                1200,
+                500.0 + (k + 1) as f64 * 0.1 + late_ms / 1000.0,
+            );
+        }
+        let l = clock.lateness().unwrap();
+        assert!((l.median_ms - 1.5).abs() < 1e-6, "{l:?}");
+        assert!((l.p90_ms - 3.0).abs() < 1e-6, "{l:?}");
     }
 }

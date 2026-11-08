@@ -16,7 +16,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::signal::ft8::cycle::Decode;
+use crate::signal::ft8::clock::Lateness;
+use crate::signal::ft8::cycle::{Decode, Funnel};
 
 pub use super::pager::PagerFeed as Ft8Feed;
 
@@ -61,6 +62,58 @@ pub struct CycleEntry {
     /// The clock verdict as it stood when this cycle was published, so a
     /// record of the cycle carries the one it was read with.
     pub clock: Option<ClockVerdict>,
+    /// What became of the candidates, pass by pass; empty when not decoded.
+    pub funnel: Vec<Funnel>,
+    /// The noise under the band, dBFS of the radio's word per Hz. `None`
+    /// when not decoded, when the radio held its level ([`CycleEntry::held`])
+    /// or when a setting changed inside the cycle: past either, the level is
+    /// not comparable with any other cycle's.
+    pub floor_db_hz: Option<f32>,
+    /// What set the level in the word when the cycle ended.
+    pub setting: Option<Setting>,
+    /// The setting changed while the cycle was heard.
+    pub setting_changed: bool,
+    /// The sample peak reached the radio's stated ceiling inside the cycle:
+    /// the radio may have cut its own gain by an amount it does not report.
+    /// Its decodes stand (signal and noise were scaled alike); its level
+    /// does not.
+    pub held: bool,
+    /// The deliveries' lateness when the cycle was cut.
+    pub lateness: Option<Lateness>,
+}
+
+/// What sets the level in the radio's word. Two cycles' levels are
+/// comparable only where this is the same: the rate moves the scale (a
+/// radio's hidden filter gain differs by rate), and so does every gain
+/// stage, curve and boost.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Setting {
+    pub dial_hz: u64,
+    pub rate_hz: f64,
+    pub gains: Vec<f64>,
+    pub gain_curve: Option<usize>,
+    pub boost: bool,
+}
+
+impl Setting {
+    pub fn of(radio: &crate::state::RadioState, dial_hz: u64, rate_hz: f64) -> Self {
+        Self {
+            dial_hz,
+            rate_hz,
+            gains: radio.gains.clone(),
+            gain_curve: radio.gain_curve,
+            boost: radio.amp_enabled,
+        }
+    }
+
+    /// Whether the radio is still at this setting, without building one.
+    pub fn matches(&self, radio: &crate::state::RadioState, dial_hz: u64, rate_hz: f64) -> bool {
+        self.dial_hz == dial_hz
+            && self.rate_hz == rate_hz
+            && self.gains == radio.gains
+            && self.gain_curve == radio.gain_curve
+            && self.boost == radio.amp_enabled
+    }
 }
 
 impl CycleEntry {
@@ -706,6 +759,12 @@ mod tests {
             seconds: 0.0,
             band: Vec::new(),
             clock: None,
+            funnel: Vec::new(),
+            floor_db_hz: None,
+            setting: None,
+            setting_changed: false,
+            held: false,
+            lateness: None,
         }
     }
 
