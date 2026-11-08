@@ -21,6 +21,7 @@
 //! reported once.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use num_complex::Complex;
 
@@ -30,6 +31,7 @@ use super::ldpc;
 use super::message::{self, Message};
 use super::modulate::{self, Waveform, NOMINAL_START, SYMBOLS};
 use super::search::{self, Baseband, Spectrogram, DOWN_RATE, RATE};
+use super::trace::Trace;
 
 /// The most passes over one cycle (the paper: a third pass "will sometimes"
 /// find more).
@@ -130,6 +132,8 @@ pub struct Decode {
     pub distance: f32,
     /// The pass that found it, from 1.
     pub pass: u8,
+    /// What it looked like on the way in.
+    pub trace: Arc<Trace>,
 }
 
 /// A cycle's decodes and the count of what did not become one.
@@ -160,6 +164,7 @@ struct Found {
     block: u8,
     decoded: ldpc::Decoded,
     pass: u8,
+    trace: Arc<Trace>,
 }
 
 /// Decode a cycle (at [`RATE`], the buffer starting at the 15 s boundary).
@@ -224,6 +229,7 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
                 osd: f.decoded.osd,
                 distance: f.decoded.distance,
                 pass: f.pass,
+                trace: f.trace,
             }),
             Err(_) => report.malformed += 1,
         }
@@ -286,7 +292,10 @@ fn try_candidate(
             }
             let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);
             let tones = demod::tones_of(word91);
-            let mut physics = demod::measure(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z);
+            let measured = demod::measured(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z);
+            let codeword = ldpc::encode(word91);
+            let trace = Trace::build(&y, &measured, &tones, &llr, &codeword, at_zero);
+            let mut physics = measured.physics;
             physics.f0 += at_zero;
             return Some(Found {
                 payload: decoded.payload,
@@ -297,6 +306,7 @@ fn try_candidate(
                 block,
                 decoded,
                 pass,
+                trace: Arc::new(trace),
             });
         }
     }

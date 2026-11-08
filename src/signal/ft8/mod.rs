@@ -25,6 +25,7 @@
 //! - [`search`]: where in a cycle transmissions start, and on what tone.
 //! - [`demod`]: a candidate to soft bits; a decode to what it measured.
 //! - [`cycle`]: one 15 s cycle to its decodes, subtracting and searching again.
+//! - [`trace`]: what one decoded transmission looked like on the way in.
 //! - [`bands`]: the conventional FT8 dial frequencies.
 //! - [`channel`]: the radio's stream to FT8's 12 000 samples a second.
 //! - [`clock`]: when each sample was taken, in UTC.
@@ -55,4 +56,5 @@ pub mod ldpc;
 pub mod message;
 pub mod modulate;
 pub mod search;
+pub mod trace;
 pub mod worker;

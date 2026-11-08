@@ -691,6 +691,7 @@ mod tests {
             osd: None,
             distance: 0.0,
             pass: 1,
+            trace: std::sync::Arc::new(crate::signal::ft8::trace::Trace::empty()),
         }
     }
 

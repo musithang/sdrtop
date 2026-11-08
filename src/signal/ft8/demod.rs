@@ -358,7 +358,7 @@ fn per_symbol(
 
 /// [`per_symbol`] with each symbol cut into `parts` equal pieces, correlated
 /// one by one.
-fn per_part(
+pub(super) fn per_part(
     y: &[Complex<f32>],
     start: f64,
     hz: f64,
@@ -463,7 +463,24 @@ fn vertex(a: f64, b: f64, c: f64) -> f64 {
 /// Pieces a symbol is cut into for the signal's power: short enough that a
 /// carrier fading at 2 Hz barely turns inside one, long enough that each
 /// piece still stands above the noise near the decoder's threshold.
-const POWER_PARTS: usize = 2;
+pub const POWER_PARTS: usize = 2;
+
+/// What [`measured`] found, with what it worked out on the way that a
+/// decode's trace keeps.
+#[derive(Clone, Debug)]
+pub struct Measured {
+    pub physics: Physics,
+    /// Each piece's ([`POWER_PARTS`] to a symbol) correlation with the
+    /// waveform rebuilt at the frequency and drift found, and that
+    /// waveform's energy in it.
+    pub pieces: Vec<Complex<f64>>,
+    pub piece_energy: Vec<f64>,
+    /// Noise variance per sample of the slice.
+    pub sigma2: f64,
+    /// The signal's mean power, the noise's share taken out, in the slice's
+    /// units.
+    pub power: f64,
+}
 
 /// Measure a decoded transmission in its slice `y` (tone 0 near `hz`,
 /// starting near `start` seconds), given the tones it was sent as.
@@ -474,6 +491,17 @@ pub fn measure(
     tones: &[u8; SYMBOLS],
     z: &Correlations,
 ) -> Physics {
+    measured(y, start, hz, tones, z).physics
+}
+
+/// [`measure`], keeping what it worked out on the way.
+pub fn measured(
+    y: &[Complex<f32>],
+    start: f64,
+    hz: f64,
+    tones: &[u8; SYMBOLS],
+    z: &Correlations,
+) -> Measured {
     // Frequency and drift at the synchronised start, then the start on a
     // finer grid with them, then both again at the start found.
     let (df, drift, _) = fit(&per_symbol(y, start, hz, 0.0, tones).0);
@@ -546,7 +574,7 @@ pub fn measure(
     let rho = amplitude * amplitude / sigma2.max(f64::MIN_POSITIVE);
     let var = 6.0 * DOWN_RATE * DOWN_RATE / (TAU * TAU * rho * m * (m * m - 1.0));
 
-    Physics {
+    let physics = Physics {
         snr_db: 10.0 * snr.max(1e-6).log10(),
         start,
         f0: hz + df,
@@ -555,6 +583,13 @@ pub fn measure(
         amplitude,
         phase: sum.arg(),
         coherence: amplitude * amplitude / power.max(f64::MIN_POSITIVE),
+    };
+    Measured {
+        physics,
+        pieces: cs,
+        piece_energy: es,
+        sigma2,
+        power,
     }
 }
 
