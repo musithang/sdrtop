@@ -12,6 +12,50 @@ field falls back to a default rather than refusing to start.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-08
+
+**The RSP1B, driven natively.**
+
+SDRplay sent one. sdrtop now drives it through SDRplay's own API, and
+everything it shows was measured on the radio first, mostly on a cable
+from a HackRF. The full story is on
+[its page](https://github.com/musithang/sdrtop/blob/main/user_docs/sdrplay.md).
+
+### Added
+
+- **SDRplay RSP1B support.** Every rate from 62.5 kS/s to 10 Msps, every
+  bench. The LNA is in dB, measured per band, because the radio does not
+  quite match SDRplay's table. Sensitivity and Linearity curves on the
+  knob, SDRplay's AGC, its DC/IQ correction and the AM/FM and DAB notches
+  as switches in Options.
+- **A known trap, kept out of.** In some LNA states more IF gain gives
+  less signal. sdrtop never sets those combinations, in any band.
+- **Timing through SDRplay's service.** The service hands samples over in
+  bursts of up to 70 ms; the timing bench shows how long it held them
+  instead of calling a healthy link broken.
+- **Observer mode for an RSP1B** another program holds, and a word when
+  SDRplay's service stops under a stream.
+- **Every lost sample has a time.** The log says when, at most a line a
+  second, the driver's part and sdrtop's apart.
+- `install.sh --sdrplay` checks that SDRplay's API and service are there.
+
+### Changed
+
+- **Every library sdrtop is built on is at its latest**, the terminal UI
+  included (ratatui 0.30). Nothing should look different, except that
+  spectrum lines now land on the nearest dot, a hair more precisely.
+- The config gains an `[sdrplay]` block for the RSP1B's switches. Older
+  configs load as before.
+- The user guide has a page per radio now, and the README got shorter.
+
+### Fixed
+
+- The menu opened on Wi-Fi when the last view was FT8. It opens on FT8.
+- A sample rate reads with the places it needs: 2.048 Msps no longer
+  shows as 2.0, and 62.5 kS/s as 0.062.
+- When a radio library cannot be loaded, the message says why again
+  (which file, which symbol), not just "dlopen failed".
+
 ## [0.7.2] - 2026-11-03
 
 **FT8 heard stations no decoder can hear.**
@@ -1439,7 +1483,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/musithang/sdrtop/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/musithang/sdrtop/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/musithang/sdrtop/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/musithang/sdrtop/compare/v0.6.9...v0.7.0
