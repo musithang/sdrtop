@@ -113,7 +113,10 @@ pub fn run<B: Backend>(
     devices: Vec<(usize, String)>,
     theme: &Theme,
     terminal: &mut Terminal<B>,
-) -> anyhow::Result<Option<usize>> {
+) -> anyhow::Result<Option<usize>>
+where
+    B::Error: Send + Sync + 'static,
+{
     let mut sel = DeviceSelector::new(&devices, theme);
     loop {
         terminal.draw(|f| sel.draw(f))?;

@@ -421,7 +421,10 @@ mod tests {
 
     #[test]
     fn final_fft_interval_is_filled_without_turning_scatter_into_a_line() {
-        for bins in [vec![-100.0, -20.0], vec![-20.0]] {
+        // -13 dBFS is 5.07 dots below the top of this 40x10 canvas: row 1 by
+        // any rounding. (-20 sat at 7.8 dots, 0.2 from the row boundary, so
+        // which row it landed in was the canvas's rounding, not the trace.)
+        for bins in [vec![-100.0, -13.0], vec![-13.0]] {
             let braille = render_style(SpectrumStyle::Braille, bins.clone(), None);
             let fill = render_style(SpectrumStyle::Fill, bins.clone(), None);
             let scatter = render_style(SpectrumStyle::Scatter, bins.clone(), None);
@@ -440,7 +443,8 @@ mod tests {
         let held = render_style(
             SpectrumStyle::Scatter,
             vec![-100.0; 2],
-            Some(Arc::new(vec![-20.0; 2])),
+            // Row 1 by any rounding; see the test above.
+            Some(Arc::new(vec![-13.0; 2])),
         );
         assert_ne!(&held[(35, 1)], &background[(35, 1)]);
     }

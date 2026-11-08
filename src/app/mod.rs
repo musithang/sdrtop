@@ -119,13 +119,16 @@ impl App {
         }
     }
 
-    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
         const FRAME_DURATION: Duration = Duration::from_millis(33);
         let mut last_draw = Instant::now();
 
         // Repaint from a clean slate: the device selector and any backend chatter
         // during open may have left the alternate screen dirty before we get here.
-        terminal.clear()?;
+        terminal.clear().map_err(backend_error)?;
         self.draw(terminal)?;
 
         loop {
@@ -376,7 +379,10 @@ impl App {
             .push_log(line.into());
     }
 
-    fn draw<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+    fn draw<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
         let active_preset = self.engine.active_preset().to_string();
         let sweep_active = self.engine.is_panel_visible("sweep_panel")
             || self.engine.is_panel_visible("micro_sweep_panel");
@@ -474,7 +480,7 @@ impl App {
         } else {
             self.theme.clone()
         };
-        terminal.draw(|f| {
+        let drawn = terminal.draw(|f| {
             self.engine.draw(f, &m, &frame_theme);
             // The rail's full-log overlay only floats while the rail is focused.
             if m.ui.log_overlay && m.ui.focused_panel.as_deref() == Some("command_rail") {
@@ -527,7 +533,8 @@ impl App {
                     area,
                 );
             }
-        })?;
+        });
+        drawn.map_err(backend_error)?;
         // The deck is behind the menu from the moment it has been drawn once
         // without one in front of it.
         if m.ui.menu.is_none() {
@@ -751,6 +758,17 @@ impl App {
     }
 }
 
+/// The terminal backend's error as the `io::Error` the run loop speaks. A real
+/// terminal's error already is one and comes back unchanged, kind and all; a
+/// backend with an error type of its own (the tests' `TestBackend`, which
+/// cannot fail) is wrapped.
+fn backend_error<E: std::error::Error + Send + Sync + 'static>(err: E) -> io::Error {
+    let boxed: Box<dyn std::error::Error + Send + Sync> = Box::new(err);
+    match boxed.downcast::<io::Error>() {
+        Ok(io) => *io,
+        Err(other) => io::Error::other(other),
+    }
+}
 #[cfg(test)]
 mod tests {
 
@@ -769,6 +787,19 @@ mod tests {
             KeyCode::Char('R'),
             KeyModifiers::SHIFT
         )));
+    }
+
+    /// **A terminal's own error keeps its kind** through `backend_error`, so
+    /// the run loop reports a broken pipe as one; another backend's error
+    /// becomes `Other` rather than being lost.
+    #[test]
+    fn a_backend_error_keeps_its_io_kind() {
+        let pipe = io::Error::new(io::ErrorKind::BrokenPipe, "gone");
+        let got = backend_error(pipe);
+        assert_eq!(got.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(got.to_string(), "gone");
+        let fmt = backend_error(std::fmt::Error);
+        assert_eq!(fmt.kind(), io::ErrorKind::Other);
     }
 
     /// **And it is answered before any handler sees it.** The loop is not

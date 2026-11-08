@@ -44,7 +44,7 @@ pub(super) fn canvas_x_to_col(x: f64, max_x: f64, width: u16) -> u16 {
         return 0;
     }
     let x = x.clamp(0.0, max_x);
-    let dot = (x * (2.0 * width as f64 - 1.0) / max_x) as usize;
+    let dot = (x * (2.0 * width as f64 - 1.0) / max_x).round() as usize;
     (dot / 2) as u16
 }
 
