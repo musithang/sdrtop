@@ -198,7 +198,7 @@ fn rhythm(buf: &mut Buffer, area: Rect, top: u16, r: &Rhythm, theme: &crate::The
         for row in 0..rows {
             let c = super::airtime::eighth(f64::from(*n) / max, rows, row);
             if c != ' ' {
-                buf.get_mut(x0 + k as u16, floor - row)
+                buf[(x0 + k as u16, floor - row)]
                     .set_char(c)
                     .set_style(Style::default().fg(theme.value));
             }
@@ -209,8 +209,8 @@ fn rhythm(buf: &mut Buffer, area: Rect, top: u16, r: &Rhythm, theme: &crate::The
         let k = (us.log10() * 10.0).floor() as u16;
         let cx = x0 + k;
         for y in rule_y + 1..=floor {
-            if buf.get(cx, y).symbol() == " " {
-                buf.get_mut(cx, y).set_char('\u{250a}').set_style(dim);
+            if buf[(cx, y)].symbol() == " " {
+                buf[(cx, y)].set_char('\u{250a}').set_style(dim);
             }
         }
         let lx = (i32::from(cx) + shift).max(i32::from(area.x)) as u16;

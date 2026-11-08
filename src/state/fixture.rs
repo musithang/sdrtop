@@ -588,7 +588,7 @@ pub(crate) fn draw(
     let mut terminal = ratatui::Terminal::new(backend).expect("test backend never fails");
     terminal
         .draw(|f| {
-            let area = f.size();
+            let area = f.area();
             registry.render_panel(name, f, area, state, &theme, false);
         })
         .expect("test backend never fails");
@@ -597,7 +597,7 @@ pub(crate) fn draw(
     (0..height)
         .map(|y| {
             (0..width)
-                .map(|x| buffer.get(x, y).symbol())
+                .map(|x| buffer[(x, y)].symbol())
                 .collect::<String>()
                 .trim_end()
                 .to_string()

@@ -32,7 +32,7 @@ pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, text: &str, styl
     }
     for (x, ch) in (x..).zip(text.chars()) {
         if x >= area.left() && x < area.right() {
-            buf.get_mut(x, y).set_char(ch).set_style(style);
+            buf[(x, y)].set_char(ch).set_style(style);
         }
     }
 }
@@ -41,7 +41,7 @@ pub(super) fn fill(buf: &mut Buffer, area: Rect, r: Rect, bg: Color) {
     let r = r.intersection(area);
     for y in r.top()..r.bottom() {
         for x in r.left()..r.right() {
-            buf.get_mut(x, y).set_symbol(" ").set_bg(bg);
+            buf[(x, y)].set_symbol(" ").set_bg(bg);
         }
     }
 }

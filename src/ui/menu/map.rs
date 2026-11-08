@@ -79,7 +79,7 @@ mod tests {
             &crate::Theme::sdr(),
         );
         (0..h)
-            .map(|y| (0..w).map(|x| buf.get(x, y).symbol().to_string()).collect())
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect())
             .collect()
     }
 

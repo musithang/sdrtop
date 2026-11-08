@@ -299,7 +299,7 @@ impl LayoutEngine {
 
     pub fn draw(&self, f: &mut Frame, state: &SdrMetrics, theme: &crate::Theme) {
         let focused = self.focused_panel.as_deref();
-        let placed = self.place(f.size(), state);
+        let placed = self.place(f.area(), state);
         for (spec, area) in &placed.stacked {
             let is_focused = focused == Some(spec.name.as_str());
             self.registry
@@ -737,7 +737,7 @@ mod tests {
             .unwrap();
         let buf = term.backend().buffer();
         (0..20)
-            .map(|y| (0..60).map(|x| buf.get(x, y).symbol()).collect::<String>())
+            .map(|y| (0..60).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
     }

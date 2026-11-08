@@ -108,7 +108,7 @@ fn put(buf: &mut Buffer, x: u16, y: u16, s: &str, style: Style, area: Rect) -> u
         if x >= area.right() || y >= area.bottom() {
             break;
         }
-        buf.get_mut(x, y).set_char(ch).set_style(style);
+        buf[(x, y)].set_char(ch).set_style(style);
         x += 1;
     }
     x
@@ -133,7 +133,7 @@ fn plate(buf: &mut Buffer, area: Rect, s: &Silence, theme: &crate::Theme) {
                 (true, _, _, _) | (_, true, _, _) => '│',
                 _ => ' ',
             };
-            buf.get_mut(x, y).set_char(c).set_style(edge);
+            buf[(x, y)].set_char(c).set_style(edge);
         }
     }
     let inside = Rect::new(x0 + 3, y0, w.saturating_sub(4), h);

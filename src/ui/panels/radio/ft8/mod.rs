@@ -144,7 +144,7 @@ pub fn put(
     let mut cx = x;
     for ch in text.chars() {
         if y >= area.top() && y < area.bottom() && cx >= area.left() && cx < area.right() {
-            buf.get_mut(cx, y).set_char(ch).set_style(style);
+            buf[(cx, y)].set_char(ch).set_style(style);
         }
         cx = cx.saturating_add(1);
     }
@@ -323,7 +323,7 @@ fn render_the_view_to_html() {
     for y in 0..41 {
         out.push_str("<div class=r>");
         for x in 0..191 {
-            let c = buf.get(x, y);
+            let c = &buf[(x, y)];
             let col = |c: Color, d: &str| match c {
                 Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
                 _ => d.to_string(),

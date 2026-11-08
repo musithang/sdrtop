@@ -6,7 +6,7 @@
 //! `,` / `.` used to live here; it is a key every section has now
 //! (`global::gain`), because a radio's stages are not the Rail's alone.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::RailMode;
 

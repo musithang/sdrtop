@@ -12,7 +12,7 @@
 //! Not `a` for "my pager", which the design first gave it: `a` is the
 //! amplifier on every view, and the radio's own controls stay the radio's.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{metrics, InputCtx};
 
@@ -69,7 +69,7 @@ mod tests {
     use crate::signal::pocsag::page::{Content, Decided, End, Function, Page};
     use crate::state::SdrMetrics;
     use crate::ui::{self, PanelRegistry};
-    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use std::time::Instant;

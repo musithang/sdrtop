@@ -1167,7 +1167,7 @@ mod tests {
         t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
         let buf = t.backend().buffer().clone();
         let text: String = (0..41)
-            .map(|y| (0..191).map(|x| buf.get(x, y).symbol()).collect::<String>() + "\n")
+            .map(|y| (0..191).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
         assert!(
             text.contains("PICONET") && text.contains("HEADERS"),

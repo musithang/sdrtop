@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::RailMode;
 use crate::ui;
@@ -451,7 +451,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
     use crate::config::LayoutConfig;
     use crate::state::SdrMetrics;

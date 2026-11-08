@@ -191,11 +191,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         render(&mut buf, area, radio, mark, &crate::Theme::sdr());
         (0..HEIGHT)
-            .map(|y| {
-                (0..64)
-                    .map(|x| buf.get(x, y).symbol().to_string())
-                    .collect()
-            })
+            .map(|y| (0..64).map(|x| buf[(x, y)].symbol().to_string()).collect())
             .collect()
     }
 
@@ -259,7 +255,7 @@ mod tests {
             let mut buf = Buffer::empty(area);
             render(&mut buf, area, hf, Mark::Band(band, "b"), &theme);
             let x = column(band.lo_hz as f64, 64);
-            let ink = buf.get(x, 1).fg;
+            let ink = buf[(x, 1)].fg;
             let want = if ok {
                 theme.value_hi
             } else {
@@ -284,9 +280,7 @@ mod tests {
                 Mark::Band(BAND, "2.4 GHz"),
                 &theme,
             );
-            let bar: String = (0..64)
-                .map(|x| buf.get(x, 1).symbol().to_string())
-                .collect();
+            let bar: String = (0..64).map(|x| buf[(x, 1)].symbol().to_string()).collect();
             let at = bar
                 .chars()
                 .position(|c| c == '█')
@@ -296,10 +290,8 @@ mod tests {
             } else {
                 theme.status_crit
             };
-            assert_eq!(buf.get(at as u16, 1).fg, want);
-            let top_row: String = (0..64)
-                .map(|x| buf.get(x, 0).symbol().to_string())
-                .collect();
+            assert_eq!(buf[(at as u16, 1)].fg, want);
+            let top_row: String = (0..64).map(|x| buf[(x, 0)].symbol().to_string()).collect();
             assert!(top_row.contains("2.4 GHz"), "{top_row}");
         }
     }

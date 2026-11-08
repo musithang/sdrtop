@@ -878,7 +878,7 @@ mod tests {
             t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
             let buf = t.backend().buffer().clone();
             let text: Vec<String> = (0..h)
-                .map(|y| (0..w).map(|x| buf.get(x, y).symbol()).collect())
+                .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect())
                 .collect();
             let all = text.join("\n");
             let river = text.iter().find(|l| l.contains("River")).unwrap();

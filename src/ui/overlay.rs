@@ -13,7 +13,7 @@ use crate::state::SdrMetrics;
 /// panel showing the whole scrollback. Reuses the standard `log::render` so it
 /// reads identically to the docked log, just larger and floating over the deck.
 pub fn render_log(f: &mut Frame, m: &SdrMetrics, theme: &crate::Theme) {
-    let full = f.size();
+    let full = f.area();
     let w = ((full.width as u32 * 7 / 10) as u16)
         .max(24)
         .min(full.width);

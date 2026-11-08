@@ -41,8 +41,7 @@ name = "sdrtop"
 path = "src/main.rs"
 
 [dependencies]
-ratatui = "0.27"
-crossterm = "0.27"
+ratatui = "0.28"
 libc = "0.2"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"

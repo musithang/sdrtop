@@ -265,11 +265,11 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         let mut card = Rect::default();
         terminal
-            .draw(|f| card = render(f, f.size(), t, Tile::Lab, path, cursor, &theme))
+            .draw(|f| card = render(f, f.area(), t, Tile::Lab, path, cursor, &theme))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let rows = (0..h)
-            .map(|y| (0..w).map(|x| buf.get(x, y).symbol().to_string()).collect())
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect())
             .collect();
         (rows, card)
     }
@@ -326,13 +326,13 @@ mod tests {
         for cursor in [true, false] {
             terminal
                 .draw(|f| {
-                    render(f, f.size(), &t, Tile::Lab, &path, cursor, &theme);
+                    render(f, f.area(), &t, Tile::Lab, &path, cursor, &theme);
                 })
                 .unwrap();
             let buf = terminal.backend().buffer().clone();
             let lit = (0..191u16)
                 .flat_map(|x| (0..24u16).map(move |y| (x, y)))
-                .any(|(x, y)| buf.get(x, y).fg == theme.value_hi && buf.get(x, y).symbol() != " ");
+                .any(|(x, y)| buf[(x, y)].fg == theme.value_hi && buf[(x, y)].symbol() != " ");
             assert_eq!(lit, cursor);
         }
     }

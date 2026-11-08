@@ -55,7 +55,7 @@ fn bar(buf: &mut Buffer, x: u16, floor: u16, rows: u16, w: u16, share: f64, colo
             '█'
         };
         for dx in 0..w {
-            buf.get_mut(x + dx, y)
+            buf[(x + dx, y)]
                 .set_char(glyph)
                 .set_style(Style::default().fg(colour));
         }
@@ -96,7 +96,7 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             area,
         );
         for x in area.x + PLOT_X..area.right().saturating_sub(1) {
-            buf.get_mut(x, y).set_char('┈').set_style(grid);
+            buf[(x, y)].set_char('┈').set_style(grid);
         }
     }
     let col = (area.width.saturating_sub(PLOT_X + 1)) / 13;
@@ -345,7 +345,7 @@ mod tests {
     fn buffer(m: &SdrMetrics, w: u16, h: u16) -> Buffer {
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| NetWifiSurveyPanel.render(f, f.size(), m, &theme, false))
+        t.draw(|f| NetWifiSurveyPanel.render(f, f.area(), m, &theme, false))
             .unwrap();
         t.backend().buffer().clone()
     }
@@ -354,7 +354,7 @@ mod tests {
     /// all, the one holding both 12 and 13 below the plot.
     fn label_at(b: &Buffer, ch: u8) -> (u16, u16) {
         let rows: Vec<String> = (0..b.area.height)
-            .map(|y| (0..b.area.width).map(|x| b.get(x, y).symbol()).collect())
+            .map(|y| (0..b.area.width).map(|x| b[(x, y)].symbol()).collect())
             .collect();
         let y = rows
             .iter()
@@ -440,7 +440,7 @@ mod tests {
         let b = buffer(&m, 145, 25);
         let colour_at = |ch: u8| {
             let (x, y) = label_at(&b, ch);
-            b.get(x, y).fg
+            b[(x, y)].fg
         };
         assert_eq!(colour_at(10), theme.stale);
         assert_eq!(colour_at(11), theme.value_hi);
@@ -457,9 +457,9 @@ mod tests {
         let mut m = state(6);
         let b = buffer(&m, 145, 25);
         let (x, y) = label_at(&b, 6);
-        assert_eq!(b.get(x, y).fg, theme.value_hi);
+        assert_eq!(b[(x, y)].fg, theme.value_hi);
         let (x, y) = label_at(&b, 7);
-        assert_eq!(b.get(x, y).fg, theme.value);
+        assert_eq!(b[(x, y)].fg, theme.value);
         m.net.wifi.survey.selected = Some(10);
         let text = drawn(NetWifiSurveyPanel, 147, 27, &m).join("\n");
         assert!(text.contains("▶10"), "{text}");

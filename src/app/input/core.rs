@@ -7,7 +7,7 @@
 //! waterfall scrolls history, sets the row stride and moves the cursor. Both
 //! fall through to the global handler for anything they do not claim.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::{InputMode, RailMode};
 use crate::ui::panels::core::spectrum::{
@@ -466,7 +466,7 @@ mod tests {
                     "Zoom"
                 };
                 let mut press = |code| {
-                    let key = KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+                    let key = KeyEvent::new(code, ratatui::crossterm::event::KeyModifiers::NONE);
                     if is_waterfall {
                         waterfall(key, &mut ctx);
                     } else {

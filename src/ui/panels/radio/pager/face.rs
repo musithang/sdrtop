@@ -595,12 +595,12 @@ mod tests {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 34)).unwrap();
         terminal
-            .draw(|f| PagerFacePanel.render(f, f.size(), &m, &theme, false))
+            .draw(|f| PagerFacePanel.render(f, f.area(), &m, &theme, false))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let found = (0..34u16)
             .flat_map(|y| (0..120u16).map(move |x| (x, y)))
-            .any(|(x, y)| buf.get(x, y).bg == glass);
+            .any(|(x, y)| buf[(x, y)].bg == glass);
         assert!(found, "no cell in the blue display's night glass");
     }
 

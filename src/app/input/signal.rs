@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::ui::widgets::micro_common::fmt_bw;
 

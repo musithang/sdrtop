@@ -77,7 +77,7 @@ impl Dots {
                     continue;
                 };
                 let ch = char::from_u32(0x2800 + u32::from(c.bits)).unwrap_or(' ');
-                buf.get_mut(area.x + col as u16, area.y + row as u16)
+                buf[(area.x + col as u16, area.y + row as u16)]
                     .set_char(ch)
                     .set_fg(color);
             }
@@ -97,9 +97,9 @@ mod tests {
         d.set(3, 1, 1, Color::Blue);
         let mut buf = Buffer::empty(Rect::new(0, 0, 2, 1));
         d.render(&mut buf, Rect::new(0, 0, 2, 1));
-        assert_eq!(buf.get(0, 0).symbol(), "\u{2881}");
-        assert_eq!(buf.get(1, 0).symbol(), "\u{2810}");
-        assert_eq!(buf.get(1, 0).fg, Color::Blue);
+        assert_eq!(buf[(0, 0)].symbol(), "\u{2881}");
+        assert_eq!(buf[(1, 0)].symbol(), "\u{2810}");
+        assert_eq!(buf[(1, 0)].fg, Color::Blue);
     }
 
     #[test]
@@ -109,8 +109,8 @@ mod tests {
         d.set(1, 1, 1, Color::Gray);
         let mut buf = Buffer::empty(Rect::new(0, 0, 1, 1));
         d.render(&mut buf, Rect::new(0, 0, 1, 1));
-        assert_eq!(buf.get(0, 0).fg, Color::Yellow);
-        assert_eq!(buf.get(0, 0).symbol(), "\u{2811}");
+        assert_eq!(buf[(0, 0)].fg, Color::Yellow);
+        assert_eq!(buf[(0, 0)].symbol(), "\u{2811}");
     }
 
     #[test]

@@ -27,7 +27,7 @@ use app::App;
 use clap::Parser;
 use cli::Cli;
 use config::AppConfig;
-use crossterm::{
+use ratatui::crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };

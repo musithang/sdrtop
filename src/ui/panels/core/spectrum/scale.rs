@@ -176,7 +176,7 @@ mod tests {
                     })
                     .render(area, &mut buffer);
                 let painted = (0..width)
-                    .find(|col| buffer.get(*col, 0).fg == Color::Red)
+                    .find(|col| buffer[(*col, 0)].fg == Color::Red)
                     .unwrap();
                 assert_eq!(
                     canvas_x_to_col(x, 32.0, width),

@@ -281,11 +281,11 @@ mod tests {
         let m = on_eleven();
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(118, 8)).unwrap();
-        t.draw(|f| NetWifiLedgerPanel.render(f, f.size(), &m, &theme, false))
+        t.draw(|f| NetWifiLedgerPanel.render(f, f.area(), &m, &theme, false))
             .unwrap();
         let b = t.backend().buffer();
-        assert_eq!(b.get(0, 1).fg, theme.wifi(Family::Dsss));
-        assert_eq!(b.get(20, 1).fg, theme.wifi(Family::Dsss));
+        assert_eq!(b[(0, 1)].fg, theme.wifi(Family::Dsss));
+        assert_eq!(b[(20, 1)].fg, theme.wifi(Family::Dsss));
     }
 
     /// **Short of rows, a format's rates fold into one**: four rows will

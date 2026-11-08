@@ -454,7 +454,7 @@ mod tests {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal
-            .draw(|f| NetCoexistPanel.render(f, f.size(), m, &theme, false))
+            .draw(|f| NetCoexistPanel.render(f, f.area(), m, &theme, false))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -486,10 +486,10 @@ mod tests {
         let buf = cells(&m, 90, 12);
         let x = band_axis::column_of(20, 90) as u16;
         assert_eq!(
-            buf.get(x, 0).style().fg,
+            buf[(x, 0)].style().fg,
             Some(ink(Some(0.08f32 / 0.1f32), &theme))
         );
-        assert_ne!(buf.get(x, 0).style().fg, Some(ink(Some(0.08), &theme)));
+        assert_ne!(buf[(x, 0)].style().fg, Some(ink(Some(0.08), &theme)));
         let text = draw(NetCoexistPanel, 120, 12, &m).join("\n");
         assert!(text.contains("colour 0\u{2013}10 % busy"), "{text}");
     }
@@ -509,10 +509,10 @@ mod tests {
                 // Oldest first: `other` a moment ago, `cell` now.
                 let buf = cells(&with(vec![column(other), column(cell)]), w, h);
                 let x = band_axis::column_of(cell, w as usize) as u16;
-                assert_eq!(buf.get(x, 0).style().fg, Some(busy), "{w}x{h}: now, {cell}");
+                assert_eq!(buf[(x, 0)].style().fg, Some(busy), "{w}x{h}: now, {cell}");
                 let x = band_axis::column_of(other, w as usize) as u16;
                 assert_eq!(
-                    buf.get(x, 0).style().bg,
+                    buf[(x, 0)].style().bg,
                     Some(busy),
                     "{w}x{h}: before, {other}"
                 );
@@ -628,28 +628,28 @@ mod tests {
             band_axis::column_of(occupancy::cell_of(hz as f64).unwrap(), w as usize) as u16
         };
 
-        let ble = buf.get(col(2_402_000_000), 0);
+        let ble = &buf[(col(2_402_000_000), 0)];
         assert_eq!(ble.symbol(), "\u{25cf}");
         assert_eq!(ble.style().fg, Some(theme.net_ble));
 
         // 1.1 s back is the third moment: row 1, its upper half.
-        let bt = buf.get(col(2_441_000_000), 1);
+        let bt = &buf[(col(2_441_000_000), 1)];
         assert_eq!(bt.symbol(), "\u{25a0}");
         assert_eq!(bt.style().fg, Some(theme.net_bt));
 
         assert_ne!(
-            buf.get(col(2_426_000_000), 0).symbol(),
+            buf[(col(2_426_000_000), 0)].symbol(),
             "\u{25cf}",
             "a failed CRC is not identified"
         );
         for y in 0..h - 2 {
             assert_ne!(
-                buf.get(col(2_480_000_000), y).symbol(),
+                buf[(col(2_480_000_000), y)].symbol(),
                 "\u{25cf}",
                 "ten minutes back is off the canvas"
             );
         }
-        let footer: String = (0..w).map(|x| buf.get(x, h - 1).symbol()).collect();
+        let footer: String = (0..w).map(|x| buf[(x, h - 1)].symbol()).collect();
         assert!(
             footer.contains("BLE 1") && footer.contains("BT 1"),
             "{footer}"
@@ -677,8 +677,8 @@ mod tests {
             })
             .unwrap();
         let buf = terminal.backend().buffer();
-        assert_eq!(buf.get(0, 1).symbol(), "\u{25b6}");
-        assert_eq!(buf.get(0, 0).symbol(), " ");
+        assert_eq!(buf[(0, 1)].symbol(), "\u{25b6}");
+        assert_eq!(buf[(0, 0)].symbol(), " ");
     }
 
     /// **The history follows the cursor back.** Past the moments the canvas
@@ -711,16 +711,16 @@ mod tests {
         let buf = terminal.backend().buffer();
         let x = 1 + band_axis::column_of(20, 60) as u16;
         assert_eq!(
-            buf.get(x, 0).style().fg,
+            buf[(x, 0)].style().fg,
             Some(ink(Some(1.0), &theme)),
             "the top is 15 back"
         );
         assert_eq!(
-            buf.get(0, 17).symbol(),
+            buf[(0, 17)].symbol(),
             "\u{25b6}",
             "the cursor's row is in view"
         );
-        let footer: String = (0..61).map(|x| buf.get(x, 19).symbol()).collect();
+        let footer: String = (0..61).map(|x| buf[(x, 19)].symbol()).collect();
         assert!(footer.contains("7.5 s ago at the top"), "{footer}");
     }
 
@@ -741,7 +741,7 @@ mod tests {
         let buf = cells(&with(vec![column(10), column(40), column(70)]), 60, 20);
         for y in 0..20u16 {
             for x in 0..60 {
-                let style = buf.get(x, y).style();
+                let style = buf[(x, y)].style();
                 for c in [style.fg, style.bg] {
                     if let Some(c) = c.filter(|c| *c != ratatui::style::Color::Reset) {
                         assert!(allowed.contains(&c), "{c:?} at {x},{y} is not the theme's");
@@ -778,8 +778,8 @@ mod tests {
         let buf = cells(&with(vec![column(40); 4]), 60, 20);
         let x = band_axis::column_of(40, 60) as u16;
         // Four moments fill the top two rows; the bottom of the canvas is dark.
-        assert_ne!(buf.get(x, 0).style().fg, Some(ink(None, &theme)));
-        assert_eq!(buf.get(x, 17).style().fg, Some(ink(None, &theme)));
+        assert_ne!(buf[(x, 0)].style().fg, Some(ink(None, &theme)));
+        assert_eq!(buf[(x, 17)].style().fg, Some(ink(None, &theme)));
     }
 
     #[test]

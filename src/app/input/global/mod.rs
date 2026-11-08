@@ -29,7 +29,7 @@ pub(super) mod presets;
 mod radio;
 pub(super) mod view;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{InputCtx, KeyAction};
 

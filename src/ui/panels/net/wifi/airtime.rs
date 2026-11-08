@@ -115,14 +115,14 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             let y = floor - r;
             let e = eighth(c.busy, rows, r);
             if e != ' ' {
-                buf.get_mut(cx, y)
+                buf[(cx, y)]
                     .set_char(e)
                     .set_style(Style::default().fg(theme.value));
             }
             let g = eighth(c.frames(), rows, r);
             if g != ' ' {
                 let colour: Color = theme.wifi(family_at(c, rows, r));
-                buf.get_mut(cx + 1, y)
+                buf[(cx + 1, y)]
                     .set_char(g)
                     .set_style(Style::default().fg(colour));
             }
@@ -315,11 +315,11 @@ mod tests {
         m.net.wifi.survey.visits[10] = vec![visit(0.2, 1.0, 1.0, 1.0)];
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(98, 9)).unwrap();
-        t.draw(|f| NetWifiAirtimePanel.render(f, f.size(), &m, &theme, false))
+        t.draw(|f| NetWifiAirtimePanel.render(f, f.area(), &m, &theme, false))
             .unwrap();
         let b = t.backend().buffer();
-        assert_eq!(b.get(7 + 87, 0).fg, theme.value);
-        assert_eq!(b.get(7 + 88, 0).fg, theme.wifi(Family::Dsss));
+        assert_eq!(b[(7 + 87, 0)].fg, theme.value);
+        assert_eq!(b[(7 + 88, 0)].fg, theme.wifi(Family::Dsss));
     }
 
     /// **A column a gap in the feed cut into is hatched**, and so is a

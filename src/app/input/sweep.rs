@@ -3,7 +3,7 @@
 
 //! `[G]` sweep-panel focus: band entry, dwell, and starting or stopping a sweep.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::InputMode;
 

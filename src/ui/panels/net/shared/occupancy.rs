@@ -1013,17 +1013,17 @@ mod tests {
         let m = surveyed();
         let theme = crate::Theme::sdr();
         let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
-        term.draw(|f| NetOccupancyPanel.render_bonded(f, f.size(), &m, &theme, false, Bond::Below))
+        term.draw(|f| NetOccupancyPanel.render_bonded(f, f.area(), &m, &theme, false, Bond::Below))
             .unwrap();
         let buf = term.backend().buffer();
         let bar_rows = (0..20u16)
             .filter(|&y| {
-                let row: String = (1..99).map(|x| buf.get(x, y).symbol()).collect();
+                let row: String = (1..99).map(|x| buf[(x, y)].symbol()).collect();
                 row.contains(UNSEEN)
             })
             .count();
         assert!(bar_rows > ROWS, "{bar_rows} bar rows in a 20-row half");
-        let last: String = (1..99).map(|x| buf.get(x, 19).symbol()).collect();
+        let last: String = (1..99).map(|x| buf[(x, 19)].symbol()).collect();
         assert!(
             last.contains(UNSEEN),
             "the bars stand on the seam: {last:?}"

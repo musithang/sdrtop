@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::hardware;
 use crate::state::{InputMode, RailMode, SdrMetrics, SpectrumMarker, StationField};

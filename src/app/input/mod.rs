@@ -35,7 +35,7 @@ mod text;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::event::{DeviceOptionCompletion, DeviceOptionRequest};
 use crate::hardware;
@@ -219,7 +219,7 @@ fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::KeyModifiers;
+    use ratatui::crossterm::event::KeyModifiers;
 
     fn ev(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

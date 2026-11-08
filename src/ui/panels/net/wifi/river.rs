@@ -288,7 +288,7 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
         );
         if silent.is_some() {
             for x in 0..lw {
-                buf.get_mut(area.x + LABEL + x, bottom_y)
+                buf[(area.x + LABEL + x, bottom_y)]
                     .set_char('\u{2581}')
                     .set_style(Style::default().fg(theme.border_dim));
             }
@@ -308,18 +308,16 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             // Never heard: hatched, so it does not pass for quiet air.
             if lost.iter().any(|&(from, to)| a < to && a + d > from) {
                 let hatch = Style::default().fg(theme.stale);
-                buf.get_mut(cx, top_y).set_char('\u{2571}').set_style(hatch);
-                buf.get_mut(cx, bottom_y)
-                    .set_char('\u{2571}')
-                    .set_style(hatch);
+                buf[(cx, top_y)].set_char('\u{2571}').set_style(hatch);
+                buf[(cx, bottom_y)].set_char('\u{2571}').set_style(hatch);
                 continue;
             }
             let selected = lit.is_some_and(|s| a < s.end(d) && a + d > s.start);
             if selected {
-                buf.get_mut(cx, top_y).set_bg(theme.border_dim);
-                buf.get_mut(cx, bottom_y).set_bg(theme.border_dim);
+                buf[(cx, top_y)].set_bg(theme.border_dim);
+                buf[(cx, bottom_y)].set_bg(theme.border_dim);
                 for y in [top_y, bottom_y] {
-                    buf.get_mut(area.x + LABEL - 1, y)
+                    buf[(area.x + LABEL - 1, y)]
                         .set_char('\u{25b8}')
                         .set_style(mark);
                 }
@@ -338,11 +336,11 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
                     Some(_) => theme.border_focused,
                     None => colour,
                 };
-                buf.get_mut(cx, top_y).set_char(t).set_fg(colour);
-                buf.get_mut(cx, bottom_y).set_char(b).set_fg(colour);
+                buf[(cx, top_y)].set_char(t).set_fg(colour);
+                buf[(cx, bottom_y)].set_char(b).set_fg(colour);
                 if selected {
-                    buf.get_mut(cx, top_y).set_style(mark.fg(colour));
-                    buf.get_mut(cx, bottom_y).set_style(mark.fg(colour));
+                    buf[(cx, top_y)].set_style(mark.fg(colour));
+                    buf[(cx, bottom_y)].set_style(mark.fg(colour));
                 }
             }
         }
@@ -501,7 +499,7 @@ mod tests {
         let mut registry = crate::ui::PanelRegistry::new();
         registry.register(NetWifiRiverPanel);
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 11)).unwrap();
-        t.draw(|f| registry.render_panel("net_wifi_river", f, f.size(), m, &theme, false))
+        t.draw(|f| registry.render_panel("net_wifi_river", f, f.area(), m, &theme, false))
             .unwrap();
         t.backend().buffer().clone()
     }
@@ -618,7 +616,7 @@ mod tests {
         let theme = crate::Theme::sdr();
         // The second frame, 4 ms in: lane 1 (lanes of 89 cells of 40 us),
         // cells 11 and 12, rows 3 and 4.
-        let at = |x: u16, y: u16| buf.get(x, y);
+        let at = |x: u16, y: u16| &buf[(x, y)];
         for y in [3, 4] {
             for cell in [11, 12] {
                 assert_eq!(at(10 + cell, y).fg, theme.border_focused, "{cell},{y}");
@@ -668,7 +666,7 @@ mod tests {
         m.net.wifi.frames_view.selected = Some(2);
         let buf = buffer(&m);
         let theme = crate::Theme::sdr();
-        let fg = |cell: u16| buf.get(10 + cell, 2).fg;
+        let fg = |cell: u16| buf[(10 + cell, 2)].fg;
         let lerp = crate::ui::widgets::charts::lerp_color;
         let tinted = lerp(theme.wifi_non_ht, theme.value, 0.55);
         assert_eq!(fg(0), tinted);
@@ -748,12 +746,8 @@ mod tests {
             let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
             t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
             let buf = t.backend().buffer().clone();
-            assert_eq!(
-                buf.get(at.x, at.y).symbol(),
-                "\u{256d}",
-                "{w} x {h}: {at:?}"
-            );
-            assert_eq!(buf.get(at.x + at.width - 1, at.y).symbol(), "\u{256e}");
+            assert_eq!(buf[(at.x, at.y)].symbol(), "\u{256d}", "{w} x {h}: {at:?}");
+            assert_eq!(buf[(at.x + at.width - 1, at.y)].symbol(), "\u{256e}");
             let cells = u64::from(at.width - 2 - super::LABEL);
             assert_eq!(super::capture_cells(at), lanes * cells, "{w} x {h}");
         }
@@ -774,7 +768,7 @@ mod tests {
             t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
             let buf = t.backend().buffer().clone();
             let text: Vec<String> = (0..h)
-                .map(|y| (0..w).map(|x| buf.get(x, y).symbol()).collect())
+                .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect())
                 .collect();
             let at = |title: &str| {
                 text.iter()

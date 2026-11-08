@@ -160,7 +160,7 @@ mod tests {
                 .draw(|f| {
                     draw(
                         f,
-                        f.size(),
+                        f.area(),
                         &rows,
                         |row_bins| Some(columns(row_bins, 1, 1)),
                         None,
@@ -173,7 +173,7 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(
-                terminal.backend().buffer().get(0, 0).fg,
+                terminal.backend().buffer()[(0, 0)].fg,
                 magnitude_to_color_palette(
                     -10.0,
                     -110.0,

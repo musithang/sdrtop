@@ -730,23 +730,23 @@ mod tests {
         m.net.bt_view.selected = Some(0xbbbbbb);
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(90, 16)).unwrap();
-        t.draw(|f| NetBtHopsPanel.render(f, f.size(), &m, &theme, false))
+        t.draw(|f| NetBtHopsPanel.render(f, f.area(), &m, &theme, false))
             .unwrap();
         let buf = t.backend().buffer().clone();
-        let row_text = |y: u16| (0..90).map(|x| buf.get(x, y).symbol()).collect::<String>();
+        let row_text = |y: u16| (0..90).map(|x| buf[(x, y)].symbol()).collect::<String>();
         let tick_on = |lap: &str| {
             let y = (0..16).find(|&y| row_text(y).contains(lap)).unwrap();
             let x = (0..90)
-                .find(|&x| buf.get(x, y).symbol() == "\u{2503}")
+                .find(|&x| buf[(x, y)].symbol() == "\u{2503}")
                 .unwrap();
-            buf.get(x, y).clone()
+            buf[(x, y)].clone()
         };
         let sel = tick_on("0xbbbbbb");
         assert_eq!(sel.fg, theme.series_color(1));
         assert!(sel.modifier.contains(Modifier::BOLD));
         assert_eq!(tick_on("0xaaaaaa").fg, theme.receded(theme.series_color(0)));
         let y = (0..16).find(|&y| row_text(y).contains("0xbbbbbb")).unwrap();
-        assert_eq!(buf.get(0, y).symbol(), "\u{258c}", "the lane is marked");
+        assert_eq!(buf[(0, y)].symbol(), "\u{258c}", "the lane is marked");
     }
 
     /// **A count of one is not half a panel.** On a tall panel the bars
@@ -769,16 +769,16 @@ mod tests {
         m.net.bt_view.selected = Some(0xbbbbbb);
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(90, 20)).unwrap();
-        t.draw(|f| NetBtHopsPanel.render(f, f.size(), &m, &theme, false))
+        t.draw(|f| NetBtHopsPanel.render(f, f.area(), &m, &theme, false))
             .unwrap();
         let buf = t.backend().buffer().clone();
         // Column of channel 10: the scale, then the channels spread over
         // the rest of the width.
         let x = (SCALE + column_of(10, 90 - SCALE)) as u16;
         let y = (0..20)
-            .find(|&y| buf.get(x, y).symbol() == "\u{2588}")
+            .find(|&y| buf[(x, y)].symbol() == "\u{2588}")
             .expect("channel 10's bar");
-        assert_eq!(buf.get(x, y).fg, theme.receded(theme.series_color(0)));
+        assert_eq!(buf[(x, y)].fg, theme.receded(theme.series_color(0)));
     }
 
     /// **The room the capped bars leave goes to the lanes**: on a tall panel

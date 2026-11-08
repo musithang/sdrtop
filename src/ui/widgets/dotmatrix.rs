@@ -91,7 +91,7 @@ pub fn wrap(text: &str, chars: usize) -> Vec<String> {
 pub fn render(buf: &mut Buffer, area: Rect, lines: &[&str], look: Look) {
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
-            buf.get_mut(x, y).set_symbol(" ").set_bg(look.glass);
+            buf[(x, y)].set_symbol(" ").set_bg(look.glass);
         }
     }
     let across = chars_across(area.width);
@@ -112,7 +112,7 @@ pub fn render(buf: &mut Buffer, area: Rect, lines: &[&str], look: Look) {
                             look.ghost
                         }
                     };
-                    buf.get_mut(left + cx, top + cy)
+                    buf[(left + cx, top + cy)]
                         .set_symbol("\u{2580}")
                         .set_fg(dot(cy * 2))
                         .set_bg(dot(cy * 2 + 1));
@@ -366,7 +366,7 @@ mod tests {
             .map(|row| {
                 (0..DOTS)
                     .map(|x| {
-                        let c = buf.get(x, row / 2);
+                        let c = &buf[(x, row / 2)];
                         let ink = if row % 2 == 0 { c.fg } else { c.bg };
                         if ink == LOOK.ink {
                             '#'
@@ -396,9 +396,9 @@ mod tests {
         let area = Rect::new(0, 0, width_of(2), LINE_CELLS);
         let mut buf = Buffer::empty(area);
         render(&mut buf, area, &["AB"], LOOK);
-        assert_eq!(buf.get(0, 0).fg, LOOK.ghost, "A's top-left dot is off");
-        assert_eq!(buf.get(DOTS, 0).bg, LOOK.glass, "the gap column");
-        assert_eq!(buf.get(DOTS, 0).symbol(), " ");
+        assert_eq!(buf[(0, 0)].fg, LOOK.ghost, "A's top-left dot is off");
+        assert_eq!(buf[(DOTS, 0)].bg, LOOK.glass, "the gap column");
+        assert_eq!(buf[(DOTS, 0)].symbol(), " ");
     }
 
     /// Every printable 7-bit character has a glyph of its own: none falls
@@ -423,15 +423,11 @@ mod tests {
         let mut buf = Buffer::empty(area);
         render(&mut buf, area, &["A"], LOOK);
         assert_eq!(
-            buf.get(2 * CHAR_CELLS, 0).fg,
+            buf[(2 * CHAR_CELLS, 0)].fg,
             LOOK.ghost,
             "the third cell of the first row"
         );
-        assert_eq!(
-            buf.get(0, LINE_CELLS).fg,
-            LOOK.ghost,
-            "the empty second row"
-        );
+        assert_eq!(buf[(0, LINE_CELLS)].fg, LOOK.ghost, "the empty second row");
     }
 
     /// Nothing is drawn past the area, and what does not fit is left off,
@@ -444,7 +440,7 @@ mod tests {
         for y in 0..10 {
             for x in 0..30 {
                 if !area.contains(ratatui::layout::Position { x, y }) {
-                    assert_eq!(buf.get(x, y).symbol(), " ", "{x},{y}");
+                    assert_eq!(buf[(x, y)].symbol(), " ", "{x},{y}");
                 }
             }
         }

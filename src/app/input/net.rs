@@ -3,7 +3,7 @@
 
 //! The NET section's panel handlers.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{global, metrics, InputCtx, KeyAction};
 use crate::state::{InputMode, SdrMetrics};
@@ -762,7 +762,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::*;
     use crate::signal::net::census::Device;

@@ -626,13 +626,13 @@ mod tests {
                         ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
                             .unwrap();
                     terminal
-                        .draw(|f| render(f, f.size(), &m, 0, &crate::Theme::sdr()))
+                        .draw(|f| render(f, f.area(), &m, 0, &crate::Theme::sdr()))
                         .unwrap();
                     let buffer = terminal.backend().buffer();
                     let rows: Vec<String> = (0..height)
                         .map(|y| {
                             (0..width)
-                                .map(|x| buffer.get(x, y).symbol())
+                                .map(|x| buffer[(x, y)].symbol())
                                 .collect::<String>()
                                 .trim_end()
                                 .to_string()

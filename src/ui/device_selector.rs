@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -30,7 +30,7 @@ impl<'a> DeviceSelector<'a> {
     }
 
     fn draw(&mut self, f: &mut Frame) {
-        let area = f.size();
+        let area = f.area();
 
         f.render_widget(
             Block::default().style(Style::default().bg(Color::Black)),

@@ -422,9 +422,9 @@ mod tests {
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer.get(0, 0).fg, buffer.get(0, 0).bg);
-        assert_ne!(buffer.get(0, 0).fg, buffer.get(1, 0).fg);
-        assert_ne!(buffer.get(0, 0).bg, buffer.get(1, 0).bg);
+        assert_eq!(buffer[(0, 0)].fg, buffer[(0, 0)].bg);
+        assert_ne!(buffer[(0, 0)].fg, buffer[(1, 0)].fg);
+        assert_ne!(buffer[(0, 0)].bg, buffer[(1, 0)].bg);
     }
 
     #[test]

@@ -11,7 +11,7 @@
 //! quit key, so `[F]` cannot start a frequency entry behind the menu and `[W]`
 //! cannot pause a waterfall you are not looking at.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::event::{DeviceOptionCompletion, DeviceOptionRequest};
 use crate::state::{DeviceOptionUpdate, InputMode, MenuFocus, MenuState, MenuTile, SdrMetrics};
@@ -546,7 +546,7 @@ mod tests {
     use crate::hardware::DeviceOption;
     use crate::state::SdrMetrics;
     use crate::ui::{self, PanelRegistry};
-    use crossterm::event::KeyEvent;
+    use ratatui::crossterm::event::KeyEvent;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 

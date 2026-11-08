@@ -848,7 +848,7 @@ mod tests {
         let normal_height = compute_footer_height(80, &m);
         let mut draw = |m: &SdrMetrics| {
             terminal
-                .draw(|f| FooterPanel.render(f, f.size(), m, &crate::Theme::sdr(), false))
+                .draw(|f| FooterPanel.render(f, f.area(), m, &crate::Theme::sdr(), false))
                 .unwrap();
             terminal.backend().buffer().clone()
         };
@@ -1317,13 +1317,13 @@ mod tests {
             let mut terminal =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 4)).unwrap();
             terminal
-                .draw(|f| FooterPanel.render(f, f.size(), m, &crate::Theme::sdr(), false))
+                .draw(|f| FooterPanel.render(f, f.area(), m, &crate::Theme::sdr(), false))
                 .unwrap();
             let buf = terminal.backend().buffer().clone();
             (0..buf.area.height)
                 .map(|y| {
                     (0..buf.area.width)
-                        .map(|x| buf.get(x, y).symbol().to_string())
+                        .map(|x| buf[(x, y)].symbol().to_string())
                         .collect::<String>()
                 })
                 .collect::<Vec<_>>()
@@ -1357,11 +1357,11 @@ mod tests {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 1)).unwrap();
         terminal
-            .draw(|f| FooterPanel.render(f, f.size(), &one, &crate::Theme::sdr(), false))
+            .draw(|f| FooterPanel.render(f, f.area(), &one, &crate::Theme::sdr(), false))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let row: String = (0..buf.area.width)
-            .map(|x| buf.get(x, 0).symbol().to_string())
+            .map(|x| buf[(x, 0)].symbol().to_string())
             .collect();
         assert!(
             row.contains("\u{25b8}0.768\u{25c2}") && row.contains("Step"),

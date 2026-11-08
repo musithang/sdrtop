@@ -222,12 +222,12 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(40, 1)).unwrap();
         terminal
             .draw(|f| {
-                f.render_widget(Paragraph::new(Line::from(r.spans(&theme))), f.size());
+                f.render_widget(Paragraph::new(Line::from(r.spans(&theme))), f.area());
             })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..40)
-            .map(|x| buf.get(x, 0).symbol().to_string())
+            .map(|x| buf[(x, 0)].symbol().to_string())
             .collect::<String>()
             .trim_end()
             .to_string()

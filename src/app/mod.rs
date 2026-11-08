@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::Backend, Terminal};
 
 use crate::config::{AppConfig, DisplayConfig, RadioConfig};
@@ -445,6 +445,7 @@ impl App {
         // The width this frame is drawn at, for the panels that give way on
         // a narrow screen and the ones that take over what they showed.
         let size = terminal.size().unwrap_or_default();
+        let size = ratatui::layout::Rect::new(0, 0, size.width, size.height);
         m.ui.screen_cols = size.width;
         // The Frames capture is as long as the river's lanes on this screen,
         // and the NET worker takes it: written on the shared side, and only
@@ -483,7 +484,7 @@ impl App {
             // Drawn last so nothing else lands on top of it, and outside the
             // layout engine because it is not a panel.
             if let Some(menu_state) = m.ui.menu {
-                let full = f.size();
+                let full = f.area();
                 // Startup gets the whole terminal, because there is no deck
                 // behind it worth showing yet. Afterwards it is a box over the
                 // layout you are on, so you can see what you are leaving.
@@ -510,7 +511,7 @@ impl App {
                 );
             }
             if m.ui.device_option_update.quit_requested() {
-                let full = f.size();
+                let full = f.area();
                 let area = ratatui::layout::Rect::new(
                     full.x,
                     full.y + full.height.saturating_sub(1),

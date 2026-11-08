@@ -396,7 +396,7 @@ mod tests {
             .draw(|f| {
                 draw(
                     f,
-                    f.size(),
+                    f.area(),
                     &view,
                     &Vertical::new(-100.0, 0.0, 10, &theme),
                     Layers {
@@ -427,10 +427,10 @@ mod tests {
             let scatter = render_style(SpectrumStyle::Scatter, bins.clone(), None);
             let background = render_style(SpectrumStyle::Scatter, vec![-100.0; bins.len()], None);
             // Column 35 lies inside the final FFT interval at both bin counts
-            assert_ne!(braille.get(35, 4), background.get(35, 4));
-            assert_ne!(fill.get(35, 4), background.get(35, 4));
-            assert_eq!(scatter.get(35, 4), background.get(35, 4));
-            assert_ne!(braille.get(35, 1), background.get(35, 1));
+            assert_ne!(&braille[(35, 4)], &background[(35, 4)]);
+            assert_ne!(&fill[(35, 4)], &background[(35, 4)]);
+            assert_eq!(&scatter[(35, 4)], &background[(35, 4)]);
+            assert_ne!(&braille[(35, 1)], &background[(35, 1)]);
         }
     }
 
@@ -442,7 +442,7 @@ mod tests {
             vec![-100.0; 2],
             Some(Arc::new(vec![-20.0; 2])),
         );
-        assert_ne!(held.get(35, 1), background.get(35, 1));
+        assert_ne!(&held[(35, 1)], &background[(35, 1)]);
     }
 
     #[test]

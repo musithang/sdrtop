@@ -269,7 +269,7 @@ fn below_tree(
     let cursor = state.focus == MenuFocus::Below;
     let card_area = cascade::render(f, columns, tree, tile, &path, cursor, theme);
 
-    let screen = f.size();
+    let screen = f.area();
     let view = trail.last().filter(|n| n.opens()).and_then(|n| n.view());
     let placed = view
         .map(|e| engine.placement_of(&e.preset, screen, m))
@@ -514,13 +514,13 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         let controls = engine.section_controls(keys_section(engine, state), m);
         terminal
-            .draw(|f| render(f, f.size(), m, engine, state, &controls, &theme))
+            .draw(|f| render(f, f.area(), m, engine, state, &controls, &theme))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..h)
             .map(|y| {
                 (0..w)
-                    .map(|x| buf.get(x, y).symbol().to_string())
+                    .map(|x| buf[(x, y)].symbol().to_string())
                     .collect::<String>()
                     .trim_end()
                     .to_string()

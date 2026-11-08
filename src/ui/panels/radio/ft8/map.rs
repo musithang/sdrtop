@@ -467,7 +467,7 @@ impl Panel for Ft8MapPanel {
             for (k, ch) in text.chars().enumerate() {
                 let xx = x + k as i64;
                 if xx >= 0 && y >= 0 && (xx as u16) < area.width && (y as usize) < rows {
-                    buf.get_mut(area.x + xx as u16, area.y + y as u16)
+                    buf[(area.x + xx as u16, area.y + y as u16)]
                         .set_char(ch)
                         .set_style(style);
                 }
@@ -802,13 +802,11 @@ fn draw_legend(buf: &mut Buffer, area: Rect, theme: &crate::Theme, lit: bool) {
         if x + need > area.right() {
             break;
         }
-        buf.get_mut(x, y)
+        buf[(x, y)]
             .set_char(mark.chars().next().unwrap())
             .set_fg(color);
         for (k, ch) in text.chars().enumerate() {
-            buf.get_mut(x + 1 + k as u16, y)
-                .set_char(ch)
-                .set_fg(theme.label);
+            buf[(x + 1 + k as u16, y)].set_char(ch).set_fg(theme.label);
         }
         x += need;
     }
@@ -847,7 +845,7 @@ fn refuse(buf: &mut Buffer, area: Rect, theme: &crate::Theme) {
         for (i, ch) in text.chars().enumerate() {
             let xx = x + i as u16;
             if xx < area.right() {
-                buf.get_mut(xx, y).set_char(ch).set_fg(*color);
+                buf[(xx, y)].set_char(ch).set_fg(*color);
             }
         }
     }
@@ -1138,7 +1136,7 @@ pub(crate) mod tests {
         let theme = crate::Theme::sdr();
         let mut frame = |m: &SdrMetrics| {
             let t = Instant::now();
-            term.draw(|f| panel.render(f, f.size(), m, &theme, false))
+            term.draw(|f| panel.render(f, f.area(), m, &theme, false))
                 .unwrap();
             t.elapsed()
         };
@@ -1199,14 +1197,14 @@ pub(crate) mod tests {
             let theme = crate::Theme::sdr();
             let mut t =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(112, 37)).unwrap();
-            t.draw(|f| registry.render_panel("ft8_map", f, f.size(), &m, &theme, false))
+            t.draw(|f| registry.render_panel("ft8_map", f, f.area(), &m, &theme, false))
                 .unwrap();
             let buf = t.backend().buffer().clone();
             out.push_str(&format!("<h2>{title}</h2><div class=g>"));
             for y in 0..37 {
                 out.push_str("<div class=r>");
                 for x in 0..112 {
-                    let c = buf.get(x, y);
+                    let c = &buf[(x, y)];
                     let fg = match c.fg {
                         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
                         _ => "#c3d2dc".into(),

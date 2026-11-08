@@ -428,12 +428,12 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(W as u16, 1)).unwrap();
         terminal
             .draw(|f| {
-                f.render_widget(Paragraph::new(Line::from(row.spans(&theme, w))), f.size());
+                f.render_widget(Paragraph::new(Line::from(row.spans(&theme, w))), f.area());
             })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..W as u16)
-            .map(|x| buf.get(x, 0).symbol().to_string())
+            .map(|x| buf[(x, 0)].symbol().to_string())
             .collect::<String>()
             .trim_end()
             .to_string()

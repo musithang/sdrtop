@@ -1374,7 +1374,7 @@ mod tests {
             t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
             let buf = t.backend().buffer().clone();
             (0..41)
-                .map(|y| (0..191).map(|x| buf.get(x, y).symbol()).collect::<String>())
+                .map(|y| (0..191).map(|x| buf[(x, y)].symbol()).collect::<String>())
                 .collect::<Vec<_>>()
         };
         let six = screen("net_piconet");
@@ -1504,7 +1504,7 @@ mod tests {
         t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
         let buf = t.backend().buffer().clone();
         let text: String = (0..41)
-            .map(|y| (0..191).map(|x| buf.get(x, y).symbol()).collect::<String>() + "\n")
+            .map(|y| (0..191).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
         for name in ["MODULATION", "CARRIER", "TIMING"] {
             assert!(text.contains(name), "{name}: {text}");

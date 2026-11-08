@@ -284,15 +284,11 @@ mod tests {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal
-            .draw(|f| render(f, f.size(), &card, &theme))
+            .draw(|f| render(f, f.area(), &card, &theme))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..28)
-            .map(|y| {
-                (0..100)
-                    .map(|x| buf.get(x, y).symbol().to_string())
-                    .collect()
-            })
+            .map(|y| (0..100).map(|x| buf[(x, y)].symbol().to_string()).collect())
             .collect()
     }
 

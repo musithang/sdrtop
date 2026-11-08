@@ -752,7 +752,7 @@ mod tests {
                 let backend = ratatui::backend::TestBackend::new(140, 30);
                 let mut terminal = ratatui::Terminal::new(backend).unwrap();
                 terminal
-                    .draw(|f| panel.render(f, f.size(), &m, &theme, false))
+                    .draw(|f| panel.render(f, f.area(), &m, &theme, false))
                     .unwrap();
                 let buffer = terminal.backend().buffer();
                 let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
@@ -1123,7 +1123,7 @@ mod tests {
             .unwrap();
         let buf = term.backend().buffer();
         let rows: Vec<String> = (0..h)
-            .map(|y| (0..w).map(|x| buf.get(x, y).symbol()).collect())
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect())
             .collect();
         let all = rows.join("\n");
         let seam = rows
@@ -1306,7 +1306,7 @@ mod tests {
             term.draw(|f| engine.draw(f, &m, &theme)).unwrap();
             let buf = term.backend().buffer();
             let rows: Vec<String> = (0..h)
-                .map(|y| (0..100).map(|x| buf.get(x, y).symbol()).collect())
+                .map(|y| (0..100).map(|x| buf[(x, y)].symbol()).collect())
                 .collect();
 
             let Some(top) = rows.iter().position(|r| r.contains("WATERFALL")) else {
@@ -1566,7 +1566,7 @@ mod tests {
             t.draw(|f| {
                 engine
                     .registry()
-                    .render_panel(name, f, f.size(), m, &theme, false)
+                    .render_panel(name, f, f.area(), m, &theme, false)
             })
             .unwrap();
             t.backend().buffer().clone()
@@ -1692,7 +1692,7 @@ mod tests {
             for y in 0..h {
                 out.push_str("<div class=r>");
                 for x in 0..w {
-                    let c = buf.get(x, y);
+                    let c = &buf[(x, y)];
                     let col = |c: Color, d: &str| match c {
                         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
                         _ => d.to_string(),

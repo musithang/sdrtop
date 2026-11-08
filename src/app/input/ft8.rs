@@ -11,7 +11,7 @@
 //! tunes, and only to a band the radio reaches. Opening the view retunes
 //! nothing.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{global, metrics, InputCtx, KeyAction};
 use crate::signal::ft8::bands;
@@ -187,7 +187,7 @@ mod tests {
     use crate::state::ft8::MapRange;
     use crate::state::SdrMetrics;
     use crate::ui::{self, PanelRegistry};
-    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
