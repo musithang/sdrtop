@@ -16,8 +16,8 @@ field falls back to a default rather than refusing to start.
 
 **The RSP1B, driven natively.**
 
-SDRplay sent one. sdrtop now drives it through SDRplay's own API, and
-everything it shows was measured on the radio first, mostly on a cable
+sdrtop now drives the RSP1B through SDRplay's own API, and everything
+it shows was measured on the radio first, mostly on a cable
 from a HackRF. The full story is on
 [its page](https://github.com/musithang/sdrtop/blob/main/user_docs/sdrplay.md).
 
@@ -46,7 +46,6 @@ from a HackRF. The full story is on
   spectrum lines now land on the nearest dot, a hair more precisely.
 - The config gains an `[sdrplay]` block for the RSP1B's switches. Older
   configs load as before.
-- The user guide has a page per radio now, and the README got shorter.
 
 ### Fixed
 

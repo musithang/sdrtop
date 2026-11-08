@@ -68,10 +68,6 @@ https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
 > [!IMPORTANT]
 > **Early development.** New features keep coming, each one measured against the specification and then polished until it reads at a glance. Known issues: plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
-<details>
-  <summary><b>📻 More clips and screenshots</b>: Bluetooth, RDS, the lab benches</summary>
-  <br>
-
 **Piconet follow** · classic Bluetooth<br>
 <sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net-classic.md)</sub>
 
@@ -81,22 +77,6 @@ https://github.com/user-attachments/assets/a9c554c0-bb78-4ac9-9970-b569650d4d08
 <sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. [How it works](user_docs/demodulator.md#rds-in-two-halves)</sub>
 
 https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
-
-  <table>
-    <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
-    </tr>
-    <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
-    </tr>
-    <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
-    </tr>
-  </table>
-</details>
 
 ---
 
@@ -122,7 +102,7 @@ curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/ins
 
 The installer takes the prebuilt binary, or compiles from source when that can't run on your machine. Add your radio's runtime with `sh -s -- --hackrf`, `--rtlsdr`, `--airspy`, `--airspyhf` or `--soapy`; `--sdrplay` checks SDRplay's API and service. Piping a script into `sh` means running code you haven't read, so read it first: [`packaging/install.sh`](packaging/install.sh). I'd want to.
 
-**On Arch**, from the [AUR](https://aur.archlinux.org/packages?K=sdrtop) (packaged by [Ateles](https://aur.archlinux.org/account/Ateles), thank you):
+**On Arch**, from the [AUR](https://aur.archlinux.org/packages?K=sdrtop):
 
 ```sh
 yay -S sdrtop-bin    # or sdrtop, or sdrtop-git
