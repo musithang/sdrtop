@@ -134,23 +134,21 @@ pub fn bonded_frame(
     plate_below: bool,
 ) -> Option<ratatui::layout::Rect> {
     use crate::ui::chrome::frame;
-    use ratatui::widgets::block::{Position, Title};
     use ratatui::widgets::{Block, BorderType};
     let chrome = panel.chrome(state).with_engine_tags(state);
     let stale = chrome.staleness.resolve(state);
     let colour = frame::frame_color(&chrome, state, focused, theme);
     let plate =
         ratatui::text::Line::from(frame::title_spans(&chrome, panel.focus_key(), stale, theme));
-    let title = Title::from(plate).position(if plate_below {
-        Position::Bottom
-    } else {
-        Position::Top
-    });
     let block = Block::default()
         .borders(borders)
         .border_type(BorderType::Rounded)
-        .border_style(ratatui::style::Style::default().fg(colour))
-        .title(title);
+        .border_style(ratatui::style::Style::default().fg(colour));
+    let block = if plate_below {
+        block.title_bottom(plate)
+    } else {
+        block.title_top(plate)
+    };
     let inner = block.inner(area);
     f.render_widget(block, area);
     (inner.width > 0 && inner.height > 0).then_some(inner)
