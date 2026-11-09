@@ -27,7 +27,7 @@ use ratatui::{
     Frame,
 };
 
-use super::caption;
+use super::{caption, say, shown_or_say};
 use crate::signal::ft8::modulate::{COSTAS, COSTAS_AT, SYMBOLS};
 use crate::state::ft8::{DecodeEntry, Shown};
 use crate::state::SdrMetrics;
@@ -127,29 +127,12 @@ impl Panel for Ft8LadderPanel {
         _focused: bool,
     ) {
         let buf = f.buffer_mut();
-        let label = Style::default().fg(theme.label);
-        let say = |buf: &mut ratatui::buffer::Buffer, text: &str| {
-            let y = area.y + area.height / 2;
-            let x = area.x + area.width.saturating_sub(text.chars().count() as u16) / 2;
-            put(buf, area, x, y, text, label);
-        };
-        let d = match state.ft8.shown() {
-            Shown::Waiting => {
-                say(buf, "waiting for a decode");
-                return;
-            }
-            Shown::Gone(call) => {
-                say(
-                    buf,
-                    &format!("{call}: its decodes have left the list; trace no longer kept"),
-                );
-                return;
-            }
-            Shown::Decode(d) => d,
+        let Some(d) = shown_or_say(buf, area, state, theme) else {
+            return;
         };
         match fit(area.width, area.height) {
             Ok(fit) => draw(buf, area, &d, fit, theme),
-            Err(why) => say(buf, &why),
+            Err(why) => say(buf, area, &why, theme),
         }
     }
 }

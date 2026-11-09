@@ -236,6 +236,12 @@ symbol: each of the 79 symbols' energy on every tone (and one guard tone either
 side) on the theme's own colour ramp, the tone the codeword sent drawn through
 it, the symbols the code repaired and the Costas symbols that were not where
 they belong marked under it, and how clearly each symbol was decided.
+`ft8_track`, tone 0 through the transmission against the line the decode
+fitted, each point with its own spread, and a dot where the signal was too
+weak to say. `ft8_power`, the transmission's power half symbol by half symbol
+over its mean, and whether the path was steady or fading. `ft8_decode`, the
+transmission's numbers (SNR, DT, tone 0 with its spread, drift, path, sync,
+what decoding took) and every transmission of the same station still held.
 
 **Observer:** `observer`
 

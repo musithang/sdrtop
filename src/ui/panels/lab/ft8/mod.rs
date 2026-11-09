@@ -11,10 +11,49 @@
 //! first decode it waits, and for a station whose decodes have left the list
 //! it says the trace is no longer kept (POLICY.md, rule 2).
 
+pub mod decode;
 pub mod ladder;
+pub mod power;
+pub mod track;
 
-use crate::state::ft8::DecodeEntry;
-use crate::ui::panels::radio::ft8::{hhmmss, signed};
+use std::sync::Arc;
+
+use ratatui::{layout::Rect, style::Style};
+
+use crate::state::ft8::{DecodeEntry, Shown};
+use crate::state::SdrMetrics;
+use crate::ui::panels::radio::ft8::{hhmmss, put, signed};
+
+/// Below this body width the views that need room give way: the
+/// frequency track and the power, leaving the ladder and the numbers.
+pub const NARROW_BODY: u16 = 150;
+
+/// The transmission to draw, or, written centred in `area`, why there is
+/// none: before the first decode, or a chosen station whose decodes have
+/// left the list.
+pub fn shown_or_say(
+    buf: &mut ratatui::buffer::Buffer,
+    area: Rect,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+) -> Option<Arc<DecodeEntry>> {
+    let text = match state.ft8.shown() {
+        Shown::Decode(d) => return Some(d),
+        Shown::Waiting => "waiting for a decode".to_string(),
+        Shown::Gone(call) => {
+            format!("{call}: its decodes have left the list; trace no longer kept")
+        }
+    };
+    say(buf, area, &text, theme);
+    None
+}
+
+/// `text` centred in `area`, in the label colour.
+pub fn say(buf: &mut ratatui::buffer::Buffer, area: Rect, text: &str, theme: &crate::Theme) {
+    let y = area.y + area.height / 2;
+    let x = area.x + area.width.saturating_sub(text.chars().count() as u16) / 2;
+    put(buf, area, x, y, text, Style::default().fg(theme.label));
+}
 
 /// The transmission a panel's title names: its message, cycle, SNR and
 /// tone 0.

@@ -1,7 +1,9 @@
 # FT8 Lab, Signal: one transmission as the decoder saw it. The tone ladder
 # (79 symbols by 8 tones and a guard either side, the sent tone through it,
-# the repairs and the margin under it) under the cycle row. L goes to World
-# and back with the same station chosen.
+# the repairs and the margin under it) under the cycle row; below it the
+# frequency track, the power and the numbers with the station's history.
+# Under 150 columns the track and the power give way and the numbers take
+# the body. L goes to World and back with the same station chosen.
 section = "ft8_lab"
 slot    = 1
 title   = "Signal"
@@ -11,6 +13,9 @@ about   = "The chosen station's newest transmission as sdrtop's decoder saw it: 
 panels = [
     { name = "header_slim",  position = "top", height = 4 },
     { name = "ft8_cycles",   position = "top", height = 1 },
-    { name = "ft8_ladder",   position = "body" },
+    { name = "ft8_ladder",   position = "top", height = 16 },
+    { name = "ft8_track",    position = "left", width_pct = 32 },
+    { name = "ft8_power",    position = "body" },
+    { name = "ft8_decode",   position = "right", width_pct = 36 },
     { name = "footer",       position = "bottom" },
 ]
