@@ -18,11 +18,31 @@ pub mod track;
 
 use std::sync::Arc;
 
-use ratatui::{layout::Rect, style::Style};
+use ratatui::{
+    layout::Rect,
+    style::{Color, Style},
+};
 
 use crate::state::ft8::{DecodeEntry, Shown};
 use crate::state::SdrMetrics;
 use crate::ui::panels::radio::ft8::{hhmmss, put, signed};
+
+/// The heat's range, dB over the noise: the ladder's cells and the power's
+/// columns, one quantity on one scale.
+pub const HEAT_DB: (f64, f64) = (-5.0, 30.0);
+
+/// `db` over the noise on the theme's own gradient (the waterfall's).
+pub fn heat(t: &crate::Theme, db: f64) -> Color {
+    t.palette_color((((db - HEAT_DB.0) / (HEAT_DB.1 - HEAT_DB.0)).clamp(0.0, 1.0)) as f32)
+}
+
+/// The sent tone's energy over the noise in symbol `s`, dB: the ladder's
+/// lit cell.
+pub fn sent_db(tr: &crate::signal::ft8::trace::Trace, s: usize) -> f64 {
+    let noise = f64::from(tr.noise).max(f64::MIN_POSITIVE);
+    let e = f64::from(tr.energies[s][usize::from(tr.tones[s]) + 1]);
+    10.0 * (e / noise).max(1e-6).log10()
+}
 
 /// Below this body width the views that need room give way: the
 /// frequency track and the power, leaving the ladder and the numbers.

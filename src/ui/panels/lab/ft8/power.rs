@@ -9,10 +9,17 @@
 //! share of the power one steady carrier explains
 //! ([`crate::signal::ft8::demod::Physics::coherence`]). A column past twice
 //! the mean is drawn full with a `▲` on top rather than cut off silently.
+//!
+//! **Its colour is the ladder's.** Each column is coloured by the sent
+//! tone's energy over the noise in the symbols it covers, on the same
+//! gradient the ladder's cells use: one quantity on one scale, so a tall
+//! column and a bright cell above it are the same moment. The darkest
+//! column is lifted off the gradient's bottom, which is the background in
+//! most themes, so a weak column still shows.
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
-use super::{say, shown_or_say};
+use super::{heat, say, sent_db, shown_or_say, HEAT_DB};
 use crate::state::ft8::DecodeEntry;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -87,10 +94,11 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
     for c in 0..cols {
         let v = column_mean(env, c, cols);
         let full = (v / TOP).clamp(0.0, 1.0) * f64::from(rows) * 8.0;
+        let ink = Style::default().fg(heat(t, column_db(&d.decode.trace, c, cols)));
         for r in 0..rows {
             let lo = f64::from(rows - 1 - r) * 8.0;
             let e = (full - lo).clamp(0.0, 8.0).round() as usize;
-            put(buf, area, x0 + c as u16, area.y + r, EIGHTHS[e], value);
+            put(buf, area, x0 + c as u16, area.y + r, EIGHTHS[e], ink);
         }
         if v > TOP {
             put(
@@ -121,6 +129,26 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
     put(buf, area, x + 1, foot, "of it one carrier", label);
 }
 
+/// The colour's figure for column `c` of `cols`: the sent tone's energy
+/// over the noise, averaged as energy over the symbols the column covers,
+/// in dB, kept off the gradient's lowest fifth.
+pub fn column_db(tr: &crate::signal::ft8::trace::Trace, c: usize, cols: usize) -> f64 {
+    let pieces = tr.envelope.len().max(1);
+    let a = c * pieces / cols;
+    let b = ((c + 1) * pieces / cols).max(a + 1).min(pieces);
+    let per = (pieces / crate::signal::ft8::modulate::SYMBOLS).max(1);
+    let (s0, s1) = (
+        a / per,
+        ((b - 1) / per).min(crate::signal::ft8::modulate::SYMBOLS - 1),
+    );
+    let mean = (s0..=s1)
+        .map(|s| 10f64.powf(sent_db(tr, s) / 10.0))
+        .sum::<f64>()
+        / (s1 - s0 + 1) as f64;
+    let floor = HEAT_DB.0 + 0.2 * (HEAT_DB.1 - HEAT_DB.0);
+    (10.0 * mean.max(1e-6).log10()).max(floor)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +173,20 @@ mod tests {
                 lines.contains(&format!("{word} {:.2}", s.decode.physics.coherence)),
                 "{lines}"
             );
+        }
+    }
+
+    /// A column's colour is the ladder's lit cell for its symbols, never
+    /// below the gradient's lowest fifth.
+    #[test]
+    fn a_columns_colour_is_its_symbols_sent_tone() {
+        let m = SdrMetrics::fixture().streaming().ft8_traced();
+        let tr = &m.ft8.decodes[0].decode.trace;
+        // One column a symbol: its own sent tone, or the floor.
+        let floor = HEAT_DB.0 + 0.2 * (HEAT_DB.1 - HEAT_DB.0);
+        for s in [0, 10, 40, 78] {
+            let want = sent_db(tr, s).max(floor);
+            assert!((column_db(tr, s, 79) - want).abs() < 1e-9, "symbol {s}");
         }
     }
 

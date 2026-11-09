@@ -4,12 +4,14 @@
 //! The frequency track: tone 0 through the transmission against the line
 //! the decode fitted (its frequency and its drift), group by group.
 //!
-//! Each point is the trace's ([`crate::signal::ft8::trace::TrackPoint`]),
-//! drawn with its own spread as a bar. A point whose spread is a tenth of the
-//! tone spacing or more is too weak to say where the tone was, and shows as a
-//! dot on the line's row, never as a place. The plot is +-2 Hz; a point past
-//! that is drawn at the edge as an arrow, so a jump stays visible without
-//! being drawn where it was not.
+//! Hz from the decode's tone 0 up the side, the transmission's 12.64 s
+//! across. The fitted line is drawn as it runs, so its drift shows as a
+//! slope; each point is the trace's ([`crate::signal::ft8::trace::TrackPoint`]),
+//! tone 0 over eight symbols, drawn with its own spread as a bar. A point
+//! whose spread is a tenth of the tone spacing or more is too weak to say
+//! where the tone was: it is not drawn, and the figures say how many there
+//! were. The plot is +-2 Hz; a point past that is drawn at the edge as an
+//! arrow, so a jump stays visible without being drawn where it was not.
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
@@ -80,49 +82,55 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
     let tr = &d.decode.trace;
     let p = &d.decode.physics;
     let label = Style::default().fg(t.label);
-    let rows = area.height - 1;
+    let value = Style::default().fg(t.value);
+    // Plot rows; then the time axis, the figures and, with room, the key.
+    let keyed = area.height >= 9;
+    let rows = area.height - if keyed { 3 } else { 2 };
     let x0 = area.x + 8;
     let plot_w = area.width.saturating_sub(9).max(2);
+    let length = SYMBOLS as f64 * SYMBOL_SECONDS;
     let row_of = |hz: f64| -> u16 {
         let k = (SPAN_HZ - hz.clamp(-SPAN_HZ, SPAN_HZ)) / (2.0 * SPAN_HZ);
         (k * f64::from(rows - 1)).round() as u16
     };
-    for (hz, text) in [(SPAN_HZ, "+2 Hz"), (0.0, " line"), (-SPAN_HZ, "-2 Hz")] {
+    let col_of = |at: f64| -> u16 { x0 + ((at / length) * f64::from(plot_w - 1)).round() as u16 };
+    // The scale: Hz from the decode's tone 0.
+    let mut ticks = vec![(SPAN_HZ, "+2 Hz"), (0.0, "   f0"), (-SPAN_HZ, "-2 Hz")];
+    if rows >= 7 {
+        ticks.extend([(1.0, "   +1"), (-1.0, "   -1")]);
+    }
+    for (hz, text) in ticks {
         put(buf, area, area.x + 1, area.y + row_of(hz), text, label);
     }
-    let zero = area.y + row_of(0.0);
+    // The fitted line, its drift as a slope: tone 0 at every column.
     for c in 0..plot_w {
+        let at = f64::from(c) / f64::from(plot_w - 1) * length;
+        let hz = on_the_line(p.f0, p.drift, at) - p.f0;
         put(
             buf,
             area,
             x0 + c,
-            zero,
-            "┄",
-            Style::default().fg(t.border_dim),
+            area.y + row_of(hz),
+            "┈",
+            Style::default().fg(t.border_default),
         );
     }
-    let length = SYMBOLS as f64 * SYMBOL_SECONDS;
+    // The points: each where the samples put tone 0, with its spread.
+    let mut weak = 0;
     for pt in &tr.f0_track {
-        let col = x0 + ((pt.at / length) * f64::from(plot_w - 1)).round() as u16;
-        let dev = pt.hz - on_the_line(p.f0, p.drift, pt.at);
         if pt.sigma >= TRACKED_SIGMA_HZ {
-            put(buf, area, col, zero, "·", label);
+            weak += 1;
             continue;
         }
-        let (top, bottom) = (row_of(dev + pt.sigma), row_of(dev - pt.sigma));
+        let col = col_of(pt.at);
+        let hz = pt.hz - p.f0;
+        let (top, bottom) = (row_of(hz + pt.sigma), row_of(hz - pt.sigma));
         for r in top..=bottom {
-            put(
-                buf,
-                area,
-                col,
-                area.y + r,
-                "│",
-                Style::default().fg(t.value),
-            );
+            put(buf, area, col, area.y + r, "│", value);
         }
-        let mark = if dev > SPAN_HZ {
+        let mark = if hz > SPAN_HZ {
             "▲"
-        } else if dev < -SPAN_HZ {
+        } else if hz < -SPAN_HZ {
             "▼"
         } else {
             "●"
@@ -131,30 +139,63 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
             buf,
             area,
             col,
-            area.y + row_of(dev),
+            area.y + row_of(hz),
             mark,
             Style::default().fg(t.value_hi),
         );
     }
-    let foot = area.y + rows;
-    let x = put(buf, area, x0, foot, "line ", label);
+    // Time across.
+    let axis = area.y + rows;
+    put(buf, area, x0, axis, "0 s", label);
+    let mid = col_of(length / 2.0);
+    put(buf, area, mid.saturating_sub(1), axis, "6.3", label);
+    put(
+        buf,
+        area,
+        (x0 + plot_w).saturating_sub(6),
+        axis,
+        "12.6 s",
+        label,
+    );
+    // The figures.
+    let fig = axis + 1;
+    let x = put(buf, area, x0, fig, "f0 ", label);
+    let x = put(buf, area, x, fig, &format!("{:.2} Hz", p.f0), value);
+    let x = put(buf, area, x, fig, "  drift ", label);
     let x = put(
         buf,
         area,
         x,
-        foot,
-        &format!("{:.2} Hz", p.f0),
-        Style::default().fg(t.value),
-    );
-    let x = put(buf, area, x, foot, "  drift ", label);
-    put(
-        buf,
-        area,
-        x,
-        foot,
+        fig,
         &format!("{} Hz", signed(p.drift, 2)),
-        Style::default().fg(t.value),
+        value,
     );
+    if weak > 0 {
+        put(
+            buf,
+            area,
+            x,
+            fig,
+            &format!("  {weak} too weak to place"),
+            label,
+        );
+    }
+    if keyed {
+        let key = fig + 1;
+        let x = put(buf, area, x0, key, "●", Style::default().fg(t.value_hi));
+        let x = put(buf, area, x + 1, key, "8 symbols  ", label);
+        let x = put(buf, area, x, key, "│", value);
+        let x = put(buf, area, x + 1, key, "1 sigma  ", label);
+        let x = put(
+            buf,
+            area,
+            x,
+            key,
+            "┈┈",
+            Style::default().fg(t.border_default),
+        );
+        put(buf, area, x + 1, key, "fitted f0 and drift", label);
+    }
 }
 
 #[cfg(test)]
@@ -180,12 +221,13 @@ mod tests {
                 .filter(|p| p.sigma < TRACKED_SIGMA_HZ)
                 .count();
             let lines = render(Ft8TrackPanel, 63, 18, &m).join("\n");
-            let placed = lines.matches('●').count()
+            // Less the one in the key.
+            let placed = lines.matches('●').count() - 1
                 + lines.matches('▲').count()
                 + lines.matches('▼').count();
             assert_eq!(placed, tracked, "{lines}");
             assert!(
-                lines.contains(&format!("line {:.2} Hz", s.decode.physics.f0)),
+                lines.contains(&format!("f0 {:.2} Hz", s.decode.physics.f0)),
                 "{lines}"
             );
         }
@@ -210,8 +252,9 @@ mod tests {
         m.ft8.view.selected = None;
         let lines = render(Ft8TrackPanel, 63, 18, &m).join("\n");
         assert_eq!(lines.matches('▲').count(), 1, "{lines}");
-        assert_eq!(lines.matches('·').count(), 1, "{lines}");
-        assert_eq!(lines.matches('●').count(), 8, "{lines}");
+        assert!(lines.contains("1 too weak to place"), "{lines}");
+        // Eight placed, and one in the key.
+        assert_eq!(lines.matches('●').count(), 8 + 1, "{lines}");
     }
 
     #[test]
