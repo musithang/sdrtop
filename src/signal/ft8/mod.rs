@@ -40,7 +40,7 @@
 #[cfg(test)]
 mod compare;
 #[cfg(test)]
-mod conformance;
+pub(crate) mod conformance;
 /// The menu section the FT8 view is filed under: the one whose being on
 /// screen turns the FT8 feed on.
 pub const SECTION: &str = "ft8";

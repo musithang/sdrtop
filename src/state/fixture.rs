@@ -500,6 +500,129 @@ impl SdrMetrics {
         self
     }
 
+    /// One decoded FT8 cycle on 20 m with real traces: six standard CQs at
+    /// -18 to +6 dB, one drifting 1.5 Hz, made by the closed-form transmitter
+    /// on unit noise and read by the decoder (once per test run), published
+    /// as the worker publishes a cycle. The listener is placed in Budapest so
+    /// distances can be drawn.
+    pub(crate) fn ft8_traced(mut self) -> Self {
+        use crate::signal::dsp::testkit::Rng;
+        use crate::signal::ft8::{conformance, cycle, hash::HashBook};
+        static DECODED: std::sync::OnceLock<(cycle::Report, f64)> = std::sync::OnceLock::new();
+        let (report, seconds) = DECODED
+            .get_or_init(|| {
+                let mut rng = Rng::new(61);
+                let mut sent = conformance::readable(6, 0.0, &mut rng);
+                for (s, snr) in sent.iter_mut().zip([-18.0, -12.0, -6.0, 0.0, 6.0, -9.0]) {
+                    s.snr_db = snr;
+                }
+                sent[5].drift = 1.5;
+                let x = conformance::cycle(&sent, &mut rng);
+                let settings = cycle::Settings {
+                    max_candidates: 40,
+                    ..cycle::Settings::DEFAULT
+                };
+                let t = Instant::now();
+                let report = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+                (report, t.elapsed().as_secs_f64())
+            })
+            .clone();
+        let dial = 14_074_000;
+        self.radio.frequency = dial;
+        self.home.latitude = Some(47.497);
+        self.home.longitude = Some(19.04);
+        let entry = ft8::CycleEntry {
+            start_unix: FT8_EPOCH,
+            dial_hz: dial,
+            outcome: ft8::CycleOutcome::Decoded,
+            decodes: report.decodes.len(),
+            candidates: report.candidates,
+            malformed: report.malformed,
+            seconds,
+            band: report.band,
+            clock: None,
+            funnel: report.funnel,
+            floor_db_hz: report.floor_db_hz,
+            setting: Some(ft8::Setting::of(&self.radio, dial, 192_000.0)),
+            setting_changed: false,
+            held: false,
+            lateness: None,
+        };
+        self.ft8
+            .push_cycle(entry, report.decodes, None, Instant::now(), None);
+        self
+    }
+
+    /// An hour of FT8 on 20 m, generated from a seed rather than typed:
+    /// forty stations with locators anywhere on Earth, each heard on its own
+    /// parity for a run of cycles at its own tone, SNR -22 to +10 dB. Only the
+    /// hour's history and the station table: no decode list, no traces.
+    pub(crate) fn ft8_hour(mut self) -> Self {
+        use crate::signal::dsp::testkit::Rng;
+        let mut rng = Rng::new(67);
+        let dial = 14_074_000;
+        self.radio.frequency = dial;
+        self.home.latitude = Some(47.497);
+        self.home.longitude = Some(19.04);
+        let cycles = 240u64;
+        let letter = |rng: &mut Rng, n: u64| (b'A' + (rng.next_u64() % n) as u8) as char;
+        let mut rows = Vec::new();
+        for k in 0..40u64 {
+            let call = format!(
+                "K{}{}{}",
+                k % 10,
+                letter(&mut rng, 26),
+                letter(&mut rng, 26)
+            );
+            let locator = format!(
+                "{}{}{}{}",
+                letter(&mut rng, 18),
+                letter(&mut rng, 18),
+                rng.next_u64() % 10,
+                rng.next_u64() % 10
+            );
+            let parity = rng.next_u64() % 2;
+            let first = rng.next_u64() % (cycles - 8);
+            let run = 4 + rng.next_u64() % 40;
+            let f0 = 200.0 + rng.unit() * 2700.0;
+            let call: Arc<str> = Arc::from(call.as_str());
+            let mut station = ft8::Station {
+                call: call.to_string(),
+                locator: Some(locator),
+                last_unix: 0.0,
+                last_at: Instant::now(),
+                dial_hz: dial,
+                heard: 0,
+                snr: VecDeque::new(),
+                called_you: false,
+            };
+            for c in (first..(first + 2 * run).min(cycles)).filter(|c| c % 2 == parity) {
+                let unix = FT8_EPOCH + 15.0 * c as f64;
+                let snr = -22.0 + rng.unit() * 32.0;
+                rows.push(ft8::HistoryRow {
+                    cycle_unix: unix,
+                    dial_hz: dial,
+                    f0: f0 as f32,
+                    snr_db: snr as f32,
+                    dt: (rng.unit() * 0.6 - 0.3) as f32,
+                    call: Some(Arc::clone(&call)),
+                });
+                station.last_unix = unix;
+                station.heard += 1;
+                station.snr.push_back((unix, snr));
+                if station.snr.len() > ft8::SNR_HISTORY {
+                    station.snr.pop_front();
+                }
+            }
+            if station.heard > 0 {
+                self.ft8.stations.insert(station.call.clone(), station);
+            }
+        }
+        rows.sort_by(|a, b| a.cycle_unix.total_cmp(&b.cycle_unix));
+        self.ft8.history = Arc::new(rows.into());
+        self
+    }
+
     /// The knob on one of the gain model's vendor curves, the chain exactly on
     /// `step` of it.
     pub(crate) fn on_curve(mut self, curve: usize, step: usize) -> Self {
@@ -573,6 +696,9 @@ impl SdrMetrics {
 /// `Panel::render` directly, so the frame, the nameplate and the `[STALE]` tag
 /// are part of what is compared - those are as much the panel's output as its
 /// body is, and R3 moved them out of the panel precisely so they could not drift.
+/// The start of the FT8 fixtures' first cycle: an even one, on the minute.
+pub(crate) const FT8_EPOCH: f64 = 1_800_000_000.0;
+
 pub(crate) fn draw(
     panel: impl crate::ui::panel::Panel + 'static,
     width: u16,
@@ -611,6 +737,42 @@ mod tests {
 
     /// The fixture has to be a state the app can actually be in, or every test
     /// written against it is testing a fiction.
+    #[test]
+    fn the_traced_ft8_cycle_carries_real_traces() {
+        let m = SdrMetrics::fixture().ft8_traced();
+        assert!(m.ft8.decodes.len() >= 5, "{}", m.ft8.decodes.len());
+        for d in &m.ft8.decodes {
+            let t = &d.decode.trace;
+            assert_eq!(t.envelope.len(), 158);
+            assert_eq!(t.f0_track.len(), 10);
+            assert!(t.noise > 0.0);
+        }
+        let c = m.ft8.cycles.back().unwrap();
+        assert!(!c.funnel.is_empty());
+        assert!(c.floor_db_hz.is_some());
+        assert_eq!(m.ft8.history.len(), m.ft8.decodes.len());
+    }
+
+    #[test]
+    fn the_ft8_hour_is_an_hour_of_stations_with_locators() {
+        let m = SdrMetrics::fixture().ft8_hour();
+        let h = &m.ft8.history;
+        let span = h.back().unwrap().cycle_unix - h.front().unwrap().cycle_unix;
+        assert!(
+            (3000.0..=crate::state::ft8::HISTORY_SECONDS).contains(&span),
+            "{span}"
+        );
+        assert!(h
+            .iter()
+            .zip(h.iter().skip(1))
+            .all(|(a, b)| a.cycle_unix <= b.cycle_unix));
+        for r in h.iter() {
+            let s = &m.ft8.stations[r.call.as_deref().unwrap()];
+            assert!(s.locator.is_some());
+        }
+        assert!(m.ft8.stations.len() >= 30, "{}", m.ft8.stations.len());
+    }
+
     #[test]
     fn the_idle_fixture_is_a_coherent_idle_radio() {
         let m = SdrMetrics::fixture();

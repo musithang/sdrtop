@@ -34,14 +34,6 @@ use super::hash::HashBook;
 
 const CYCLE: usize = 15 * RATE_HZ as usize;
 
-/// A recording's samples as complex floats at full scale 1, and how each
-/// contiguous run of them is timed.
-struct Recording {
-    rate: f64,
-    /// Contiguous runs: (UTC of the first sample, samples).
-    runs: Vec<(f64, Vec<Complex<f32>>)>,
-}
-
 fn rfc3339_to_unix(s: &str) -> f64 {
     // `2026-10-30T20:35:40.954746Z`
     let (date, time) = s.trim_end_matches('Z').split_once('T').unwrap();
@@ -64,7 +56,11 @@ fn rfc3339_to_unix(s: &str) -> f64 {
     days as f64 * 86_400.0 + hh * 3600.0 + mm * 60.0 + ss
 }
 
-fn read_recording(meta: &Path) -> Recording {
+/// A recording through FT8's channel: the UTC of the channel's first
+/// sample, and the channel's samples. Read block by block, so a recording
+/// of hours at the radio's rate never has to fit in memory (two hours of the
+/// HF+ at 192 kS/s are 11.5 GB of pairs; at 12 kS/s they are 0.7 GB).
+fn channel_of_recording(meta: &Path) -> (f64, Vec<Complex<f32>>) {
     use std::io::Read;
     let m: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(meta).unwrap()).unwrap();
@@ -101,20 +97,40 @@ fn read_recording(meta: &Path) -> Recording {
     // cycle in it can be cut; both decoders are handed the same gaps.
     let caps = m["captures"].as_array().unwrap();
     let at = |c: &serde_json::Value, k: &str| c[k].as_u64().unwrap() as usize;
-    let total = at(caps.last().unwrap(), "core:global_index")
-        + (g["sdrtop:pairs_written"].as_u64().unwrap() as usize
-            - at(caps.last().unwrap(), "core:sample_start"));
-    let mut iq = vec![Complex::new(0.0f32, 0.0); total];
+    let mut ch = Channel::new(rate).expect("a route to 12 000 S/s");
+    let mut x = Vec::new();
     let mut file =
         std::io::BufReader::new(std::fs::File::open(meta.with_extension("sigmf-data")).unwrap());
     let mut buf = vec![0u8; width * 65_536];
+    // The channel is handed 16 384 pairs at a time from the start, zero
+    // fills included, whatever the file reads return: its DC estimate is
+    // seeded from the first block, so the blocks are kept as they always
+    // were and the channel's output is what it always was.
+    const BLOCK: usize = 16_384;
+    let mut staged: Vec<Complex<f32>> = Vec::with_capacity(2 * BLOCK + 65_536);
+    let mut feed = |pairs: &mut dyn Iterator<Item = Complex<f32>>, x: &mut Vec<Complex<f32>>| {
+        staged.extend(pairs);
+        let whole = staged.len() / BLOCK * BLOCK;
+        for block in staged[..whole].chunks(BLOCK) {
+            ch.push(block, x);
+        }
+        staged.drain(..whole);
+    };
+    let mut place = 0usize;
+    let mut lost = 0usize;
     for (k, c) in caps.iter().enumerate() {
+        let index = at(c, "core:global_index");
+        if place < index {
+            let n = index - place;
+            feed(&mut std::iter::repeat_n(Complex::new(0.0, 0.0), n), &mut x);
+            place += n;
+            lost += n;
+        }
         let (from, to) = (
             at(c, "core:sample_start"),
             caps.get(k + 1)
                 .map_or(usize::MAX, |n| at(n, "core:sample_start")),
         );
-        let mut place = at(c, "core:global_index");
         let mut left = to.saturating_sub(from);
         while left > 0 {
             let want = left.min(65_536) * width;
@@ -122,14 +138,16 @@ fn read_recording(meta: &Path) -> Recording {
             if got == 0 {
                 break;
             }
-            for chunk in buf[..got - got % width].chunks(width) {
-                if place < iq.len() {
-                    iq[place] = pair(chunk);
-                }
-                place += 1;
-            }
+            feed(
+                &mut buf[..got - got % width].chunks(width).map(pair),
+                &mut x,
+            );
+            place += got / width;
             left -= got / width;
         }
+    }
+    if !staged.is_empty() {
+        ch.push(&staged, &mut x);
     }
     // Arrivals are late, never early: the earliest any capture allows.
     let t0 = caps
@@ -139,16 +157,13 @@ fn read_recording(meta: &Path) -> Recording {
                 - at(c, "core:global_index") as f64 / rate
         })
         .fold(f64::INFINITY, f64::min);
-    let lost = total - g["sdrtop:pairs_written"].as_u64().unwrap() as usize;
     println!(
         "{:.1} s at {rate} S/s, {lost} pairs lost and filled ({:.3} %)",
-        total as f64 / rate,
-        lost as f64 * 100.0 / total as f64
+        place as f64 / rate,
+        lost as f64 * 100.0 / place.max(1) as f64
     );
-    Recording {
-        rate,
-        runs: vec![(t0, iq)],
-    }
+    // Channel sample k was taken at t0 + k / 12000 - the channel's delay.
+    (t0 - ch.delay(), x)
 }
 
 /// The upper sideband of a cycle, as real audio with peaks near full scale.
@@ -306,35 +321,26 @@ fn cycles_from_a_recording() {
     let Ok(meta) = std::env::var("FT8_SIGMF") else {
         return;
     };
-    let rec = read_recording(Path::new(&meta));
+    let (first, x) = channel_of_recording(Path::new(&meta));
     let dir = out_dir();
     let mut ours = Vec::new();
     let mut book = HashBook::new();
     if let Ok(call) = std::env::var("FT8_CALL") {
         book.learn(&call);
     }
-    for (t0, iq) in &rec.runs {
-        let mut ch = Channel::new(rec.rate).expect("a route to 12 000 S/s");
-        let mut x = Vec::new();
-        for block in iq.chunks(16_384) {
-            ch.push(block, &mut x);
+    let mut start = (first / 15.0).ceil() * 15.0;
+    loop {
+        let i = ((start - first) * RATE_HZ as f64).round() as usize;
+        if i + CYCLE > x.len() {
+            break;
         }
-        // Channel sample k was taken at t0 + k / 12000 - the channel's delay.
-        let first = t0 - ch.delay();
-        let mut start = (first / 15.0).ceil() * 15.0;
-        loop {
-            let i = ((start - first) * RATE_HZ as f64).round() as usize;
-            if i + CYCLE > x.len() {
-                break;
-            }
-            let cyc = &x[i..i + CYCLE];
-            let name = format!("{}_{}.wav", yymmdd(start), hhmmss(start));
-            write_wav(&dir.join(&name), &usb_audio(cyc));
-            let lines = decode_lines(&hhmmss(start), cyc, &mut book);
-            println!("{name}: {} decodes", lines.len());
-            ours.extend(lines);
-            start += 15.0;
-        }
+        let cyc = &x[i..i + CYCLE];
+        let name = format!("{}_{}.wav", yymmdd(start), hhmmss(start));
+        write_wav(&dir.join(&name), &usb_audio(cyc));
+        let lines = decode_lines(&hhmmss(start), cyc, &mut book);
+        println!("{name}: {} decodes", lines.len());
+        ours.extend(lines);
+        start += 15.0;
     }
     std::fs::write(dir.join("ours.txt"), ours.join("\n") + "\n").unwrap();
 }

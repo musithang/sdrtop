@@ -27,6 +27,10 @@ pub const DECODES_MAX: usize = 500;
 /// Cycles kept, newest last: the river's rows and the cycle strip.
 pub const CYCLES_MAX: usize = 40;
 
+/// How far back the hour's history reaches, seconds before the newest
+/// cycle.
+pub const HISTORY_SECONDS: f64 = 3600.0;
+
 /// How long a station stays after it was last heard: the longest time
 /// window the map offers ([`Window::Session`]) reaches back this far.
 pub const STATION_SECONDS: f64 = 86_400.0;
@@ -485,6 +489,38 @@ pub struct Ft8State {
     /// The radio's rate offers no route to FT8's 12 000 samples a second.
     pub unreachable_rate: Option<f64>,
     pub feed: Ft8Feed,
+    /// Every decode of the last [`HISTORY_SECONDS`], oldest first, as
+    /// [`HistoryRow`]s: the decode list keeps [`DECODES_MAX`], about three
+    /// minutes of a busy band, and the hour's views need the hour. Behind an
+    /// `Arc` because the state is cloned for every frame.
+    pub history: Arc<VecDeque<HistoryRow>>,
+}
+
+/// One decode as the hour keeps it: when, where in the band, how strong,
+/// and who sent it. Where the sender is goes through the station table,
+/// which holds the latest locator the station sent, as the map does.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryRow {
+    /// Its cycle's start, Unix seconds.
+    pub cycle_unix: f64,
+    pub dial_hz: u64,
+    /// Tone 0, Hz above the dial.
+    pub f0: f32,
+    pub snr_db: f32,
+    pub dt: f32,
+    /// The sender heard in full; `None` for a message without one (free
+    /// text, telemetry, a hashed sender).
+    pub call: Option<Arc<str>>,
+}
+
+impl HistoryRow {
+    /// Odd cycles start 15 and 45 s past the minute.
+    // Read by tests until the Band view draws it; `expect` fails the build
+    // once something does.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn odd(&self) -> bool {
+        (self.cycle_unix / 15.0).round() as i64 % 2 != 0
+    }
 }
 
 impl Ft8State {
@@ -498,6 +534,31 @@ impl Ft8State {
         at: Instant,
         my_call: Option<&str>,
     ) {
+        let newest = self
+            .history
+            .back()
+            .map_or(cycle.start_unix, |r| r.cycle_unix.max(cycle.start_unix));
+        let stale = self
+            .history
+            .front()
+            .is_some_and(|r| newest - r.cycle_unix > HISTORY_SECONDS);
+        if !decodes.is_empty() || stale {
+            let history = Arc::make_mut(&mut self.history);
+            history.extend(decodes.iter().map(|d| HistoryRow {
+                cycle_unix: cycle.start_unix,
+                dial_hz: cycle.dial_hz,
+                f0: d.physics.f0 as f32,
+                snr_db: d.physics.snr_db as f32,
+                dt: d.dt as f32,
+                call: d.message.sender().map(Arc::from),
+            }));
+            while history
+                .front()
+                .is_some_and(|r| newest - r.cycle_unix > HISTORY_SECONDS)
+            {
+                history.pop_front();
+            }
+        }
         for d in decodes {
             self.decoded += 1;
             let for_you = my_call.is_some_and(|me| d.message.addressees().contains(&me));
@@ -655,6 +716,7 @@ impl Ft8State {
         self.stations.clear();
         self.clock = None;
         self.view.selected = None;
+        self.history = Arc::default();
     }
 
     /// The decodes in the order the list shows them: cycles newest first,
@@ -766,6 +828,142 @@ mod tests {
             held: false,
             lateness: None,
         }
+    }
+
+    /// What the published state costs on a busy band: an hour of 40
+    /// decodes a cycle, each with its own copy of a real trace. Prints the
+    /// traces' memory at the decode list's bound, `push_cycle`'s time (the
+    /// lock block) with a frame's snapshot held, so the hour is copied on
+    /// write as it is live, and the time to clone the state (every frame).
+    #[test]
+    #[ignore]
+    fn measure_the_published_state() {
+        let real = crate::state::SdrMetrics::fixture().ft8_traced();
+        let model = real.ft8.decodes[0].decode.clone();
+        let t = &model.trace;
+        let trace_bytes = std::mem::size_of::<crate::signal::ft8::trace::Trace>()
+            + t.f0_track.capacity() * std::mem::size_of::<crate::signal::ft8::trace::TrackPoint>()
+            + t.envelope.capacity() * 4;
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        let mut push = Vec::new();
+        let mut snapshot = s.clone();
+        for k in 0..240u32 {
+            let ds: Vec<Decode> = (0..40)
+                .map(|i| {
+                    let mut d = model.clone();
+                    d.trace = Arc::new((*model.trace).clone());
+                    d.message = Message::Standard {
+                        to: Call::Cq(None),
+                        from: Call::Std {
+                            call: format!("K{}A{}", i % 10, (b'A' + (k % 26) as u8) as char),
+                            suffix: None,
+                        },
+                        ack: false,
+                        word: G15::Grid("JN97".into()),
+                    };
+                    d
+                })
+                .collect();
+            let t0 = Instant::now();
+            s.push_cycle(
+                cycle(1_800_000_000.0 + 15.0 * f64::from(k)),
+                ds,
+                None,
+                now,
+                None,
+            );
+            push.push(t0.elapsed().as_secs_f64() * 1000.0);
+            snapshot = s.clone();
+        }
+        drop(snapshot);
+        push.sort_by(f64::total_cmp);
+        let t0 = Instant::now();
+        for _ in 0..100 {
+            std::hint::black_box(s.clone());
+        }
+        let clone_us = t0.elapsed().as_secs_f64() * 1e6 / 100.0;
+        println!(
+            "trace {trace_bytes} B, at {DECODES_MAX} decodes {:.2} MB; history {} rows",
+            (trace_bytes * DECODES_MAX) as f64 / 1e6,
+            s.history.len()
+        );
+        println!(
+            "push_cycle ms: median {:.3}, p90 {:.3}, max {:.3}; state clone {clone_us:.1} us",
+            push[push.len() / 2],
+            push[push.len() * 9 / 10],
+            push[push.len() - 1]
+        );
+    }
+
+    #[test]
+    fn the_hour_keeps_an_hour_and_every_decode_in_it() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        // 70 minutes of cycles, two decodes each.
+        for k in 0..280 {
+            let t = 1_800_000_000.0 + 15.0 * f64::from(k);
+            let ds = vec![
+                decode("HA5ZZT", Some("JN97"), -10.0),
+                decode("DL1ABC", None, -15.0),
+            ];
+            s.push_cycle(cycle(t), ds, None, now, None);
+        }
+        let h = &s.history;
+        let newest = h.back().unwrap().cycle_unix;
+        assert!(newest - h.front().unwrap().cycle_unix <= HISTORY_SECONDS);
+        assert_eq!(h.len(), 2 * (HISTORY_SECONDS / 15.0) as usize + 2);
+        assert_eq!(h.back().unwrap().call.as_deref(), Some("DL1ABC"));
+        assert!(s.decodes.len() <= DECODES_MAX);
+    }
+
+    #[test]
+    fn a_decode_without_a_sender_is_still_in_the_hour() {
+        let mut s = Ft8State::default();
+        let mut d = decode("HA5ZZT", None, -10.0);
+        d.message = Message::FreeText("TNX 73 GL".into());
+        s.push_cycle(cycle(1_800_000_015.0), vec![d], None, Instant::now(), None);
+        assert_eq!(s.history.len(), 1);
+        assert_eq!(s.history[0].call, None);
+        assert!(s.history[0].odd());
+    }
+
+    #[test]
+    fn clearing_forgets_the_hour() {
+        let mut s = Ft8State::default();
+        s.push_cycle(
+            cycle(1_800_000_000.0),
+            vec![decode("HA5ZZT", None, -10.0)],
+            None,
+            Instant::now(),
+            None,
+        );
+        assert!(!s.history[0].odd());
+        s.clear();
+        assert!(s.history.is_empty());
+    }
+
+    /// A trace lives as long as its decode: the decode list's bound is the
+    /// traces' bound.
+    #[test]
+    fn a_trace_leaves_with_its_decode() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        let first = decode("HA5ZZT", None, -10.0);
+        let trace = Arc::downgrade(&first.trace);
+        s.push_cycle(cycle(1_800_000_000.0), vec![first], None, now, None);
+        assert!(trace.upgrade().is_some());
+        for k in 1..=DECODES_MAX {
+            let t = 1_800_000_000.0 + 15.0 * k as f64;
+            s.push_cycle(
+                cycle(t),
+                vec![decode("DL1ABC", None, -15.0)],
+                None,
+                now,
+                None,
+            );
+        }
+        assert!(trace.upgrade().is_none());
     }
 
     #[test]
