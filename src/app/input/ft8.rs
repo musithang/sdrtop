@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The FT8 view's keys, live whenever the view is on screen.
+//! The FT8 views' keys, live whenever World or the FT8 Lab is on screen.
 //!
 //! **Section-scoped and declining**, as the pager's are: on any other view
 //! every one of these keys goes on to what it does there. Here `↑` `↓` choose
@@ -10,6 +10,11 @@
 //! and `←` `→` step between FT8's bands: the one key on this view that
 //! tunes, and only to a band the radio reaches. Opening the view retunes
 //! nothing.
+//!
+//! **One key between World and the Lab.** `L` opens the FT8 Lab from World
+//! and World from the Lab, each at the layout it was last left from. The
+//! selection is the state's, so the station chosen on one side is the
+//! station on the other.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
@@ -17,7 +22,11 @@ use super::{global, metrics, InputCtx, KeyAction};
 use crate::signal::ft8::bands;
 use crate::state::ft8::MapDir;
 
-/// Handle `key` if the FT8 view is on screen and it is one of its own.
+/// What `L` opens on each side the first time.
+const FIRST_WORLD: &str = "radio_ft8";
+const FIRST_LAB: &str = "lab_ft8_signal";
+
+/// Handle `key` if an FT8 view is on screen and it is one of its own.
 /// Returns whether it was.
 pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
     let mut m = metrics(ctx.state);
@@ -31,7 +40,30 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
         KeyCode::Up | KeyCode::Down if gain_picked => return false,
         KeyCode::Up => m.ft8.select_step(false),
         KeyCode::Down => m.ft8.select_step(true),
-        KeyCode::Char('z') => {
+        // Shown as `L`; the input layer folds case, so it arrives as `l`.
+        // With World's map focused, `l` is the map's day and night instead.
+        KeyCode::Char('l') => {
+            let leaving = ctx.engine.active_preset().to_string();
+            let target = if m.ui.is_ft8_lab() {
+                m.ft8.view.lab_preset = Some(leaving);
+                m.ft8
+                    .view
+                    .world_preset
+                    .clone()
+                    .unwrap_or_else(|| FIRST_WORLD.into())
+            } else {
+                m.ft8.view.world_preset = Some(leaving);
+                m.ft8
+                    .view
+                    .lab_preset
+                    .clone()
+                    .unwrap_or_else(|| FIRST_LAB.into())
+            };
+            drop(m);
+            super::global::presets::try_set_preset(ctx.engine, ctx.state, &target);
+        }
+        // The map's range is World's: the Lab has no map.
+        KeyCode::Char('z') if !m.ui.is_ft8_lab() => {
             // A range chosen ends a zoom: the two would say different things.
             m.ft8.view.zoomed = false;
             m.ft8.view.range = m.ft8.view.range.next();
@@ -236,6 +268,42 @@ mod tests {
             s.lock().unwrap().radio.gains,
             SdrMetrics::fixture().radio.gains
         );
+    }
+
+    /// `L` crosses from World to the FT8 Lab and back, each time to the
+    /// layout last left, the chosen station carried; on the Lab `z` (the
+    /// map's range) does nothing, since the Lab has no map.
+    #[test]
+    fn l_crosses_between_world_and_the_lab_with_the_station() {
+        let (mut engine, keys) =
+            crate::app::App::build_ui("radio_ft8", &HashMap::new(), None, true);
+        engine.set_preset("radio_ft8");
+        let s = on_view();
+        s.lock().unwrap().ft8.view.selected = Some("JA1VQD".into());
+        let press_on = |code: KeyCode, engine: &mut ui::LayoutEngine| {
+            let mut footer = true;
+            handle_key(KeyEvent::from(code), &s, None, engine, &mut footer, &keys);
+            // What `App::draw` does every frame: the section is the layout's.
+            let section = engine.scope().map(|sc| sc.id.clone()).unwrap_or_default();
+            s.lock().unwrap().ui.section = section;
+        };
+        press_on(KeyCode::Char('L'), &mut engine);
+        assert_eq!(engine.active_preset(), "lab_ft8_signal");
+        {
+            let m = s.lock().unwrap();
+            assert!(m.ui.is_ft8_lab() && m.ui.is_ft8_section());
+            assert_eq!(m.ft8.view.selected.as_deref(), Some("JA1VQD"));
+            assert_eq!(m.ft8.view.world_preset.as_deref(), Some("radio_ft8"));
+        }
+        let range = s.lock().unwrap().ft8.view.range;
+        press_on(KeyCode::Char('z'), &mut engine);
+        assert_eq!(s.lock().unwrap().ft8.view.range, range);
+        press_on(KeyCode::Char('L'), &mut engine);
+        assert_eq!(engine.active_preset(), "radio_ft8");
+        let m = s.lock().unwrap();
+        assert_eq!(m.ui.section, crate::signal::ft8::SECTION);
+        assert_eq!(m.ft8.view.lab_preset.as_deref(), Some("lab_ft8_signal"));
+        assert_eq!(m.ft8.view.selected.as_deref(), Some("JA1VQD"));
     }
 
     #[test]

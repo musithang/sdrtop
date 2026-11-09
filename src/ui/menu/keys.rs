@@ -296,19 +296,19 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
         ],
     ),
     (
-        "The FT8 view",
+        "The FT8 views",
         &[
             f(
                 "\u{2191} \u{2193}",
                 None,
                 "on FT8: choose a station down the list; with a gain stage picked (, .) the gain",
-                Footer::Section(&[crate::signal::ft8::SECTION], "station"),
+                Footer::Section(&crate::signal::ft8::SECTIONS, "station"),
             ),
             f(
                 "\u{2190} \u{2192}",
                 None,
                 "on FT8: the next band down or up that this radio reaches",
-                Footer::Section(&[crate::signal::ft8::SECTION], "band"),
+                Footer::Section(&crate::signal::ft8::SECTIONS, "band"),
             ),
             f(
                 "Z",
@@ -320,19 +320,25 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 "U",
                 Some('u'),
                 "on FT8: only the messages that name your call, or every one",
-                Footer::Section(&[crate::signal::ft8::SECTION], "only yours"),
+                Footer::Section(&crate::signal::ft8::SECTIONS, "only yours"),
             ),
             f(
                 "C",
                 Some('c'),
                 "on FT8: forget the decodes, the stations and the map",
-                Footer::Section(&[crate::signal::ft8::SECTION], "clear"),
+                Footer::Section(&crate::signal::ft8::SECTIONS, "clear"),
             ),
             f(
                 "O",
                 Some('o'),
                 "on FT8: write every decode held to a CSV file, with what each measured",
-                Footer::Section(&[crate::signal::ft8::SECTION], "export"),
+                Footer::Section(&crate::signal::ft8::SECTIONS, "export"),
+            ),
+            f(
+                "L",
+                Some('l'),
+                "on FT8: the FT8 Lab from World, World from the Lab, the chosen station carried",
+                Footer::Section(&crate::signal::ft8::SECTIONS, "FT8 Lab"),
             ),
         ],
     ),

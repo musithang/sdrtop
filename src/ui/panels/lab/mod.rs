@@ -10,6 +10,7 @@
 pub mod adc_loading;
 pub mod bars;
 pub mod fm_demod;
+pub mod ft8;
 pub mod image_scope;
 pub mod iq_constellation;
 pub mod iq_diagnostics;

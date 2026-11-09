@@ -135,6 +135,7 @@ impl App {
         registry.register(ui::PagerCardPanel);
         registry.register(ui::Ft8MapPanel::new());
         registry.register(ui::Ft8CyclesPanel);
+        registry.register(ui::Ft8LadderPanel);
         registry.register(ui::Ft8BandPanel);
         registry.register(ui::Ft8DecodesPanel);
         registry.register(ui::Ft8CardPanel);
@@ -1605,6 +1606,7 @@ mod tests {
             // spectrum, and FT8 at 912 kS/s spent a tenth of a core on an FFT
             // nothing showed.
             ("radio_ft8", false),
+            ("lab_ft8_signal", false),
             ("radio_pocsag", false),
             ("main", true),
             ("lab_signal", true),
@@ -1672,23 +1674,47 @@ mod tests {
     #[test]
     #[ignore]
     fn render_the_ft8_view() {
-        use ratatui::style::Color;
         let Ok(path) = std::env::var("FT8_VIEW_HTML") else {
             return;
         };
-        let (mut engine, _) = App::build_ui("radio_ft8", &HashMap::new(), None, true);
-        engine.set_preset("radio_ft8");
         let mut m = crate::ui::panels::radio::ft8::sample::evening();
         m.ui.section = crate::signal::ft8::SECTION.to_string();
-        m.ui.active_preset = "radio_ft8".into();
         m.ft8.view.selected = Some("JA1VQD".into());
+        render_html("radio_ft8", m, &path);
+    }
+
+    /// The FT8 Lab's Signal view the same way, on real decodes with their
+    /// traces, to the path in `FT8_LAB_HTML` (and the text beside it, `.txt`).
+    #[test]
+    #[ignore]
+    fn render_the_ft8_lab() {
+        let Ok(path) = std::env::var("FT8_LAB_HTML") else {
+            return;
+        };
+        let mut m = crate::state::SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .ft8_traced();
+        m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
+        render_html("lab_ft8_signal", m, &path);
+    }
+
+    /// `preset` through the real engine at the three reference sizes, as
+    /// HTML with every cell's colours, and as text beside it.
+    fn render_html(preset: &str, mut m: crate::state::SdrMetrics, path: &str) {
+        use ratatui::style::Color;
+        let (mut engine, _) = App::build_ui(preset, &HashMap::new(), None, true);
+        engine.set_preset(preset);
+        m.ui.active_preset = preset.into();
         let theme = crate::Theme::sdr();
         let mut out = String::new();
+        let mut text = String::new();
         for (w, h) in [(191u16, 41u16), (152, 32), (100, 30)] {
             let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
             t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
             let buf = t.backend().buffer().clone();
             out.push_str(&format!("<h2>{w} x {h}</h2><div class=g>"));
+            text.push_str(&format!("{w} x {h}\n"));
             for y in 0..h {
                 out.push_str("<div class=r>");
                 for x in 0..w {
@@ -1703,11 +1729,14 @@ mod tests {
                         col(c.fg, "#c3d2dc"),
                         col(c.bg, "#000000")
                     ));
+                    text.push_str(c.symbol());
                 }
                 out.push_str("</div>");
+                text.push('\n');
             }
             out.push_str("</div>");
         }
         std::fs::write(path, out).unwrap();
+        std::fs::write(format!("{path}.txt"), text).unwrap();
     }
 }

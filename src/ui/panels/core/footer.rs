@@ -125,6 +125,8 @@ fn section_group(m: &SdrMetrics) -> Group {
             let ft8 = m.ui.is_ft8_section();
             let view = &m.pager.view;
             out.push(match row.ch {
+                // The bridge names where it leads from here.
+                Some('l') if ft8 && m.ui.is_ft8_lab() => format!("[{}] World", row.key),
                 Some('m') if net => format!("[{}] {label}={}", row.key, m.net.mode.label()),
                 Some('i') if net => {
                     format!("[{}] {label}={}", row.key, m.net.address_display.label())

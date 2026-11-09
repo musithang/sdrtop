@@ -528,6 +528,11 @@ fn lab_table() -> Vec<Node> {
         )
         .hint("2.4 · 5 GHz")
         .about("Routers, phones, laptops: who is using the air, and how."),
+        // A mode is not a device: its own heading.
+        heading("MEASURE A MODE"),
+        group(Radio, crate::signal::ft8::LAB_SECTION)
+            .hint("15 s cycles")
+            .about("FT8 measured: every decode's physics, the band's reach, your own station. L goes to World and back."),
         heading("SMALL WINDOW"),
         group(Quiet, "micro")
             .hint("large type")
@@ -788,6 +793,8 @@ mod tests {
                 "DECODE DEVICES",
                 "Bluetooth",
                 "Wi-Fi",
+                "MEASURE A MODE",
+                "FT8",
                 "SMALL WINDOW",
                 "Compact"
             ]

@@ -406,8 +406,26 @@ pub struct Ft8View {
     pub zoomed: bool,
     /// Only the decodes that name your call.
     pub only_yours: bool,
-    /// The selected station, by call.
+    /// The selected station, by call. World's list and map and the Lab's
+    /// views all follow it.
     pub selected: Option<String>,
+    /// The FT8 Lab view `L` last left from, so it opens there again.
+    pub lab_preset: Option<String>,
+    /// The World layout `L` last left from.
+    pub world_preset: Option<String>,
+}
+
+/// What a view of one transmission shows.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shown {
+    /// Nothing decoded yet this session.
+    Waiting,
+    /// The chosen station's newest decode still held, or with no station
+    /// chosen the newest decode of all.
+    Decode(Arc<DecodeEntry>),
+    /// A station is chosen whose decodes have all left the list: its
+    /// numbers stay in the station table, its traces went with them.
+    Gone(String),
 }
 
 impl Ft8View {
@@ -447,6 +465,8 @@ impl Ft8View {
             zoomed: false,
             only_yours: false,
             selected: None,
+            lab_preset: None,
+            world_preset: None,
         };
         (view, said)
     }
@@ -742,6 +762,25 @@ impl Ft8State {
     /// row's. A station heard in several cycles is one step, not one per
     /// row: stepping by rows found the selected call's first row and went
     /// back and forth between it and the next one forever.
+    /// The transmission the Lab's Signal view shows.
+    pub fn shown(&self) -> Shown {
+        match &self.view.selected {
+            Some(call) => self
+                .decodes
+                .iter()
+                .rev()
+                .find(|d| d.decode.message.sender() == Some(call.as_str()))
+                .map_or_else(
+                    || Shown::Gone(call.clone()),
+                    |d| Shown::Decode(Arc::clone(d)),
+                ),
+            None => self
+                .decodes
+                .back()
+                .map_or(Shown::Waiting, |d| Shown::Decode(Arc::clone(d))),
+        }
+    }
+
     pub fn select_step(&mut self, down: bool) {
         let rows = self.listed();
         let mut calls: Vec<String> = Vec::new();
@@ -894,6 +933,49 @@ mod tests {
             push[push.len() * 9 / 10],
             push[push.len() - 1]
         );
+    }
+
+    /// The Signal view shows the chosen station's newest decode, the newest
+    /// of all with no choice, says when a chosen station's decodes have all
+    /// gone, and waits before the first.
+    #[test]
+    fn the_signal_view_shows_the_chosen_stations_newest_decode() {
+        let mut s = Ft8State::default();
+        assert_eq!(s.shown(), Shown::Waiting);
+        let now = Instant::now();
+        s.push_cycle(
+            cycle(1_800_000_000.0),
+            vec![decode("HA5ZZT", None, -10.0), decode("DL1ABC", None, -15.0)],
+            None,
+            now,
+            None,
+        );
+        s.push_cycle(
+            cycle(1_800_000_015.0),
+            vec![decode("HA5ZZT", None, -5.0)],
+            None,
+            now,
+            None,
+        );
+        let Shown::Decode(d) = s.shown() else {
+            panic!("{:?}", s.shown())
+        };
+        assert_eq!(d.cycle_unix, 1_800_000_015.0);
+        s.view.selected = Some("HA5ZZT".into());
+        let Shown::Decode(d) = s.shown() else {
+            panic!()
+        };
+        assert_eq!(
+            (d.cycle_unix, d.decode.physics.snr_db),
+            (1_800_000_015.0, -5.0)
+        );
+        s.view.selected = Some("DL1ABC".into());
+        let Shown::Decode(d) = s.shown() else {
+            panic!()
+        };
+        assert_eq!(d.decode.message.sender(), Some("DL1ABC"));
+        s.view.selected = Some("JA1VQD".into());
+        assert_eq!(s.shown(), Shown::Gone("JA1VQD".into()));
     }
 
     #[test]

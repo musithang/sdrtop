@@ -23,7 +23,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
 `net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
-`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`, `observer`) and your version replaces it, so the number key that
+`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`, `lab_ft8_signal`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -60,7 +60,7 @@ panels  = [ ... ]   # exactly as above
 
 | Field | What it does |
 |-------|--------------|
-| `section` | Which group it belongs to, by id: `command_rail` (**Spectrum**), `sweep` (**Sweep**), `lab` (**Receiver**), `micro` (**Compact**), `net` (**Overview**), `le` (**Low Energy**), `classic` (**Classic**), `coded` (**Long range**), `wifi_channel` (**Channel**), `pocsag` (**POCSAG**, under Radio), `ft8` (**FT8**, under Radio), or a name of your own, which becomes a group under **Lab › Other**. The ids are older than the names and stay as they are, so a preset written for an earlier sdrtop still lands in the right place. `hidden` keeps it out of the menu entirely |
+| `section` | Which group it belongs to, by id: `command_rail` (**Spectrum**), `sweep` (**Sweep**), `lab` (**Receiver**), `micro` (**Compact**), `net` (**Overview**), `le` (**Low Energy**), `classic` (**Classic**), `coded` (**Long range**), `wifi_channel` (**Channel**), `pocsag` (**POCSAG**, under Radio), `ft8` (**FT8**, under Radio), `ft8_lab` (**FT8**, under Lab › Measure a mode), or a name of your own, which becomes a group under **Lab › Other**. The ids are older than the names and stay as they are, so a preset written for an earlier sdrtop still lands in the right place. `hidden` keeps it out of the menu entirely |
 | `slot` | The number key, `1` to `9`, **within that group**. Leave it out and the layout is still listed, just without a shortcut |
 | `title` | What the menu calls it. Defaults to the preset name |
 | `blurb` | The half-line under the title. Optional, and worth writing: it is what tells you which of two similar layouts you want |
@@ -230,6 +230,12 @@ bar on its tone with its call, and the energy that did not decode.
 `ft8_decodes`, the decodes cycle by cycle with SNR, DT, tone, message,
 distance and bearing. `ft8_station`, the chosen station's newest decode and
 everything it measured and took.
+
+**FT8 Lab:** `ft8_ladder`, the chosen station's newest transmission symbol by
+symbol: each of the 79 symbols' energy on every tone (and one guard tone either
+side) on the theme's own colour ramp, the tone the codeword sent drawn through
+it, the symbols the code repaired and the Costas symbols that were not where
+they belong marked under it, and how clearly each symbol was decided.
 
 **Observer:** `observer`
 

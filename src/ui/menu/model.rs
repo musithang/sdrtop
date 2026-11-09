@@ -92,6 +92,8 @@ const KNOWN: &[(&str, &str, Option<&str>)] = &[
         Some(WIFI_HEADING),
     ),
     (WIFI, "Wi-Fi", None),
+    // The Lab tile's FT8: the Radio tile's decoder, measured.
+    (crate::signal::ft8::LAB_SECTION, "FT8", None),
     // The Radio tile's groups: a pager, then FT8.
     (crate::signal::pocsag::SECTION, "POCSAG", None),
     (crate::signal::ft8::SECTION, "FT8", None),
@@ -287,11 +289,11 @@ mod tests {
         }
     }
 
-    /// The built-ins land in ten sections, in order: the four Bluetooth
-    /// groups, the band first among them, then Wi-Fi's Channel, its one
-    /// group with a view so far, then the Radio tile's POCSAG.
+    /// The built-ins land in these sections, in order: the Lab's own, the
+    /// four Bluetooth groups, the band first among them, Wi-Fi's Channel, the
+    /// FT8 Lab, then the Radio tile's POCSAG and FT8.
     #[test]
-    fn the_builtins_build_ten_sections() {
+    fn the_builtins_build_their_sections_in_order() {
         let menu = build(&LayoutConfig::default_config().presets);
         let ids: Vec<&str> = menu.sections.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
@@ -306,6 +308,7 @@ mod tests {
                 "classic",
                 "coded",
                 "wifi_channel",
+                "ft8_lab",
                 "pocsag",
                 "ft8"
             ]
@@ -334,6 +337,7 @@ mod tests {
                 "classic",
                 "coded",
                 "wifi_channel",
+                "ft8_lab",
                 "pocsag",
                 "ft8"
             ]
@@ -366,6 +370,7 @@ mod tests {
                 ("classic", Some("Bluetooth")),
                 ("coded", Some("Bluetooth")),
                 ("wifi_channel", Some("Wi-Fi")),
+                ("ft8_lab", None),
                 ("pocsag", None),
                 ("ft8", None),
             ]
@@ -590,6 +595,7 @@ mod tests {
                 "classic",
                 "coded",
                 "wifi_channel",
+                "ft8_lab",
                 "pocsag",
                 "ft8",
                 "nightwatch"
