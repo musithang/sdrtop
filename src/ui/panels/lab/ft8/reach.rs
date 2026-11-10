@@ -5,8 +5,9 @@
 //!
 //! Time across (the last hour, or as much of it as this session has
 //! heard), distance up on World's logarithmic scale from 100 to 20 000 km,
-//! a braille dot a decode: one dot column a cycle, so an opening reads as a
-//! cloud climbing and the skip zone as the empty band beneath it. A decode is
+//! a half-block pixel where decodes fell, coloured by the strongest of them
+//! on the Band view's one SNR key ([`super::snr_colour`]): an opening reads
+//! as a cloud climbing and the skip zone as the empty band beneath it. A decode is
 //! placed only by a locator its station sent; the rest are counted in the
 //! title, never placed (POLICY.md, rule 2). Without your position there are
 //! no distances, and the plot says where to set it; the rows below it still
@@ -21,7 +22,7 @@
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
-use super::{placed, say, window, Placed};
+use super::{hanging, placed, say, snr_colour, window, Pixels, Placed, SNR_RANGE};
 use crate::state::ft8::CycleMark;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -44,9 +45,6 @@ const FARTHEST: u16 = 1;
 
 /// The least the plot keeps before the rows under it give way.
 const MIN_PLOT: u16 = 4;
-
-/// Braille's dot bits by row (0 to 3) and column (0, 1) in a cell.
-const BIT: [[u8; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
 
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
@@ -150,7 +148,8 @@ impl Panel for Ft8ReachPanel {
     }
 }
 
-/// The plot: the distance lines, then a braille dot a decode.
+/// The plot: the distance lines, then a pixel where decodes fell, coloured
+/// by the strongest; the colour's key in the right margin.
 #[allow(clippy::too_many_arguments)]
 fn draw_plot(
     buf: &mut ratatui::buffer::Buffer,
@@ -197,36 +196,30 @@ fn draw_plot(
             );
         }
     }
-    put(
-        buf,
-        plot,
-        x0 + cols + 1,
-        plot.y,
-        "km",
-        Style::default().fg(t.label),
-    );
-    let mut dots = vec![vec![0u8; usize::from(cols)]; usize::from(rows)];
+    let mut px = Pixels::new(cols, rows);
     for p in pts {
-        let fx = ((p.unix - t0) / span * f64::from(cols * 2)) as usize;
-        let fy = ((1.0 - km_frac(p.km)) * f64::from(rows * 4 - 1)).round() as usize;
-        if fx < usize::from(cols) * 2 && fy < usize::from(rows) * 4 {
-            dots[fy / 4][fx / 2] |= BIT[fy % 4][fx % 2];
-        }
+        let x = ((p.unix - t0) / span * f64::from(cols)) as u16;
+        let y = ((1.0 - km_frac(p.km)) * f64::from(px.height() - 1)).round() as u16;
+        px.set(x, y, p.snr);
     }
-    for (r, row) in dots.iter().enumerate() {
-        for (c, &b) in row.iter().enumerate() {
-            if b != 0 {
-                let ch = char::from_u32(0x2800 + u32::from(b)).unwrap_or(' ');
-                put(
-                    buf,
-                    plot,
-                    x0 + c as u16,
-                    plot.y + r as u16,
-                    &ch.to_string(),
-                    Style::default().fg(t.value_hi),
-                );
-            }
+    px.draw(buf, plot, x0, plot.y, &|v| snr_colour(t, v));
+    let xr = x0 + cols + 1;
+    let label = Style::default().fg(t.label);
+    put(buf, plot, xr, plot.y, "km", label);
+    if rows >= 5 {
+        put(buf, plot, xr, plot.y + 2, "colour: SNR", label);
+        for i in 0..11u16 {
+            let v = SNR_RANGE.0 + (SNR_RANGE.1 - SNR_RANGE.0) * f64::from(i) / 10.0;
+            put(
+                buf,
+                plot,
+                xr + i,
+                plot.y + 3,
+                "█",
+                Style::default().fg(snr_colour(t, v)),
+            );
         }
+        put(buf, plot, xr, plot.y + 4, "-24     +6", label);
     }
 }
 
@@ -367,18 +360,10 @@ fn activity(
         let e = ((even[c] as f64 / top) * 8.0).round() as usize;
         put(buf, area, x, y, EIGHTHS[e], Style::default().fg(t.value));
         put(buf, area, x, y + 1, "─", Style::default().fg(t.border_dim));
-        // Odd hangs from the rule: its top eighths lit by swapping the
-        // colours of a lower block.
+        // Odd hangs from the rule.
         let o = ((odd[c] as f64 / top) * 8.0).round() as usize;
-        if o > 0 {
-            put(
-                buf,
-                area,
-                x,
-                y + 2,
-                EIGHTHS[8 - o],
-                Style::default().fg(t.palette_color(0.0)).bg(t.value),
-            );
+        if let Some(glyph) = hanging(o) {
+            put(buf, area, x, y + 2, glyph, Style::default().fg(t.value));
         }
     }
     put(buf, area, x0 + cols + 1, y, &format!("max {top:.0}"), label);
@@ -445,33 +430,21 @@ fn floor(
     let hi = known.iter().copied().fold(f64::MIN, f64::max).max(lo + 1.0);
     put(buf, area, area.x + 1, y + 1, &format!("{hi:6.1}"), dim);
     put(buf, area, area.x + 1, y + 2, &format!("{lo:6.1}"), dim);
-    let mut dots = vec![vec![0u8; n]; 3];
+    let mut px = Pixels::new(cols, 3);
     for (c, v) in med.iter().enumerate() {
         if let Some(v) = v {
-            let fy = (((hi - v) / (hi - lo)) * 11.0).round() as usize;
-            dots[fy / 4][c] |= BIT[fy % 4][0] | BIT[fy % 4][1];
+            let fy = (((hi - v) / (hi - lo)) * f64::from(px.height() - 1)).round() as u16;
+            px.set(c as u16, fy, *v);
         }
     }
-    for (r, row) in dots.iter().enumerate() {
-        for (c, &b) in row.iter().enumerate() {
-            let x = x0 + c as u16;
-            let yy = y + r as u16;
-            if held[c] {
-                if r == 0 {
-                    put(buf, area, x, yy, "×", Style::default().fg(t.status_warn));
-                }
-            } else if changed[c] {
-                put(buf, area, x, yy, "┊", dim);
-            } else if b != 0 {
-                let ch = char::from_u32(0x2800 + u32::from(b)).unwrap_or(' ');
-                put(
-                    buf,
-                    area,
-                    x,
-                    yy,
-                    &ch.to_string(),
-                    Style::default().fg(t.value),
-                );
+    px.draw(buf, area, x0, y, &|_| t.value);
+    for c in 0..n {
+        let x = x0 + c as u16;
+        if held[c] {
+            put(buf, area, x, y, "×", Style::default().fg(t.status_warn));
+        } else if changed[c] {
+            for r in 0..3 {
+                put(buf, area, x, y + r, "┊", dim);
             }
         }
     }
@@ -530,13 +503,13 @@ mod tests {
     use super::*;
     use crate::state::fixture::draw;
 
-    fn braille_dots(lines: &[String]) -> u32 {
+    /// Cells holding a pixel or two.
+    fn pixel_cells(lines: &[String]) -> usize {
         lines
             .iter()
             .flat_map(|l| l.chars())
-            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
-            .map(|c| (c as u32 - 0x2800).count_ones())
-            .sum()
+            .filter(|c| *c == '▀' || *c == '▄')
+            .count()
     }
 
     #[test]
@@ -567,15 +540,10 @@ mod tests {
             "{}",
             lines[0]
         );
-        // Dots in the plot and the floor strip; the plot's alone are at
-        // least as many as distinct places, at most as many as decodes.
+        // Pixels in the plot: at least one, never more cells than decodes.
         let plot = &lines[1..14];
-        let dots = braille_dots(plot);
-        assert!(
-            dots > 0 && dots <= pts.len() as u32,
-            "{dots} of {}",
-            pts.len()
-        );
+        let cells = pixel_cells(plot);
+        assert!(cells > 0 && cells <= pts.len(), "{cells} of {}", pts.len());
         let all = lines.join("\n");
         assert!(all.contains("farthest"), "{all}");
         assert!(

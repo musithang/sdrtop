@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! SNR against distance: each station of the hour at its best decode, a
-//! braille dot, distance across on the reach's log scale and SNR (sdrtop's,
+//! half-block pixel in the Band view's SNR colour, distance across on the reach's log scale and SNR (sdrtop's,
 //! in 2500 Hz) up from -24 to +6 dB. The skip zone shows as the empty
 //! stretch on the left, the band's reach as where the dots stop. No curve
 //! is fitted: a fit would assert a model the dots do not carry.
@@ -12,17 +12,12 @@ use std::collections::BTreeMap;
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::reach::km_frac;
-use super::{placed, say, Placed};
+use super::{placed, say, snr_colour, Pixels, Placed, SNR_RANGE};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
 
 pub struct Ft8SkipPanel;
-
-/// The SNR range up the side, dB.
-pub const SNR_RANGE: (f64, f64) = (-24.0, 6.0);
-
-const BIT: [[u8; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
 
 /// Each station's best decode: its distance and SNR.
 pub fn bests(pts: &[Placed]) -> Vec<(f64, f64)> {
@@ -84,29 +79,15 @@ impl Panel for Ft8SkipPanel {
         let rows = area.height - 2;
         let x0 = area.x + 6;
         let cols = area.width.saturating_sub(7).max(1);
-        let mut dots = vec![vec![0u8; usize::from(cols)]; usize::from(rows)];
+        let mut px = Pixels::new(cols, rows);
         for (d, snr) in &best {
-            let fx = (km_frac(*d) * f64::from(cols * 2 - 1)).round() as usize;
+            let x = (km_frac(*d) * f64::from(cols - 1)).round() as u16;
             let k =
                 (SNR_RANGE.1 - snr.clamp(SNR_RANGE.0, SNR_RANGE.1)) / (SNR_RANGE.1 - SNR_RANGE.0);
-            let fy = (k * f64::from(rows * 4 - 1)).round() as usize;
-            dots[fy / 4][fx / 2] |= BIT[fy % 4][fx % 2];
+            let y = (k * f64::from(px.height() - 1)).round() as u16;
+            px.set(x, y, *snr);
         }
-        for (r, row) in dots.iter().enumerate() {
-            for (c, &b) in row.iter().enumerate() {
-                if b != 0 {
-                    let ch = char::from_u32(0x2800 + u32::from(b)).unwrap_or(' ');
-                    put(
-                        buf,
-                        area,
-                        x0 + c as u16,
-                        area.y + r as u16,
-                        &ch.to_string(),
-                        Style::default().fg(theme.value_hi),
-                    );
-                }
-            }
-        }
+        px.draw(buf, area, x0, area.y, &|v| snr_colour(theme, v));
         put(buf, area, area.x + 1, area.y, "  +6", label);
         put(buf, area, area.x + 1, area.y + rows / 2, "  -9", label);
         put(buf, area, area.x + 1, area.y + rows - 1, " -24", label);
@@ -156,13 +137,12 @@ mod tests {
         let (pts, _) = placed(&m).unwrap();
         let n = bests(&pts).len();
         let lines = draw(Ft8SkipPanel, 64, 14, &m);
-        let dots: u32 = lines
+        let cells = lines
             .iter()
             .flat_map(|l| l.chars())
-            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
-            .map(|c| (c as u32 - 0x2800).count_ones())
-            .sum();
-        assert!(dots > 0 && dots as usize <= n, "{dots} dots, {n} stations");
+            .filter(|c| *c == '▀' || *c == '▄')
+            .count();
+        assert!(cells > 0 && cells <= n, "{cells} cells, {n} stations");
         assert!(lines
             .join("\n")
             .contains(&format!("{n} stations, each its best")));

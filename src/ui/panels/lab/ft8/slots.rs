@@ -14,7 +14,7 @@
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
-use super::say;
+use super::{hanging, say};
 use crate::signal::ft8::cycle::BAND_BIN_HZ;
 use crate::state::ft8::CycleOutcome;
 use crate::state::SdrMetrics;
@@ -155,17 +155,8 @@ impl Panel for Ft8SlotsPanel {
             );
             put(buf, area, x, y + 1, "─", dim);
             let o = (share[1][k] * 8.0).round() as usize;
-            if o > 0 {
-                put(
-                    buf,
-                    area,
-                    x,
-                    y + 2,
-                    EIGHTHS[8 - o],
-                    Style::default()
-                        .fg(theme.palette_color(0.0))
-                        .bg(theme.value),
-                );
+            if let Some(glyph) = hanging(o) {
+                put(buf, area, x, y + 2, glyph, Style::default().fg(theme.value));
             }
         }
         for (hz, text) in [

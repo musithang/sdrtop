@@ -143,3 +143,125 @@ pub fn window(m: &SdrMetrics) -> Option<(f64, f64)> {
         .max(t1 - crate::state::ft8::HISTORY_SECONDS);
     Some((t0, t1))
 }
+
+/// The SNR scale the Band view's colours share, dB (sdrtop's, in 2500 Hz).
+pub const SNR_RANGE: (f64, f64) = (-24.0, 6.0);
+
+/// A mark's colour for an SNR: the theme's gradient over [`SNR_RANGE`],
+/// never below its lowest fifth (the background in most themes), so a weak
+/// station still shows. One key for the reach, the bearings and SNR against
+/// distance.
+pub fn snr_colour(t: &crate::Theme, snr: f64) -> Color {
+    let (lo, hi) = SNR_RANGE;
+    let k = ((snr - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t.palette_color((0.2 + 0.8 * k) as f32)
+}
+
+/// A plot of half-block pixels: each cell two pixels, one above the other
+/// (`▀` and `▄`), solid enough to read at any font size. A pixel holds the
+/// largest value set on it; an empty half shows the terminal's own
+/// background.
+pub struct Pixels {
+    cols: u16,
+    rows: u16,
+    v: Vec<Option<f64>>,
+}
+
+impl Pixels {
+    /// `cols` cells across, `rows` cells down: `rows * 2` pixels down.
+    pub fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            cols,
+            rows,
+            v: vec![None; usize::from(cols) * usize::from(rows) * 2],
+        }
+    }
+
+    /// Pixels down.
+    pub fn height(&self) -> u16 {
+        self.rows * 2
+    }
+
+    /// Keep the larger of `value` and what pixel (`x`, `y`) holds.
+    pub fn set(&mut self, x: u16, y: u16, value: f64) {
+        if x < self.cols && y < self.rows * 2 {
+            let i = usize::from(y) * usize::from(self.cols) + usize::from(x);
+            self.v[i] = Some(self.v[i].map_or(value, |old: f64| old.max(value)));
+        }
+    }
+
+    /// Draw from (`x0`, `y0`), each pixel coloured by `colour` of its value.
+    pub fn draw(
+        &self,
+        buf: &mut ratatui::buffer::Buffer,
+        area: Rect,
+        x0: u16,
+        y0: u16,
+        colour: &dyn Fn(f64) -> Color,
+    ) {
+        let at = |x: u16, y: u16| self.v[usize::from(y) * usize::from(self.cols) + usize::from(x)];
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                let (top, bottom) = (at(c, 2 * r), at(c, 2 * r + 1));
+                let style = match (top, bottom) {
+                    (Some(a), Some(b)) => Some(("▀", Style::default().fg(colour(a)).bg(colour(b)))),
+                    (Some(a), None) => Some(("▀", Style::default().fg(colour(a)).bg(Color::Reset))),
+                    (None, Some(b)) => Some(("▄", Style::default().fg(colour(b)).bg(Color::Reset))),
+                    (None, None) => None,
+                };
+                if let Some((glyph, style)) = style {
+                    put(buf, area, x0 + c, y0 + r, glyph, style);
+                }
+            }
+        }
+    }
+}
+
+/// A bar hanging down from a rule, `eighths` of a cell long: drawn with the
+/// upper blocks there are (an eighth, a half, a whole), the nearest of them.
+pub fn hanging(eighths: usize) -> Option<&'static str> {
+    match eighths {
+        0 => None,
+        1..=2 => Some("▔"),
+        3..=5 => Some("▀"),
+        _ => Some("█"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pixel keeps the largest value set on it, and a cell draws its two
+    /// pixels as one half block, an empty half left to the background.
+    #[test]
+    fn pixels_keep_the_largest_and_draw_half_blocks() {
+        let mut px = Pixels::new(3, 1);
+        px.set(0, 0, -10.0);
+        px.set(0, 0, -20.0);
+        px.set(1, 1, 3.0);
+        px.set(2, 0, 1.0);
+        px.set(2, 1, 2.0);
+        px.set(9, 9, 0.0);
+        let area = Rect::new(0, 0, 3, 1);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        let seen = std::cell::RefCell::new(Vec::new());
+        px.draw(&mut buf, area, 0, 0, &|v| {
+            seen.borrow_mut().push(v);
+            Color::Indexed(0)
+        });
+        assert_eq!(buf[(0, 0)].symbol(), "▀");
+        assert_eq!(buf[(0, 0)].bg, Color::Reset);
+        assert_eq!(buf[(1, 0)].symbol(), "▄");
+        assert_eq!(buf[(2, 0)].symbol(), "▀");
+        assert!(seen.borrow().contains(&-10.0) && !seen.borrow().contains(&-20.0));
+    }
+
+    #[test]
+    fn a_hanging_bar_takes_the_nearest_upper_block() {
+        assert_eq!(hanging(0), None);
+        assert_eq!(hanging(1), Some("▔"));
+        assert_eq!(hanging(4), Some("▀"));
+        assert_eq!(hanging(8), Some("█"));
+    }
+}

@@ -22,8 +22,7 @@ use std::collections::BTreeMap;
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
-use super::skip::SNR_RANGE;
-use super::{placed, say, Placed, NARROW_BODY};
+use super::{placed, say, snr_colour, Placed, NARROW_BODY, SNR_RANGE};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::{km, put, signed};
@@ -35,14 +34,6 @@ pub const SECTORS: [&str; 16] = [
     "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW",
     "NNW",
 ];
-
-/// A bar's colour for a median SNR: the gradient over [`SNR_RANGE`],
-/// never below its lowest fifth.
-pub fn snr_colour(t: &crate::Theme, snr: f64) -> ratatui::style::Color {
-    let (lo, hi) = SNR_RANGE;
-    let k = ((snr - lo) / (hi - lo)).clamp(0.0, 1.0);
-    t.palette_color((0.2 + 0.8 * k) as f32)
-}
 
 /// Stations placed before a direction is named.
 pub const NAME_FROM: usize = 20;
