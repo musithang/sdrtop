@@ -23,7 +23,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
 `net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
-`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`, `lab_ft8_signal`, `lab_ft8_band`, `observer`) and your version replaces it, so the number key that
+`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`, `lab_ft8_signal`, `lab_ft8_band`, `lab_ft8_receiver`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -251,7 +251,12 @@ the quietest of each, as heard here. `ft8_bearings`, the hour's placed
 stations in sixteen directions from you, each with its count and median best
 SNR, and the open direction named from twenty stations up. `ft8_skip`, SNR
 against distance, each station at its best decode. `ft8_hour`, stations each
-quarter hour, decodes a cycle and the share calling CQ.
+quarter hour, decodes a cycle and the share calling CQ. `ft8_clock`, the
+hour's DTs as a histogram with the median, the verdict as the cycle row
+computes it (this computer's clock and the receive path together), and how
+many fell past a second. `ft8_sensitivity`, the hour's decodes by SNR with
+the level this decoder reads half of what is sent marked, and the weakest
+decode's distance from it.
 
 **Observer:** `observer`
 

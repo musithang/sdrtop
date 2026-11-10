@@ -144,6 +144,8 @@ impl App {
         registry.register(ui::Ft8BearingsPanel);
         registry.register(ui::Ft8SkipPanel);
         registry.register(ui::Ft8HourPanel);
+        registry.register(ui::Ft8ClockPanel);
+        registry.register(ui::Ft8SensitivityPanel);
         registry.register(ui::Ft8BandPanel);
         registry.register(ui::Ft8DecodesPanel);
         registry.register(ui::Ft8CardPanel);
@@ -1616,6 +1618,7 @@ mod tests {
             ("radio_ft8", false),
             ("lab_ft8_signal", false),
             ("lab_ft8_band", false),
+            ("lab_ft8_receiver", false),
             ("radio_pocsag", false),
             ("main", true),
             ("lab_signal", true),
@@ -1723,6 +1726,22 @@ mod tests {
             .ft8_hour();
         m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
         render_html("lab_ft8_band", m, &path);
+    }
+
+    /// The FT8 Lab's Receiver view the same way, to `FT8_RECEIVER_HTML`.
+    #[test]
+    #[ignore]
+    fn render_the_ft8_receiver() {
+        let Ok(path) = std::env::var("FT8_RECEIVER_HTML") else {
+            return;
+        };
+        let mut m = crate::state::SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .ft8_traced()
+            .ft8_hour();
+        m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
+        render_html("lab_ft8_receiver", m, &path);
     }
 
     /// `preset` through the real engine at the three reference sizes, as

@@ -176,6 +176,11 @@ pub struct ClockVerdict {
 /// Fewer decodes than this and the verdict is not given.
 pub const VERDICT_MIN: usize = 5;
 
+/// Past this many seconds off, FT8 starts to lose decodes; past
+/// [`CLOCK_CRIT_S`] it stops decoding.
+pub const CLOCK_WARN_S: f64 = 1.0;
+pub const CLOCK_CRIT_S: f64 = 2.0;
+
 /// The verdict from a set of DTs, or `None` with fewer than [`VERDICT_MIN`].
 pub fn verdict(dts: &[f64]) -> Option<ClockVerdict> {
     if dts.len() < VERDICT_MIN {

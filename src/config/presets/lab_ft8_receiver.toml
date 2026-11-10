@@ -1,0 +1,16 @@
+# FT8 Lab, Receiver: can you trust your own station? The clock as the hour's
+# stations judge it, and the sensitivity beside it, which gives way under
+# 150 columns. L goes to World and back.
+section = "ft8_lab"
+slot    = 3
+title   = "Receiver"
+blurb   = "the clock, the decoder, the radio"
+about   = "Your own station as FT8 judges it: the hour's DTs as a clock verdict (your computer's clock and the receive path together), and the hour's decodes by SNR against the level the decoder reads half of what is sent. L goes to World and back."
+
+panels = [
+    { name = "header_slim",      position = "top", height = 4 },
+    { name = "ft8_cycles",       position = "top", height = 1 },
+    { name = "ft8_clock",        position = "body" },
+    { name = "ft8_sensitivity",  position = "right", width_pct = 45 },
+    { name = "footer",           position = "bottom" },
+]

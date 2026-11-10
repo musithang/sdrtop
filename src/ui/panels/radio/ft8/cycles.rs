@@ -193,9 +193,9 @@ impl Panel for Ft8CyclesPanel {
         let parts: Vec<(String, Style)> = match ft8.clock {
             Some(v) => {
                 let mag = v.median_dt.abs();
-                let ink = if mag <= 1.0 {
+                let ink = if mag <= crate::state::ft8::CLOCK_WARN_S {
                     theme.status_ok
-                } else if mag <= 2.0 {
+                } else if mag <= crate::state::ft8::CLOCK_CRIT_S {
                     theme.status_warn
                 } else {
                     theme.status_crit
