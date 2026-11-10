@@ -146,6 +146,9 @@ impl App {
         registry.register(ui::Ft8HourPanel);
         registry.register(ui::Ft8ClockPanel);
         registry.register(ui::Ft8SensitivityPanel);
+        registry.register(ui::Ft8DecoderPanel);
+        registry.register(ui::Ft8LoadPanel);
+        registry.register(ui::Ft8RadioPanel);
         registry.register(ui::Ft8BandPanel);
         registry.register(ui::Ft8DecodesPanel);
         registry.register(ui::Ft8CardPanel);
@@ -1618,7 +1621,7 @@ mod tests {
             ("radio_ft8", false),
             ("lab_ft8_signal", false),
             ("lab_ft8_band", false),
-            ("lab_ft8_receiver", false),
+            ("lab_ft8_receiver", true),
             ("radio_pocsag", false),
             ("main", true),
             ("lab_signal", true),

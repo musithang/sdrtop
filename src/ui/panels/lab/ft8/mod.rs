@@ -14,9 +14,12 @@
 pub mod bearings;
 pub mod clock;
 pub mod decode;
+pub mod decoder;
 pub mod hour;
 pub mod ladder;
+pub mod load;
 pub mod power;
+pub mod radio;
 pub mod reach;
 pub mod sensitivity;
 pub mod skip;

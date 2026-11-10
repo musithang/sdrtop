@@ -256,7 +256,15 @@ hour's DTs as a histogram with the median, the verdict as the cycle row
 computes it (this computer's clock and the receive path together), and how
 many fell past a second. `ft8_sensitivity`, the hour's decodes by SNR with
 the level this decoder reads half of what is sent marked, and the weakest
-decode's distance from it.
+decode's distance from it. `ft8_decoder`, the funnel from candidates to new
+decodes over the cycles held, what belief propagation and OSD each finished,
+what was refused, each pass's yield, and how hard the held decodes were to
+read (with the share that needed OSD, where false decodes come from).
+`ft8_load`, decode seconds a cycle against the fifteen a cycle gives, the
+cycles skipped or cut, and what the feed lost. `ft8_radio`, the peak against
+the radio's ceiling, the strongest signal in the capture outside the FT8
+band, the frequency reference (which no FT8 measurement can check) and the
+timing bench's figures.
 
 **Observer:** `observer`
 
