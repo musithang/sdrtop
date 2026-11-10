@@ -14,6 +14,8 @@
 pub mod decode;
 pub mod ladder;
 pub mod power;
+pub mod reach;
+pub mod slots;
 pub mod track;
 
 use std::sync::Arc;
@@ -86,4 +88,55 @@ pub fn caption(d: &DecodeEntry) -> String {
         signed(p.snr_db, 0),
         p.f0
     )
+}
+
+/// A decode placed on the map of distances: when, how far, which way, how
+/// strong, who. Placed only by a locator the station sent itself (the
+/// station table's latest), and only with your position set.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Placed {
+    pub unix: f64,
+    pub km: f64,
+    pub bearing: f64,
+    pub snr: f64,
+    pub call: Arc<str>,
+}
+
+/// The hour's decodes placed, and how many could not be (no locator heard,
+/// or no sender in full). `None` without your position.
+pub fn placed(m: &SdrMetrics) -> Option<(Vec<Placed>, usize)> {
+    let home = m.home.position()?;
+    let mut out = Vec::new();
+    let mut unplaced = 0;
+    for r in m.ft8.history.iter() {
+        let there = r
+            .call
+            .as_deref()
+            .and_then(|c| m.ft8.stations.get(c))
+            .and_then(|s| s.locator.as_deref())
+            .and_then(crate::geo::maidenhead::centre);
+        match (there, &r.call) {
+            (Some(there), Some(call)) => out.push(Placed {
+                unix: r.cycle_unix,
+                km: crate::geo::sphere::distance_km(home, there),
+                bearing: crate::geo::sphere::bearing_deg(home, there),
+                snr: f64::from(r.snr_db),
+                call: Arc::clone(call),
+            }),
+            _ => unplaced += 1,
+        }
+    }
+    Some((out, unplaced))
+}
+
+/// The stretch of time the hour's views cover: from the first cycle kept
+/// (an hour back at most) to the end of the newest. `None` before any.
+pub fn window(m: &SdrMetrics) -> Option<(f64, f64)> {
+    let hour = &m.ft8.cycle_hour;
+    let t1 = hour.back()?.start_unix + 15.0;
+    let t0 = hour
+        .front()?
+        .start_unix
+        .max(t1 - crate::state::ft8::HISTORY_SECONDS);
+    Some((t0, t1))
 }

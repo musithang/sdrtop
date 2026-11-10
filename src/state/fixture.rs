@@ -555,8 +555,9 @@ impl SdrMetrics {
 
     /// An hour of FT8 on 20 m, generated from a seed rather than typed:
     /// forty stations with locators anywhere on Earth, each heard on its own
-    /// parity for a run of cycles at its own tone, SNR -22 to +10 dB. Only the
-    /// hour's history and the station table: no decode list, no traces.
+    /// parity for a run of cycles at its own tone, SNR -22 to +10 dB. The
+    /// hour's history, its cycles (a wandering floor, one in twenty held)
+    /// and the station table: no decode list, no traces.
     pub(crate) fn ft8_hour(mut self) -> Self {
         use crate::signal::dsp::testkit::Rng;
         let mut rng = Rng::new(67);
@@ -619,6 +620,24 @@ impl SdrMetrics {
             }
         }
         rows.sort_by(|a, b| a.cycle_unix.total_cmp(&b.cycle_unix));
+        // Every cycle of the hour: its count from the rows, a floor that
+        // wanders a little, one cycle in twenty past the hold.
+        let marks: VecDeque<ft8::CycleMark> = (0..cycles)
+            .map(|c| {
+                let unix = FT8_EPOCH + 15.0 * c as f64;
+                let held = rng.next_u64().is_multiple_of(20);
+                ft8::CycleMark {
+                    start_unix: unix,
+                    dial_hz: dial,
+                    outcome: ft8::CycleOutcome::Decoded,
+                    decodes: rows.iter().filter(|r| r.cycle_unix == unix).count(),
+                    floor_db_hz: (!held).then(|| (-85.0 + rng.unit() * 2.0) as f32),
+                    held,
+                    segment: 0,
+                }
+            })
+            .collect();
+        self.ft8.cycle_hour = Arc::new(marks);
         self.ft8.history = Arc::new(rows.into());
         self
     }

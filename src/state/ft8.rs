@@ -514,6 +514,36 @@ pub struct Ft8State {
     /// minutes of a busy band, and the hour's views need the hour. Behind an
     /// `Arc` because the state is cloned for every frame.
     pub history: Arc<VecDeque<HistoryRow>>,
+    /// Every cycle of the last [`HISTORY_SECONDS`], oldest first, as a
+    /// [`CycleMark`]: the cycle ring keeps [`CYCLES_MAX`] with their band
+    /// rows, ten minutes; the hour's views need the hour's counts, floors and
+    /// holds. Behind an `Arc` for the same reason as the history.
+    pub cycle_hour: Arc<VecDeque<CycleMark>>,
+    /// The setting the newest cycle was taken at, to tell a new segment.
+    pub last_setting: Option<Setting>,
+}
+
+/// One cycle as the hour keeps it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CycleMark {
+    pub start_unix: f64,
+    pub dial_hz: u64,
+    pub outcome: CycleOutcome,
+    pub decodes: usize,
+    /// The floor as the cycle published it: `None` held, changed, refused
+    /// or not decoded.
+    pub floor_db_hz: Option<f32>,
+    pub held: bool,
+    /// Counts up each time the setting changes: two cycles' levels are
+    /// comparable only within one segment.
+    pub segment: u32,
+}
+
+impl CycleMark {
+    /// Odd cycles start 15 and 45 s past the minute.
+    pub fn odd(&self) -> bool {
+        (self.start_unix / 15.0).round() as i64 % 2 != 0
+    }
 }
 
 /// One decode as the hour keeps it: when, where in the band, how strong,
@@ -562,6 +592,37 @@ impl Ft8State {
             .history
             .front()
             .is_some_and(|r| newest - r.cycle_unix > HISTORY_SECONDS);
+        // The hour's cycles: a new segment wherever the setting changed.
+        let changed = match (&self.last_setting, &cycle.setting) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        } || cycle.setting_changed;
+        let segment = self
+            .cycle_hour
+            .back()
+            .map_or(0, |c| c.segment + u32::from(changed));
+        if cycle.setting.is_some() {
+            self.last_setting = cycle.setting.clone();
+        }
+        {
+            let hour = Arc::make_mut(&mut self.cycle_hour);
+            hour.push_back(CycleMark {
+                start_unix: cycle.start_unix,
+                dial_hz: cycle.dial_hz,
+                outcome: cycle.outcome,
+                decodes: decodes.len(),
+                floor_db_hz: cycle.floor_db_hz,
+                held: cycle.held,
+                segment,
+            });
+            let newest = hour.iter().map(|c| c.start_unix).fold(f64::MIN, f64::max);
+            while hour
+                .front()
+                .is_some_and(|c| newest - c.start_unix > HISTORY_SECONDS)
+            {
+                hour.pop_front();
+            }
+        }
         if !decodes.is_empty() || stale {
             let history = Arc::make_mut(&mut self.history);
             history.extend(decodes.iter().map(|d| HistoryRow {
@@ -737,6 +798,7 @@ impl Ft8State {
         self.clock = None;
         self.view.selected = None;
         self.history = Arc::default();
+        self.cycle_hour = Arc::default();
     }
 
     /// The decodes in the order the list shows them: cycles newest first,
@@ -997,6 +1059,36 @@ mod tests {
         assert_eq!(h.len(), 2 * (HISTORY_SECONDS / 15.0) as usize + 2);
         assert_eq!(h.back().unwrap().call.as_deref(), Some("DL1ABC"));
         assert!(s.decodes.len() <= DECODES_MAX);
+    }
+
+    /// The hour's cycles: every one kept for an hour, a new segment where
+    /// the setting changed, emptied by clearing.
+    #[test]
+    fn the_hours_cycles_keep_their_marks_and_segments() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        let at = |gain: f64| Setting {
+            dial_hz: 7_074_000,
+            rate_hz: 192_000.0,
+            gains: vec![gain],
+            gain_curve: None,
+            boost: false,
+        };
+        for k in 0..250 {
+            let mut c = cycle(1_800_000_000.0 + 15.0 * f64::from(k));
+            c.setting = Some(at(if k < 200 { 0.0 } else { -6.0 }));
+            c.held = k == 100;
+            c.floor_db_hz = (k != 100).then_some(-85.0);
+            s.push_cycle(c, Vec::new(), None, now, None);
+        }
+        let h = &s.cycle_hour;
+        assert_eq!(h.len(), (HISTORY_SECONDS / 15.0) as usize + 1);
+        assert_eq!(h.front().unwrap().segment, 0);
+        assert_eq!(h.back().unwrap().segment, 1);
+        assert_eq!(h.iter().filter(|c| c.segment == 1).count(), 50);
+        assert!(h.iter().any(|c| c.held && c.floor_db_hz.is_none()));
+        s.clear();
+        assert!(s.cycle_hour.is_empty());
     }
 
     #[test]

@@ -762,6 +762,10 @@ const BUILTIN_PRESETS: &[(&str, &str)] = &[
         include_str!("config/presets/lab_ft8_signal.toml"),
     ),
     (
+        "lab_ft8_band",
+        include_str!("config/presets/lab_ft8_band.toml"),
+    ),
+    (
         "wifi_frames",
         include_str!("config/presets/wifi_frames.toml"),
     ),
@@ -998,7 +1002,7 @@ panels = [
         // This is what makes `parse_builtin`'s `expect` safe: the text is compiled
         // in, so it cannot differ between here and the shipped binary.
         let cfg = LayoutConfig::default_config();
-        assert_eq!(cfg.presets.len(), 31, "thirty-one built-ins");
+        assert_eq!(cfg.presets.len(), 32, "thirty-two built-ins");
         assert_eq!(cfg.active_preset, DEFAULT_PRESET);
         for (name, preset) in &cfg.presets {
             assert!(!preset.panels.is_empty(), "{name} lists no panels");
@@ -1068,7 +1072,7 @@ panels = [
             "a new name should be added"
         );
         assert_eq!(cfg.presets["nightwatch"].panels.len(), 3);
-        assert_eq!(cfg.presets.len(), 32, "added, not replaced");
+        assert_eq!(cfg.presets.len(), 33, "added, not replaced");
         // And every built-in is still there.
         assert!(cfg.presets.contains_key("lab_signal"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1079,7 +1083,7 @@ panels = [
         let dir = presets_dir_with("replace", &[("lab_iq", A_LAYOUT)]);
         let cfg = LayoutConfig::with_user_presets(&HashMap::new(), Some(&dir));
         assert_eq!(cfg.presets["lab_iq"].panels.len(), 3, "the file should win");
-        assert_eq!(cfg.presets.len(), 31, "replaced, not added");
+        assert_eq!(cfg.presets.len(), 32, "replaced, not added");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1138,8 +1142,8 @@ panels = [
         assert!(!cfg.presets.contains_key("README"), "only .toml is read");
         assert_eq!(
             cfg.presets.len(),
-            32,
-            "thirty-one built-ins plus the one good file"
+            33,
+            "thirty-two built-ins plus the one good file"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1184,14 +1188,14 @@ panels = [
             LayoutConfig::with_user_presets(&HashMap::new(), None)
                 .presets
                 .len(),
-            31
+            32
         );
         let missing = std::env::temp_dir().join("sdrtop-presets-that-do-not-exist");
         assert_eq!(
             LayoutConfig::with_user_presets(&HashMap::new(), Some(&missing))
                 .presets
                 .len(),
-            31
+            32
         );
     }
 

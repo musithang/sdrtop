@@ -48,6 +48,8 @@ pub use panels::core::waterfall::WaterfallPanel;
 pub use panels::lab::ft8::decode::Ft8DecodePanel;
 pub use panels::lab::ft8::ladder::Ft8LadderPanel;
 pub use panels::lab::ft8::power::Ft8PowerPanel;
+pub use panels::lab::ft8::reach::Ft8ReachPanel;
+pub use panels::lab::ft8::slots::Ft8SlotsPanel;
 pub use panels::lab::ft8::track::Ft8TrackPanel;
 pub use panels::radio::ft8::band::Ft8BandPanel;
 pub use panels::radio::ft8::card::Ft8CardPanel;

@@ -1,0 +1,17 @@
+# FT8 Lab, Band: where the band is open to and how that is changing. The
+# reach (an hour of decodes by time and distance, with activity, the floor
+# and the farthest station) over the room in the passband. L goes to World
+# and back.
+section = "ft8_lab"
+slot    = 2
+title   = "Band"
+blurb   = "where it is open to, and how that changes"
+about   = "The last hour as this antenna heard it: every placed decode by time and distance, decodes a cycle by parity, the noise under the band, the farthest station each quarter hour, and which 50 Hz slots have room. Set your position under Options, Station for distances; L goes to World and back."
+
+panels = [
+    { name = "header_slim",  position = "top", height = 4 },
+    { name = "ft8_cycles",   position = "top", height = 1 },
+    { name = "ft8_reach",    position = "body" },
+    { name = "ft8_slots",    position = "bottom", height = 7 },
+    { name = "footer",       position = "bottom" },
+]

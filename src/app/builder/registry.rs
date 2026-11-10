@@ -139,6 +139,8 @@ impl App {
         registry.register(ui::Ft8TrackPanel);
         registry.register(ui::Ft8PowerPanel);
         registry.register(ui::Ft8DecodePanel);
+        registry.register(ui::Ft8ReachPanel);
+        registry.register(ui::Ft8SlotsPanel);
         registry.register(ui::Ft8BandPanel);
         registry.register(ui::Ft8DecodesPanel);
         registry.register(ui::Ft8CardPanel);
@@ -1610,6 +1612,7 @@ mod tests {
             // nothing showed.
             ("radio_ft8", false),
             ("lab_ft8_signal", false),
+            ("lab_ft8_band", false),
             ("radio_pocsag", false),
             ("main", true),
             ("lab_signal", true),
@@ -1700,6 +1703,23 @@ mod tests {
             .ft8_traced();
         m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
         render_html("lab_ft8_signal", m, &path);
+    }
+
+    /// The FT8 Lab's Band view the same way, on a generated hour and one
+    /// real decoded cycle, to the path in `FT8_BAND_HTML`.
+    #[test]
+    #[ignore]
+    fn render_the_ft8_band() {
+        let Ok(path) = std::env::var("FT8_BAND_HTML") else {
+            return;
+        };
+        let mut m = crate::state::SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .ft8_traced()
+            .ft8_hour();
+        m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
+        render_html("lab_ft8_band", m, &path);
     }
 
     /// `preset` through the real engine at the three reference sizes, as

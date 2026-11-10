@@ -23,7 +23,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
 `net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
-`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`, `lab_ft8_signal`, `observer`) and your version replaces it, so the number key that
+`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`, `lab_ft8_signal`, `lab_ft8_band`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -242,6 +242,12 @@ weak to say. `ft8_power`, the transmission's power half symbol by half symbol
 over its mean, and whether the path was steady or fading. `ft8_decode`, the
 transmission's numbers (SNR, DT, tone 0 with its spread, drift, path, sync,
 what decoding took) and every transmission of the same station still held.
+`ft8_reach`, the last hour's decodes by time and distance (a dot each, on
+World's log scale, placed only by a locator the station sent), with decodes
+a cycle by parity, the noise under the band within one setting, and the
+farthest station of each quarter hour. `ft8_slots`, the band in 50 Hz slots,
+how often each was busy in the last ten minutes' even and odd cycles, and
+the quietest of each, as heard here.
 
 **Observer:** `observer`
 
