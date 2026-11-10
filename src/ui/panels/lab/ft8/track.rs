@@ -85,7 +85,15 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
     let value = Style::default().fg(t.value);
     // Plot rows; then the time axis, the figures and, with room, the key.
     let keyed = area.height >= 9;
-    let rows = area.height - if keyed { 3 } else { 2 };
+    let room = area.height - if keyed { 3 } else { 2 };
+    // An odd number of plot rows, so f0 has a row of its own: on an even
+    // count it fell on the boundary of two, and the smallest drift moved
+    // the line a whole row halfway along.
+    let rows = if room.is_multiple_of(2) {
+        room - 1
+    } else {
+        room
+    };
     let x0 = area.x + 8;
     let plot_w = area.width.saturating_sub(9).max(2);
     let length = SYMBOLS as f64 * SYMBOL_SECONDS;
@@ -102,18 +110,33 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
     for (hz, text) in ticks {
         put(buf, area, area.x + 1, area.y + row_of(hz), text, label);
     }
-    // The fitted line, its drift as a slope: tone 0 at every column.
-    for c in 0..plot_w {
-        let at = f64::from(c) / f64::from(plot_w - 1) * length;
+    // The fitted line, its drift as a slope: tone 0 at every braille dot
+    // across, four dots to a row, so a small drift reads as a gentle slope
+    // rather than a step.
+    const BIT: [[u8; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
+    let (dots_w, dots_h) = (usize::from(plot_w) * 2, usize::from(rows) * 4);
+    let mut dots = vec![vec![0u8; usize::from(plot_w)]; usize::from(rows)];
+    for dx in 0..dots_w {
+        let at = dx as f64 / (dots_w - 1) as f64 * length;
         let hz = on_the_line(p.f0, p.drift, at) - p.f0;
-        put(
-            buf,
-            area,
-            x0 + c,
-            area.y + row_of(hz),
-            "┈",
-            Style::default().fg(t.border_default),
-        );
+        let k = (SPAN_HZ - hz.clamp(-SPAN_HZ, SPAN_HZ)) / (2.0 * SPAN_HZ);
+        let fy = (k * (dots_h - 1) as f64).round() as usize;
+        dots[fy / 4][dx / 2] |= BIT[fy % 4][dx % 2];
+    }
+    for (r, row) in dots.iter().enumerate() {
+        for (c, &b) in row.iter().enumerate() {
+            if b != 0 {
+                let ch = char::from_u32(0x2800 + u32::from(b)).unwrap_or(' ');
+                put(
+                    buf,
+                    area,
+                    x0 + c as u16,
+                    area.y + r as u16,
+                    &ch.to_string(),
+                    Style::default().fg(t.border_default),
+                );
+            }
+        }
     }
     // The points: each where the samples put tone 0, with its spread.
     let mut weak = 0;
@@ -145,7 +168,7 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
         );
     }
     // Time across.
-    let axis = area.y + rows;
+    let axis = area.y + room;
     put(buf, area, x0, axis, "0 s", label);
     let mid = col_of(length / 2.0);
     put(buf, area, mid.saturating_sub(1), axis, "6.3", label);
@@ -191,7 +214,7 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
             area,
             x,
             key,
-            "┈┈",
+            "⠒⠒",
             Style::default().fg(t.border_default),
         );
         put(buf, area, x + 1, key, "fitted f0 and drift", label);
@@ -255,6 +278,38 @@ mod tests {
         assert!(lines.contains("1 too weak to place"), "{lines}");
         // Eight placed, and one in the key.
         assert_eq!(lines.matches('●').count(), 8 + 1, "{lines}");
+    }
+
+    /// A small drift stays a gentle slope on f0's own row, whatever the
+    /// panel's height: no row boundary sits on f0.
+    #[test]
+    fn a_small_drift_keeps_the_line_on_f0s_row() {
+        let mut m = SdrMetrics::fixture().streaming().ft8_traced();
+        let entry = m.ft8.decodes.back().unwrap().clone();
+        let mut d = (*entry).clone();
+        d.decode.physics.drift = 0.25;
+        *m.ft8.decodes.back_mut().unwrap() = std::sync::Arc::new(d);
+        m.ft8.view.selected = None;
+        for h in [14u16, 15, 16, 17, 18] {
+            let lines = render(Ft8TrackPanel, 63, h, &m);
+            let f0_row = lines.iter().position(|l| l.contains("   f0 ")).unwrap();
+            let line_rows: Vec<usize> = lines
+                .iter()
+                .enumerate()
+                .take(f0_row + 3)
+                .filter(|(_, l)| {
+                    l.chars()
+                        .skip(9)
+                        .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+                })
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(
+                line_rows,
+                vec![f0_row],
+                "height {h}: the line on rows {line_rows:?}"
+            );
+        }
     }
 
     #[test]

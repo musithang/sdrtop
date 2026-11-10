@@ -6,6 +6,13 @@
 //! count with the median of their best SNR beside it, in two columns of
 //! eight so the sixteen fit ten rows.
 //!
+//! **The bars are coloured by that median SNR**, on the theme's own
+//! gradient over the SNR scale the panel beside it uses (-24 to +6 dB),
+//! lifted off the gradient's lowest fifth so a weak direction still shows;
+//! a key under the rose names the scale, since the ladder's heat on the
+//! Signal view is another quantity on the same colours. (On World a colour
+//! by SNR would read as a station's age; the Band view has no age colours.)
+//!
 //! The direction with the most stations is named in the title, with how far
 //! they are, but only from [`NAME_FROM`] stations up: fewer than that is not
 //! a direction, it is a handful. Without your position there are no
@@ -15,6 +22,7 @@ use std::collections::BTreeMap;
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
+use super::skip::SNR_RANGE;
 use super::{placed, say, Placed, NARROW_BODY};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -27,6 +35,14 @@ pub const SECTORS: [&str; 16] = [
     "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW",
     "NNW",
 ];
+
+/// A bar's colour for a median SNR: the gradient over [`SNR_RANGE`],
+/// never below its lowest fifth.
+pub fn snr_colour(t: &crate::Theme, snr: f64) -> ratatui::style::Color {
+    let (lo, hi) = SNR_RANGE;
+    let k = ((snr - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t.palette_color((0.2 + 0.8 * k) as f32)
+}
 
 /// Stations placed before a direction is named.
 pub const NAME_FROM: usize = 20;
@@ -98,8 +114,9 @@ impl Panel for Ft8BearingsPanel {
         (body < NARROW_BODY).then_some(0)
     }
 
+    /// Eight rows of directions and the colour's key.
     fn column_height(&self, _column: u16) -> Option<u16> {
-        Some(10)
+        Some(11)
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
@@ -158,7 +175,7 @@ impl Panel for Ft8BearingsPanel {
                 x + 4,
                 y,
                 &"█".repeat(len),
-                Style::default().fg(theme.value),
+                Style::default().fg(snr.map_or(theme.value, |v| snr_colour(theme, v))),
             );
             if *n > 0 {
                 let text = match snr {
@@ -167,6 +184,32 @@ impl Panel for Ft8BearingsPanel {
                 };
                 put(buf, area, x, y, &text, Style::default().fg(theme.label));
             }
+        }
+        // The colour's key.
+        let y = area.y + 8;
+        if y < area.bottom() {
+            let label = Style::default().fg(theme.label);
+            let x = put(
+                buf,
+                area,
+                area.x + 1,
+                y,
+                "colour: median best SNR  -24 ",
+                label,
+            );
+            let mut x = x;
+            for i in 0..12 {
+                let v = SNR_RANGE.0 + (SNR_RANGE.1 - SNR_RANGE.0) * f64::from(i) / 11.0;
+                x = put(
+                    buf,
+                    area,
+                    x,
+                    y,
+                    "█",
+                    Style::default().fg(snr_colour(theme, v)),
+                );
+            }
+            put(buf, area, x, y, " +6 dB (sdrtop)", label);
         }
     }
 }
@@ -230,7 +273,7 @@ mod tests {
     #[test]
     fn it_draws_sixteen_directions_in_two_columns() {
         let m = SdrMetrics::fixture().streaming().ft8_hour();
-        let lines = draw(Ft8BearingsPanel, 64, 10, &m);
+        let lines = draw(Ft8BearingsPanel, 64, 11, &m);
         for (k, name) in SECTORS.iter().enumerate() {
             let row = &lines[1 + k % 8];
             assert!(
@@ -247,6 +290,18 @@ mod tests {
         m.home.latitude = None;
         let all = draw(Ft8BearingsPanel, 64, 10, &m).join("\n");
         assert!(all.contains("no position"), "{all}");
+    }
+
+    /// Bars take the gradient by their median SNR, kept off its lowest
+    /// fifth, and the key says so.
+    #[test]
+    fn the_bars_are_coloured_by_their_median_snr() {
+        let t = crate::Theme::sdr();
+        assert_eq!(snr_colour(&t, -30.0), t.palette_color(0.2));
+        assert_eq!(snr_colour(&t, 6.0), t.palette_color(1.0));
+        let m = SdrMetrics::fixture().streaming().ft8_hour();
+        let all = draw(Ft8BearingsPanel, 64, 11, &m).join("\n");
+        assert!(all.contains("colour: median best SNR"), "{all}");
     }
 
     #[test]
