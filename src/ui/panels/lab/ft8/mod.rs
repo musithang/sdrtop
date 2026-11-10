@@ -11,10 +11,13 @@
 //! first decode it waits, and for a station whose decodes have left the list
 //! it says the trace is no longer kept (POLICY.md, rule 2).
 
+pub mod bearings;
 pub mod decode;
+pub mod hour;
 pub mod ladder;
 pub mod power;
 pub mod reach;
+pub mod skip;
 pub mod slots;
 pub mod track;
 

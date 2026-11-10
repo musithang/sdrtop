@@ -1,7 +1,8 @@
 # FT8 Lab, Band: where the band is open to and how that is changing. The
 # reach (an hour of decodes by time and distance, with activity, the floor
-# and the farthest station) over the room in the passband. L goes to World
-# and back.
+# and the farthest station) over the room in the passband; on the right the
+# bearings, SNR against distance and the hour in numbers, which give way
+# under 150 columns. L goes to World and back.
 section = "ft8_lab"
 slot    = 2
 title   = "Band"
@@ -12,6 +13,9 @@ panels = [
     { name = "header_slim",  position = "top", height = 4 },
     { name = "ft8_cycles",   position = "top", height = 1 },
     { name = "ft8_reach",    position = "body" },
-    { name = "ft8_slots",    position = "bottom", height = 7 },
+    { name = "ft8_slots",    position = "body" },
+    { name = "ft8_bearings", position = "right", width_pct = 34 },
+    { name = "ft8_skip",     position = "right" },
+    { name = "ft8_hour",     position = "right" },
     { name = "footer",       position = "bottom" },
 ]

@@ -45,10 +45,13 @@ pub use panels::core::spectrum::SpectrumPanel;
 pub use panels::core::system_resources::SystemResourcesPanel;
 pub use panels::core::waterfall::WaterfallPanel;
 
+pub use panels::lab::ft8::bearings::Ft8BearingsPanel;
 pub use panels::lab::ft8::decode::Ft8DecodePanel;
+pub use panels::lab::ft8::hour::Ft8HourPanel;
 pub use panels::lab::ft8::ladder::Ft8LadderPanel;
 pub use panels::lab::ft8::power::Ft8PowerPanel;
 pub use panels::lab::ft8::reach::Ft8ReachPanel;
+pub use panels::lab::ft8::skip::Ft8SkipPanel;
 pub use panels::lab::ft8::slots::Ft8SlotsPanel;
 pub use panels::lab::ft8::track::Ft8TrackPanel;
 pub use panels::radio::ft8::band::Ft8BandPanel;

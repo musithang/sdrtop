@@ -101,6 +101,11 @@ impl Panel for Ft8SlotsPanel {
         (40, 5)
     }
 
+    /// Under the reach in the body column, its own five rows and frame.
+    fn column_height(&self, _column: u16) -> Option<u16> {
+        Some(7)
+    }
+
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let (_, seen) = shares(state);
         let mut chrome =

@@ -247,7 +247,11 @@ World's log scale, placed only by a locator the station sent), with decodes
 a cycle by parity, the noise under the band within one setting, and the
 farthest station of each quarter hour. `ft8_slots`, the band in 50 Hz slots,
 how often each was busy in the last ten minutes' even and odd cycles, and
-the quietest of each, as heard here.
+the quietest of each, as heard here. `ft8_bearings`, the hour's placed
+stations in sixteen directions from you, each with its count and median best
+SNR, and the open direction named from twenty stations up. `ft8_skip`, SNR
+against distance, each station at its best decode. `ft8_hour`, stations each
+quarter hour, decodes a cycle and the share calling CQ.
 
 **Observer:** `observer`
 

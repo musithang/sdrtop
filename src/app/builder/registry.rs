@@ -141,6 +141,9 @@ impl App {
         registry.register(ui::Ft8DecodePanel);
         registry.register(ui::Ft8ReachPanel);
         registry.register(ui::Ft8SlotsPanel);
+        registry.register(ui::Ft8BearingsPanel);
+        registry.register(ui::Ft8SkipPanel);
+        registry.register(ui::Ft8HourPanel);
         registry.register(ui::Ft8BandPanel);
         registry.register(ui::Ft8DecodesPanel);
         registry.register(ui::Ft8CardPanel);
