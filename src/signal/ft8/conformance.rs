@@ -968,6 +968,39 @@ const QUICK: cycle::Settings = cycle::Settings {
     ..cycle::Settings::DEFAULT
 };
 
+/// Reading a pass's candidates side by side changes nothing: a crowded
+/// cycle on one thread and on four gives the same report, decode for
+/// decode, funnel for funnel. Which of two candidates of one transmission
+/// is kept is decided in the search's order, as one after another would.
+#[test]
+fn the_decodes_do_not_depend_on_the_threads() {
+    let mut rng = Rng::new(61);
+    let mut sent = readable_apart(16, -10.0, 0.0, &mut rng);
+    for s in sent.iter_mut() {
+        s.snr_db = -4.0 - rng.unit() * 14.0;
+    }
+    // The same message twice, far apart: two candidates that decode one
+    // payload, the second a duplicate only by the order they are taken in.
+    // And a weak one within a tone of another.
+    sent[5].payload = sent[4].payload;
+    sent[4].snr_db = -6.0;
+    sent[5].snr_db = -6.0;
+    sent[1].f0 = sent[0].f0 + 2.0;
+    let x = cycle(&sent, &mut rng);
+    let at = |threads| {
+        let settings = cycle::Settings { threads, ..QUICK };
+        cycle::decode_with(&x, &mut HashBook::new(), &settings)
+    };
+    let one = at(1);
+    assert!(one.decodes.len() >= 8, "{}", one.decodes.len());
+    assert!(
+        one.funnel.iter().any(|f| f.duplicates > 0),
+        "{:?}",
+        one.funnel
+    );
+    assert_eq!(at(4), one);
+}
+
 #[test]
 fn a_weak_signal_under_a_strong_one_comes_out_after_subtraction() {
     let mut rng = Rng::new(73);

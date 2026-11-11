@@ -174,8 +174,9 @@ it is closer than that: four minutes of a busy 20 m afternoon, the same
 samples given to both, and of 254 messages sdrtop and WSJT-X at its deepest
 setting both read 233, sdrtop alone 9 and WSJT-X alone 12 (leaving out the
 ones WSJT-X guessed at from what a CQ usually says, which sdrtop does not
-do). A crowded cycle of forty signals takes about six seconds on a modest
-laptop, inside the fifteen it has.
+do). A crowded cycle of forty signals takes about three seconds on a modest
+laptop, inside the fifteen it has: the candidates are read on every core
+the machine has (up to four), with exactly the decodes one core would give.
 
 **About SNR.** Once a message is decoded, sdrtop knows which tone every
 symbol was sent on, and measures the signal's power there, half a symbol

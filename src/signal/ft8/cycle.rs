@@ -19,6 +19,14 @@
 //! [`MAX_PASSES`]. A message decoded twice in one cycle (two candidates on one
 //! transmission, or the same message found again after subtraction) is
 //! reported once.
+//!
+//! **A pass's candidates are read side by side.** No candidate's reading
+//! looks at another's, so they run on up to [`MAX_THREADS`] threads; only
+//! which of two candidates of one message is kept depends on order, and that
+//! is decided afterwards in the search's order. The decodes are the same on
+//! one thread or four (`the_decodes_do_not_depend_on_the_threads`); a
+//! crowded cycle of forty took 6.5 s on one thread of the dev machine (two
+//! cores, four threads) and 3.3 s on four.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -70,6 +78,9 @@ pub struct Settings {
     /// ...but only a candidate with at least this many of its 21 Costas
     /// symbols on their tone where it was first read ([`RESYNC_MIN_COSTAS`]).
     pub resync_min_costas: u8,
+    /// The most threads reading one pass's candidates ([`MAX_THREADS`]);
+    /// the machine may give fewer. The decodes do not depend on it.
+    pub threads: usize,
 }
 
 impl Settings {
@@ -80,6 +91,7 @@ impl Settings {
         max_candidates: search::MAX_CANDIDATES,
         resync: true,
         resync_min_costas: RESYNC_MIN_COSTAS,
+        threads: MAX_THREADS,
     };
 }
 
@@ -235,11 +247,21 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
             candidates: cands.len(),
             ..Funnel::default()
         };
-        for c in &cands {
-            // A strong transmission raises many candidates around it, and
-            // each decodes the same message: only the first is measured.
-            let mut tally = Tally::default();
-            let found = try_candidate(&bb, c, pass as u8, settings, &mut seen, &mut tally);
+        // Every candidate read on its own, side by side; then, in the
+        // search's order, each first believed payload checked against what
+        // was already decoded. A strong transmission raises many candidates
+        // around it, and each decodes the same message: only the first, in
+        // that order, is kept, exactly as one candidate after another would.
+        let read = read_all(&bb, &cands, pass as u8, settings, &seen);
+        for (mut tally, hit) in read {
+            let found = match hit {
+                Some(Hit::Found(f)) if seen.insert(f.payload) => Some(*f),
+                Some(_) => {
+                    tally.duplicate = true;
+                    None
+                }
+                None => None,
+            };
             funnel.synced += usize::from(tally.synced);
             funnel.coded += usize::from(tally.coded);
             match &found {
@@ -296,15 +318,86 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
     report
 }
 
-/// Synchronise, read and decode one candidate.
+/// Threads that read one pass's candidates: the machine's own, at most
+/// this many. A decode is a few seconds of work every fifteen, and the radio's
+/// own threads run beside it.
+const MAX_THREADS: usize = 4;
+
+/// What reading a candidate came to: its first believed codeword, measured,
+/// or only its payload where an earlier pass already decoded it (nothing
+/// left to measure: it is a duplicate whatever the order).
+enum Hit {
+    Found(Box<Found>),
+    Before,
+}
+
+/// One candidate's reading: how far it got, and what it came to.
+type Reading = (Tally, Option<Hit>);
+
+/// Every candidate read, in the search's order, each with its tally. Read
+/// side by side on [`Settings::threads`] threads at most; the result does
+/// not depend on how many, since no candidate's reading looks at another's.
+fn read_all(
+    bb: &Baseband,
+    cands: &[search::Candidate],
+    pass: u8,
+    settings: &Settings,
+    before: &HashSet<u128>,
+) -> Vec<Reading> {
+    let one = |c: &search::Candidate| {
+        let mut tally = Tally::default();
+        let hit = try_candidate(bb, c, pass, settings, before, &mut tally);
+        (tally, hit)
+    };
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(settings.threads)
+        .min(cands.len());
+    if threads <= 1 {
+        return cands.iter().map(one).collect();
+    }
+    // Each thread takes the next candidate not yet taken, so a slow one
+    // (resync, data-aided, OSD) does not hold the others back; the results
+    // go back in the search's order.
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let parts: Vec<Vec<(usize, Reading)>> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(c) = cands.get(i) else {
+                            break;
+                        };
+                        mine.push((i, one(c)));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|w| w.join().expect("a candidate's reading does not panic"))
+            .collect()
+    });
+    let mut all: Vec<(usize, Reading)> = parts.into_iter().flatten().collect();
+    all.sort_by_key(|(i, _)| *i);
+    all.into_iter().map(|(_, r)| r).collect()
+}
+
+/// Synchronise, read and decode one candidate, up to its first believed
+/// codeword. Whether that codeword is new this cycle is the caller's
+/// question, asked in the search's order; `before` only spares measuring one
+/// an earlier pass already decoded.
 fn try_candidate(
     bb: &Baseband,
     c: &search::Candidate,
     pass: u8,
     settings: &Settings,
-    seen: &mut HashSet<u128>,
+    before: &HashSet<u128>,
     tally: &mut Tally,
-) -> Option<Found> {
+) -> Option<Hit> {
     let synced = search::refine(bb, c);
     if synced.power < settings.min_power {
         return None;
@@ -351,9 +444,8 @@ fn try_candidate(
                 }
                 continue;
             }
-            if !seen.insert(decoded.payload) {
-                tally.duplicate = true;
-                return None;
+            if before.contains(&decoded.payload) {
+                return Some(Hit::Before);
             }
             let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);
             let tones = demod::tones_of(word91);
@@ -362,7 +454,7 @@ fn try_candidate(
             let trace = Trace::build(&y, &measured, &tones, &llr, &codeword, at_zero);
             let mut physics = measured.physics;
             physics.f0 += at_zero;
-            return Some(Found {
+            return Some(Hit::Found(Box::new(Found {
                 payload: decoded.payload,
                 start: physics.start,
                 physics,
@@ -372,7 +464,7 @@ fn try_candidate(
                 decoded,
                 pass,
                 trace: Arc::new(trace),
-            });
+            })));
         }
     }
     None
