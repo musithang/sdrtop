@@ -297,8 +297,79 @@ const FINE_SAMPLES: i64 = 20;
 const FINE_HZ: f64 = 2.5;
 const FINE_STEP_HZ: f64 = 0.25;
 
+/// The fine search's frequency offsets: from -[`FINE_HZ`] to +[`FINE_HZ`]
+/// in steps of [`FINE_STEP_HZ`].
+const OFFSETS: usize = 2 * (FINE_HZ / FINE_STEP_HZ) as usize + 1;
+
+/// The offsets side by side, padded to a width the vector units take whole;
+/// the lanes past [`OFFSETS`] are computed and never read.
+const LANES: usize = OFFSETS.next_multiple_of(8);
+
+/// The eight tones' reference waveforms, conjugated, for every offset at
+/// once: `re[tone][n][lane]`, so one sample of the slice meets every
+/// offset's reference in one row.
+struct LaneRefs {
+    re: [[[f32; LANES]; DOWN_SYMBOL]; 8],
+    im: [[[f32; LANES]; DOWN_SYMBOL]; 8],
+}
+
+impl LaneRefs {
+    fn new(offsets: &[f64]) -> Box<Self> {
+        let mut refs = Box::new(Self {
+            re: [[[0.0; LANES]; DOWN_SYMBOL]; 8],
+            im: [[[0.0; LANES]; DOWN_SYMBOL]; 8],
+        });
+        for t in 0..8 {
+            for (lane, &hz) in offsets.iter().enumerate() {
+                let f = t as f64 * TONE_SPACING + hz;
+                for n in 0..DOWN_SYMBOL {
+                    let ph = -TAU * f * n as f64 / DOWN_RATE;
+                    refs.re[t][n][lane] = ph.cos() as f32;
+                    refs.im[t][n][lane] = ph.sin() as f32;
+                }
+            }
+        }
+        refs
+    }
+}
+
 /// Noncoherent Costas energy in `y` (tone 0 at zero) for a start of `n0`
-/// samples and a frequency offset of `hz`.
+/// samples, at every offset of `refs` at once.
+///
+/// **Each lane is the sum one offset alone would give, bit for bit**: per
+/// symbol, the products of each sample with the reference added from zero in
+/// sample order, then the symbols' powers added in the arrays' order. Only
+/// the offsets run side by side, which is what lets the vector units carry
+/// them; no sum is reordered, so no rounding differs.
+fn costas_energies(y: &[Complex<f32>], n0: i64, refs: &LaneRefs) -> [f32; LANES] {
+    let mut e = [0f32; LANES];
+    for &at in &COSTAS_AT {
+        for (i, &tone) in COSTAS.iter().enumerate() {
+            let s = n0 + ((at + i) * DOWN_SYMBOL) as i64;
+            if s < 0 || s as usize + DOWN_SYMBOL > y.len() {
+                continue;
+            }
+            let (rr, ri) = (&refs.re[usize::from(tone)], &refs.im[usize::from(tone)]);
+            let mut zr = [0f32; LANES];
+            let mut zi = [0f32; LANES];
+            for (n, a) in y[s as usize..s as usize + DOWN_SYMBOL].iter().enumerate() {
+                let (br, bi) = (&rr[n], &ri[n]);
+                for l in 0..LANES {
+                    zr[l] += a.re * br[l] - a.im * bi[l];
+                    zi[l] += a.re * bi[l] + a.im * br[l];
+                }
+            }
+            for l in 0..LANES {
+                e[l] += zr[l] * zr[l] + zi[l] * zi[l];
+            }
+        }
+    }
+    e
+}
+
+/// One offset's Costas energy, one product at a time: what
+/// [`costas_energies`] must equal, lane by lane.
+#[cfg(test)]
 fn costas_energy(y: &[Complex<f32>], n0: i64, refs: &[Vec<Complex<f32>>; 8]) -> f32 {
     let mut e = 0f32;
     for &at in &COSTAS_AT {
@@ -320,6 +391,7 @@ fn costas_energy(y: &[Complex<f32>], n0: i64, refs: &[Vec<Complex<f32>>; 8]) -> 
 }
 
 /// The eight tones' reference waveforms, conjugated, at an offset of `hz`.
+#[cfg(test)]
 fn references(hz: f64) -> [Vec<Complex<f32>>; 8] {
     std::array::from_fn(|t| {
         let f = t as f64 * TONE_SPACING + hz;
@@ -352,13 +424,13 @@ pub fn refine(bb: &Baseband, c: &Candidate) -> Synced {
             .map(|i| i as f64 * FINE_STEP_HZ + (c.f0 - at_zero))
             .collect()
     };
-    let refs: Vec<[Vec<Complex<f32>>; 8]> = offsets.iter().map(|&hz| references(hz)).collect();
+    let refs = LaneRefs::new(&offsets);
     let dts: Vec<i64> = (-FINE_SAMPLES..=FINE_SAMPLES).collect();
     let mut grid = vec![0f32; dts.len() * offsets.len()];
     let mut best = (0usize, 0usize, f32::MIN);
     for (i, &dt) in dts.iter().enumerate() {
-        for (j, r) in refs.iter().enumerate() {
-            let e = costas_energy(&y, n0 + dt, r);
+        let lanes = costas_energies(&y, n0 + dt, &refs);
+        for (j, &e) in lanes[..offsets.len()].iter().enumerate() {
             grid[i * offsets.len() + j] = e;
             if e > best.2 {
                 best = (i, j, e);
@@ -386,5 +458,35 @@ pub fn refine(bb: &Baseband, c: &Candidate) -> Synced {
         f0,
         sync: c.sync,
         power: e / (3.0 * COSTAS.len() as f32) / mean_symbol.max(f32::MIN_POSITIVE),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signal::dsp::testkit::Rng;
+
+    /// The offsets side by side give, lane by lane, the very bits one offset
+    /// alone gives: inside the slice, at its edges where symbols fall out,
+    /// and at the fractions of a bin a candidate's frequency leaves.
+    #[test]
+    fn the_lanes_are_the_single_offsets_bit_for_bit() {
+        let mut rng = Rng::new(7);
+        let y = rng.noise(3000, 1.0);
+        for _ in 0..12 {
+            let frac = rng.unit() - 0.5;
+            let offsets: Vec<f64> = (0..OFFSETS)
+                .map(|i| (i as f64 - (OFFSETS / 2) as f64) * FINE_STEP_HZ + frac)
+                .collect();
+            let lanes = LaneRefs::new(&offsets);
+            let single: Vec<_> = offsets.iter().map(|&hz| references(hz)).collect();
+            for n0 in [-700i64, -40, 0, 37, 512, 2200, 2990] {
+                let got = costas_energies(&y, n0, &lanes);
+                for (j, r) in single.iter().enumerate() {
+                    let want = costas_energy(&y, n0, r);
+                    assert_eq!(got[j].to_bits(), want.to_bits(), "n0 {n0} lane {j}");
+                }
+            }
+        }
     }
 }
