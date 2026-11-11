@@ -428,6 +428,26 @@ impl DecodeRows {
                     self.f0_err.push(d.physics.f0 - s.f0);
                     self.f0_z.push((d.physics.f0 - s.f0) / d.physics.f0_sigma);
                     self.drift_err.push(d.physics.drift - s.drift);
+                    // `FT8_SHOW_OFF=<Hz>`: every decode whose f0 is off by
+                    // more, and how it was decoded.
+                    let off: f64 =
+                        std::env::var("FT8_SHOW_OFF").map_or(f64::INFINITY, |v| v.parse().unwrap());
+                    if (d.physics.f0 - s.f0).abs() > off {
+                        println!(
+                            "off: f0 {:+.3} Hz dt {:+.1} ms snr {:.1} (sent {:.1}) costas {} block {} osd {:?} repaired {} iterations {} pass {} sigma {:.3}",
+                            d.physics.f0 - s.f0,
+                            (d.dt - s.dt) * 1e3,
+                            d.physics.snr_db,
+                            s.snr_db,
+                            d.costas,
+                            d.block,
+                            d.osd,
+                            d.repaired,
+                            d.iterations,
+                            d.pass,
+                            d.physics.f0_sigma
+                        );
+                    }
                 }
                 None => self.wrong += 1,
             }
@@ -800,7 +820,8 @@ fn measure_the_llr_scale() {
 /// The decoder's settings with any of these from the environment, to try
 /// other numbers on the rows and on a recording: `FT8_CANDS` (the most
 /// candidates a pass reads), `FT8_PASSES`, `FT8_MIN_POWER`, `FT8_GATE` (the
-/// Costas count a candidate needs to be tried again), `FT8_RESYNC=0`.
+/// Costas count a candidate needs to be tried again), `FT8_RESYNC=0`,
+/// `FT8_OSD_BP` (the posteriors OSD is also run on).
 pub(crate) fn settings_from_env() -> cycle::Settings {
     fn var<T: std::str::FromStr>(name: &str, default: T) -> T {
         std::env::var(name).map_or(default, |v| {
@@ -814,6 +835,7 @@ pub(crate) fn settings_from_env() -> cycle::Settings {
         max_passes: var("FT8_PASSES", d.max_passes),
         min_power: var("FT8_MIN_POWER", d.min_power),
         resync_min_costas: var("FT8_GATE", d.resync_min_costas),
+        osd_from_bp: var("FT8_OSD_BP", d.osd_from_bp),
         resync: std::env::var("FT8_RESYNC").map_or(d.resync, |v| v != "0"),
         ..d
     }
@@ -1056,6 +1078,39 @@ fn drift_is_measured() {
         "{}",
         d.physics.f0 - sent[0].f0
     );
+}
+
+/// A decode read at a place a dozen milliseconds and most of a hertz off
+/// (OSD can decode there) is still measured where the signal is. Fitted
+/// coherently at that place alone, f0 came out 0.8 Hz off with a spread of
+/// 0.01 Hz.
+#[test]
+fn a_decode_read_off_its_place_is_measured_where_it_is() {
+    use super::demod;
+    use super::search::{Baseband, DOWN_RATE};
+    let mut rng = Rng::new(97);
+    let sent = readable(1, -8.0, &mut rng);
+    let x = cycle(&sent, &mut rng);
+    let bb = Baseband::new(&x);
+    let s = &sent[0];
+    for (dt, df) in [(0.0, 0.0), (0.013, -0.8), (-0.013, 0.8), (0.02, 0.5)] {
+        let (y, at_zero) = bb.around(s.f0 + df);
+        let start = s.start() + dt;
+        let hz = s.f0 + df - at_zero;
+        let z = demod::correlate(&y, (start * DOWN_RATE).round() as i64, hz);
+        let m = demod::measured_from(&y, start, hz, &s.tones(), &z).physics;
+        let f0 = m.f0 + at_zero;
+        assert!(
+            (f0 - s.f0).abs() < 0.05,
+            "read {dt} s, {df} Hz off: f0 {:+.3} Hz",
+            f0 - s.f0
+        );
+        assert!(
+            (m.start - s.start()).abs() < 0.003,
+            "read {dt} s, {df} Hz off: start {:+.1} ms",
+            (m.start - s.start()) * 1e3
+        );
+    }
 }
 
 #[test]

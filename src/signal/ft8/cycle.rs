@@ -81,6 +81,9 @@ pub struct Settings {
     /// The most threads reading one pass's candidates ([`MAX_THREADS`]);
     /// the machine may give fewer. The decodes do not depend on it.
     pub threads: usize,
+    /// OSD also on belief propagation's first this many posteriors
+    /// ([`OSD_FROM_BP`], [`ldpc::decode_deep`]).
+    pub osd_from_bp: usize,
 }
 
 impl Settings {
@@ -92,12 +95,24 @@ impl Settings {
         resync: true,
         resync_min_costas: RESYNC_MIN_COSTAS,
         threads: MAX_THREADS,
+        osd_from_bp: OSD_FROM_BP,
     };
 }
 
 /// Belief propagation's iteration limit, and the OSD order tried after it.
 const BP_ITERATIONS: u32 = 30;
 const OSD_ORDER: u8 = 2;
+
+/// How many of belief propagation's posteriors OSD is also run on
+/// ([`ldpc::decode_deep`]). Measured: on a Gaussian channel at 1 dB Eb/N0,
+/// 493 of 1000 decoded with the received ratios alone, 730 with two
+/// posteriors, none wrong; at the OSD distance limit, noise decoded 1 time in
+/// 20 000 either way. On simulated cycles at -20 to -22 dB, 117 of 216
+/// decoded against 132, none wrong; 400 cycles of noise, no false decode.
+/// On a 20 m recording, 241 messages against 248, each of the 7 new ones
+/// part of a QSO the band shows. Three and four posteriors decoded no more
+/// off the air.
+pub const OSD_FROM_BP: usize = 2;
 
 /// An OSD decode must show its sync: at least this many of the 21 Costas
 /// symbols strongest on their own tone, and no more than
@@ -431,7 +446,9 @@ fn try_candidate(
         let costas = demod::costas_matched(&z);
         for block in 1..=3u8 {
             let llr = demod::soft_bits(&z, usize::from(block), settings.llr_scale);
-            let Some(decoded) = ldpc::decode(&llr, BP_ITERATIONS, OSD_ORDER) else {
+            let Some(decoded) =
+                ldpc::decode_deep(&llr, BP_ITERATIONS, OSD_ORDER, settings.osd_from_bp)
+            else {
                 continue;
             };
             tally.coded = true;
@@ -448,7 +465,15 @@ fn try_candidate(
             }
             let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);
             let tones = demod::tones_of(word91);
-            let measured = demod::measured(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z);
+            // Read at the Costas arrays' place, the codeword may have come
+            // from a rough one (OSD decodes there too): measured there and
+            // where every symbol agrees, the stronger fit kept. The later
+            // attempts' places are that already, or finer.
+            let measured = if attempt == 0 {
+                demod::measured_from(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z)
+            } else {
+                demod::measured(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z)
+            };
             let codeword = ldpc::encode(word91);
             let trace = Trace::build(&y, &measured, &tones, &llr, &codeword, at_zero);
             let mut physics = measured.physics;

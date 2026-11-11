@@ -494,7 +494,39 @@ pub fn measure(
     measured(y, start, hz, tones, z).physics
 }
 
-/// [`measure`], keeping what it worked out on the way.
+/// [`measured`] from a place that may be rough (where the Costas arrays put
+/// it): measured there and where every symbol agrees ([`resync`]), and the
+/// one whose coherent fit is the stronger kept. At the signal's own place
+/// the 79 symbols add up most; a fit pulled to a false peak by a place a
+/// little off adds up less, though its spread does not show it. Neither
+/// place alone is always the better: on simulated cycles each put a few
+/// decodes most of a hertz off where the other did not.
+pub fn measured_from(
+    y: &[Complex<f32>],
+    start: f64,
+    hz: f64,
+    tones: &[u8; SYMBOLS],
+    z: &Correlations,
+) -> Measured {
+    let here = measured(y, start, hz, tones, z);
+    let (start, hz) = resync(y, start * DOWN_RATE, hz);
+    let z = correlate(y, (start * DOWN_RATE).round() as i64, hz);
+    let there = measured(y, start, hz, tones, &z);
+    if there.physics.amplitude > here.physics.amplitude {
+        there
+    } else {
+        here
+    }
+}
+
+/// The physics of a transmission whose tones are known, read where `start`
+/// (seconds) and `hz` put it: frequency, drift and start fitted coherently
+/// over all 79 symbols, about that place. The place must be close already: a
+/// start a dozen milliseconds off turns each symbol's phase by its tone, the
+/// data's tones scramble the coherent sum, and the fit finds a frequency
+/// that is not the signal's while its spread says it is
+/// ([`measured_from`] tries a second place). [`measure`], keeping what it
+/// worked out on the way.
 pub fn measured(
     y: &[Complex<f32>],
     start: f64,

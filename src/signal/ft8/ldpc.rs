@@ -238,10 +238,32 @@ pub const OSD_MAX_DISTANCE: f32 = 0.06;
 /// order 2.
 const OSD2_SPAN: usize = 16;
 
+/// The most belief-propagation posteriors OSD is run on besides the
+/// channel's own ratios ([`decode_deep`]).
+pub const MAX_OSD_FROM_BP: usize = 4;
+
 /// Decode 174 log-likelihood ratios (`ln P(1)/P(0)`), with at most
 /// `max_iterations` of belief propagation and OSD up to `osd_order` (0, 1
-/// or 2; anything above 2 is 2).
+/// or 2; anything above 2 is 2) on the received ratios alone.
 pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Decoded> {
+    decode_deep(llr, max_iterations, osd_order, 0)
+}
+
+/// [`decode`], with OSD run also on what belief propagation believed after
+/// each of its first `from_bp` iterations (at most [`MAX_OSD_FROM_BP`]).
+///
+/// A few iterations in, belief propagation has often put most bits right
+/// without settling on a codeword; ordered by those beliefs, the
+/// information set OSD starts from holds fewer wrong bits than the received
+/// one. Every candidate, from whichever ordering, is measured against what
+/// was received, so [`OSD_MAX_DISTANCE`] means what it means for the
+/// received ratios alone, and the closest wins.
+pub fn decode_deep(
+    llr: &[f32; N],
+    max_iterations: u32,
+    osd_order: u8,
+    from_bp: usize,
+) -> Option<Decoded> {
     let mut hard = [0u64; 3];
     for (v, &l) in llr.iter().enumerate() {
         if l > 0.0 {
@@ -267,7 +289,10 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
         }
     };
 
-    if let Some((bits, iterations)) = belief_propagation(llr, max_iterations) {
+    let mut saved = [[0f32; N]; MAX_OSD_FROM_BP];
+    let saved = &mut saved[..from_bp.min(MAX_OSD_FROM_BP)];
+    let (converged, filled) = belief_propagation(llr, max_iterations, saved);
+    if let Some((bits, iterations)) = converged {
         let word = head(&bits);
         if crc::check(word) {
             return Some(Decoded {
@@ -279,7 +304,8 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
             });
         }
     }
-    let (bits, order) = osd(llr, &hard, osd_order.min(2), OSD_MAX_DISTANCE)?;
+    let (bits, order, _) = osd_deep(llr, &hard, &saved[..filled], osd_order.min(2))
+        .filter(|&(_, _, d)| d <= OSD_MAX_DISTANCE)?;
     Some(Decoded {
         payload: head(&bits) >> 14,
         iterations: max_iterations,
@@ -292,8 +318,14 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
 /// Sum-product on the parity checks. Internally the messages are
 /// `ln P(0)/P(1)`, the textbook sign, so the check update is the plain tanh
 /// rule. Returns the codeword and the iterations it took (0 when the hard
-/// decisions were already one).
-fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)> {
+/// decisions were already one), and how many of `saved` it filled: the
+/// posterior (`ln P(1)/P(0)`, as the input) after iteration 1, 2, ..., as
+/// far as it went.
+fn belief_propagation(
+    llr: &[f32; N],
+    max_iterations: u32,
+    saved: &mut [[f32; N]],
+) -> (Option<(Bits, u32)>, usize) {
     let c = code();
     let mut prior = [0f32; N];
     for (p, l) in prior.iter_mut().zip(llr) {
@@ -308,6 +340,7 @@ fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)
     }
     // A check has six or seven bits.
     let mut t = [0f32; 7];
+    let mut filled = 0;
 
     for iteration in 0..=max_iterations {
         // Posterior and hard decision.
@@ -319,7 +352,7 @@ fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)
             }
         }
         if failed_checks(&bits) == 0 {
-            return Some((bits, iteration));
+            return (Some((bits, iteration)), filled);
         }
         if iteration == max_iterations {
             break;
@@ -343,24 +376,48 @@ fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)
             }
         }
         // Bit update: everything the bit knows except what this check said.
+        // The posterior is what the next iteration's hard decisions read;
+        // kept, in the input's sign, for OSD while there is room.
+        let mut posterior = saved.get_mut(iteration as usize);
         for v in 0..N {
             let total = prior[v] + to_bit[v].iter().sum::<f32>();
             for s in 0..3 {
                 to_check[v][s] = total - to_bit[v][s];
             }
+            if let Some(p) = posterior.as_mut() {
+                p[v] = -total;
+            }
         }
+        filled += usize::from(posterior.is_some());
     }
-    None
+    (None, filled)
 }
 
-/// Ordered statistics decoding to `order`: the codeword and the order that
-/// found it, if one passes the CRC within `max_distance` (normalised, as
-/// [`OSD_MAX_DISTANCE`]) of what was received.
-fn osd(llr: &[f32; N], hard: &Bits, order: u8, max_distance: f32) -> Option<(Bits, u8)> {
+/// OSD on the received ratios and on each of `beliefs`: the closest to
+/// what was received of the codewords each finds, with its order and its
+/// normalised distance. On a tie the earlier wins, the received first.
+fn osd_deep(
+    llr: &[f32; N],
+    hard: &Bits,
+    beliefs: &[[f32; N]],
+    order: u8,
+) -> Option<(Bits, u8, f32)> {
+    std::iter::once(llr)
+        .chain(beliefs)
+        .filter_map(|by| osd_by(by, llr, hard, order))
+        .reduce(|best, c| if c.2 < best.2 { c } else { best })
+}
+
+/// Ordered statistics decoding to `order`, the information set and its
+/// decisions taken from `by` (the received ratios, or what belief
+/// propagation came to believe), every candidate measured against what was
+/// received (`llr`, `hard`): the closest that passes the CRC, the order
+/// that found it, and its distance, normalised as [`OSD_MAX_DISTANCE`].
+fn osd_by(by: &[f32; N], llr: &[f32; N], hard: &Bits, order: u8) -> Option<(Bits, u8, f32)> {
     let c = code();
     // Columns by reliability, most reliable first.
     let mut by_reliability: Vec<usize> = (0..N).collect();
-    by_reliability.sort_by(|&a, &b| llr[b].abs().total_cmp(&llr[a].abs()));
+    by_reliability.sort_by(|&a, &b| by[b].abs().total_cmp(&by[a].abs()));
 
     // Gaussian elimination over GF(2): bring the generator to identity on
     // the most reliable 91 independent columns, kept in reliability order.
@@ -387,10 +444,10 @@ fn osd(llr: &[f32; N], hard: &Bits, order: u8, max_distance: f32) -> Option<(Bit
         return None;
     }
 
-    // Order 0: the received decisions on the information set.
+    // Order 0: the decisions on the information set.
     let mut base = [0u64; 3];
     for (p, &col) in pivots.iter().enumerate() {
-        if get(hard, col) {
+        if by[col] > 0.0 {
             xor(&mut base, &rows[p]);
         }
     }
@@ -432,7 +489,7 @@ fn osd(llr: &[f32; N], hard: &Bits, order: u8, max_distance: f32) -> Option<(Bit
         }
     }
     let (d, bits, ord) = best?;
-    (total > 0.0 && d / total <= max_distance).then_some((bits, ord))
+    (total > 0.0).then(|| (bits, ord, d / total))
 }
 
 #[cfg(test)]
@@ -567,7 +624,7 @@ mod tests {
             } else {
                 through_awgn(&cw, sigma_for(0.5 + 0.5 * (trial % 6) as f64), &mut rng)
             };
-            let got = belief_propagation(&llr, 30);
+            let got = belief_propagation(&llr, 30, &mut []).0;
             assert_eq!(got, belief_propagation_reference(&llr, 30), "trial {trial}");
             converged += usize::from(got.is_some());
             let mut hard = [0u64; 3];
@@ -657,13 +714,24 @@ mod tests {
 
     /// Decodes out of `trials` at an Eb/N0, and how many came out wrong.
     fn rate(eb_n0_db: f64, trials: usize, osd: u8, seed: u64) -> (usize, usize, usize) {
+        rate_deep(eb_n0_db, trials, osd, 0, seed)
+    }
+
+    /// [`rate`] with OSD also on the first `from_bp` posteriors.
+    fn rate_deep(
+        eb_n0_db: f64,
+        trials: usize,
+        osd: u8,
+        from_bp: usize,
+        seed: u64,
+    ) -> (usize, usize, usize) {
         let mut rng = Rng::new(seed);
         let sigma = sigma_for(eb_n0_db);
         let (mut ok, mut wrong, mut by_osd) = (0, 0, 0);
         for _ in 0..trials {
             let p = random_payload(&mut rng);
             let llr = through_awgn(&encode(crc::with_crc(p)), sigma, &mut rng);
-            match decode(&llr, 30, osd) {
+            match decode_deep(&llr, 30, osd, from_bp) {
                 Some(d) if d.payload == p => {
                     ok += 1;
                     by_osd += usize::from(d.osd.is_some());
@@ -700,7 +768,61 @@ mod tests {
                 *l = (2.0 * rng.normal_pair().0) as f32;
             }
             assert_eq!(decode(&llr, 30, 2), None);
+            assert_eq!(decode_deep(&llr, 30, 2, MAX_OSD_FROM_BP), None);
         }
+    }
+
+    /// OSD on belief propagation's posteriors as well recovers transmissions
+    /// the received ratios alone do not, none wrong; and what the received
+    /// ratios recover, it still recovers.
+    #[test]
+    fn osd_on_the_posteriors_adds_decodes_and_keeps_the_others() {
+        let mut rng = Rng::new(12);
+        let sigma = sigma_for(1.0);
+        let (mut plain, mut deep) = (0, 0);
+        for _ in 0..200 {
+            let p = random_payload(&mut rng);
+            let llr = through_awgn(&encode(crc::with_crc(p)), sigma, &mut rng);
+            let a = decode(&llr, 30, 2);
+            let b = decode_deep(&llr, 30, 2, 2);
+            assert!(a.is_none_or(|d| d.payload == p));
+            assert!(b.is_none_or(|d| d.payload == p));
+            if a.is_some() {
+                assert!(b.is_some(), "lost one the received ratios decode");
+            }
+            plain += usize::from(a.is_some());
+            deep += usize::from(b.is_some());
+        }
+        assert!(deep > plain, "{plain} -> {deep}");
+    }
+
+    /// The posteriors saved are the ones the next iteration decides on, as
+    /// many as there was room for and iterations to fill them: where belief
+    /// propagation converged, the last one saved is the codeword, sign for
+    /// bit.
+    #[test]
+    fn the_posteriors_saved_are_the_iterations_beliefs() {
+        let mut rng = Rng::new(13);
+        let mut converged_in_room = 0;
+        for trial in 0..200 {
+            let sigma = sigma_for(if trial % 2 == 0 { 0.5 } else { 2.5 });
+            let llr = through_awgn(
+                &encode(crc::with_crc(random_payload(&mut rng))),
+                sigma,
+                &mut rng,
+            );
+            let mut saved = [[0f32; N]; 3];
+            let (got, filled) = belief_propagation(&llr, 30, &mut saved);
+            assert_eq!(got, belief_propagation(&llr, 30, &mut []).0);
+            let ran = got.map_or(30, |(_, it)| it as usize);
+            assert_eq!(filled, ran.min(3));
+            if let Some((bits, it @ 1..=3)) = got {
+                let last = &saved[it as usize - 1];
+                assert!((0..N).all(|v| (last[v] > 0.0) == get(&bits, v)));
+                converged_in_room += 1;
+            }
+        }
+        assert!(converged_in_room > 20, "{converged_in_room}");
     }
 
     /// Prints the decode table the bar below was set from. `cargo test --release measure_the_decoder -- --ignored --nocapture`.
@@ -711,73 +833,85 @@ mod tests {
             let (bp, bpw, _) = rate(db, 1000, 0, 11);
             let (o1, o1w, _) = rate(db, 1000, 1, 11);
             let (o2, o2w, n2) = rate(db, 1000, 2, 11);
+            let deep: Vec<String> = (1..=MAX_OSD_FROM_BP)
+                .map(|k| {
+                    let (ok, w, _) = rate_deep(db, 1000, 2, k, 11);
+                    format!("{ok:>4} ({w})")
+                })
+                .collect();
             println!(
-                "Eb/N0 {db:>3} dB: BP+OSD0 {bp:>4} ({bpw} wrong)  OSD1 {o1:>4} ({o1w})  OSD2 {o2:>4} ({o2w}, {n2} by OSD)"
+                "Eb/N0 {db:>3} dB: BP+OSD0 {bp:>4} ({bpw} wrong)  OSD1 {o1:>4} ({o1w})  OSD2 {o2:>4} ({o2w}, {n2} by OSD)  +posteriors 1..{MAX_OSD_FROM_BP}: {}",
+                deep.join("  ")
             );
         }
     }
 
     /// What each threshold keeps and lets through: true transmissions OSD
     /// recovers after belief propagation failed, against noise decoded to a
-    /// message at all, for OSD orders 1 and 2.
+    /// message at all, for OSD orders 1 and 2, and order 2 on the first one
+    /// to [`MAX_OSD_FROM_BP`] posteriors as well.
     #[test]
     #[ignore]
     fn measure_the_osd_thresholds() {
         let mut rng = Rng::new(21);
-        let found = |order: u8, llr: &[f32; N]| -> Option<f32> {
+        // The closest codeword OSD finds, from whatever distance, and its
+        // normalised distance.
+        let found = |order: u8, from_bp: usize, llr: &[f32; N]| -> Option<(Bits, f32)> {
             let mut hard = [0u64; 3];
             for (v, &l) in llr.iter().enumerate() {
                 if l > 0.0 {
                     set(&mut hard, v);
                 }
             }
-            let (bits, _) = osd(llr, &hard, order, f32::INFINITY)?;
-            let total: f32 = llr.iter().map(|l| l.abs()).sum();
-            let d: f32 = (0..N)
-                .filter(|&v| get(&bits, v) != get(&hard, v))
-                .map(|v| llr[v].abs())
-                .sum();
-            Some(d / total)
+            let mut saved = [[0f32; N]; MAX_OSD_FROM_BP];
+            let (_, filled) = belief_propagation(llr, 30, &mut saved[..from_bp]);
+            osd_deep(llr, &hard, &saved[..filled], order).map(|(b, _, d)| (b, d))
         };
-        for order in [1u8, 2] {
-            let mut good = Vec::new();
-            let mut bad = Vec::new();
-            let mut bp_failed = 0;
-            for db in [0.5, 1.0, 1.5, 2.0] {
-                for _ in 0..1000 {
-                    let p = random_payload(&mut rng);
-                    let llr = through_awgn(&encode(crc::with_crc(p)), sigma_for(db), &mut rng);
-                    if belief_propagation(&llr, 30).is_some_and(|(b, _)| crc::check(head(&b))) {
-                        continue;
-                    }
-                    bp_failed += 1;
-                    let mut hard = [0u64; 3];
-                    for (v, &l) in llr.iter().enumerate() {
-                        if l > 0.0 {
-                            set(&mut hard, v);
-                        }
-                    }
-                    if let Some((bits, _)) = osd(&llr, &hard, order, f32::INFINITY) {
-                        let d = found(order, &llr).unwrap();
-                        if head(&bits) >> 14 == p {
-                            good.push(d)
-                        } else {
-                            bad.push(d)
-                        }
-                    }
+        let configs: Vec<(u8, usize)> = [(1, 0), (2, 0)]
+            .into_iter()
+            .chain((1..=MAX_OSD_FROM_BP).map(|k| (2, k)))
+            .collect();
+        // The same transmissions and the same noise for every setting.
+        let mut sent = Vec::new();
+        for db in [0.5, 1.0, 1.5, 2.0] {
+            for _ in 0..1000 {
+                let p = random_payload(&mut rng);
+                let llr = through_awgn(&encode(crc::with_crc(p)), sigma_for(db), &mut rng);
+                if !belief_propagation(&llr, 30, &mut [])
+                    .0
+                    .is_some_and(|(b, _)| crc::check(head(&b)))
+                {
+                    sent.push((p, llr));
                 }
             }
-            let mut noise = Vec::new();
-            for _ in 0..20000 {
+        }
+        let noise: Vec<[f32; N]> = (0..20000)
+            .map(|_| {
                 let mut llr = [0f32; N];
                 for l in llr.iter_mut() {
                     *l = (2.0 * rng.normal_pair().0) as f32;
                 }
-                if let Some(d) = found(order, &llr) {
-                    noise.push(d);
+                llr
+            })
+            .collect();
+        println!("{} BP failures (0.5-2 dB)", sent.len());
+        for (order, from_bp) in configs {
+            let mut good = Vec::new();
+            let mut bad = Vec::new();
+            for (p, llr) in &sent {
+                if let Some((bits, d)) = found(order, from_bp, llr) {
+                    if head(&bits) >> 14 == *p {
+                        good.push(d)
+                    } else {
+                        bad.push(d)
+                    }
                 }
             }
-            println!("order {order}: {bp_failed} BP failures (0.5-2 dB)");
+            let noise: Vec<f32> = noise
+                .iter()
+                .filter_map(|llr| found(order, from_bp, llr).map(|(_, d)| d))
+                .collect();
+            println!("order {order}, posteriors {from_bp}:");
             for t in [0.05f32, 0.06, 0.07, 0.075, 0.08, 0.085, 0.09, 0.10, 0.11] {
                 let g = good.iter().filter(|&&d| d <= t).count();
                 let b = bad.iter().filter(|&&d| d <= t).count();
