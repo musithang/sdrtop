@@ -14,7 +14,8 @@
 //! hold.
 //!
 //! Below the plot, on the same time axis: decodes a cycle, even cycles above
-//! the rule and odd hanging below it; the noise under the band
+//! the rule and odd hanging below it, a column never read (its cycles all
+//! cut or skipped) marked `×` on the rule rather than drawn as quiet; the noise under the band
 //! ([`crate::signal::ft8::floor`]), relative and within one setting, a cycle
 //! past the radio's hold marked `×` and a change of setting `┊`; and the
 //! farthest station of each quarter hour, by name. A band change and the sun
@@ -23,7 +24,7 @@
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::{hanging, placed, say, snr_colour, window, Pixels, Placed, SNR_RANGE};
-use crate::state::ft8::CycleMark;
+use crate::state::ft8::{CycleMark, CycleOutcome};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::{km, put};
@@ -336,9 +337,15 @@ fn activity(
 ) {
     let n = usize::from(cols);
     let (mut even, mut odd) = (vec![0usize; n], vec![0usize; n]);
+    // A column whose cycles were all cut or skipped was never read: it is
+    // marked on the rule, not drawn as a quiet one (POLICY.md, rule 2).
+    let (mut seen, mut read, mut cut) = (vec![false; n], vec![false; n], vec![false; n]);
     for c in hour {
         let col = usize::from(col_of(c.start_unix));
         if col < n {
+            seen[col] = true;
+            read[col] |= c.outcome == CycleOutcome::Decoded;
+            cut[col] |= c.outcome == CycleOutcome::Cut;
             let side = if c.odd() { &mut odd } else { &mut even };
             side[col] = side[col].max(c.decodes);
         }
@@ -359,7 +366,14 @@ fn activity(
         let x = x0 + c as u16;
         let e = ((even[c] as f64 / top) * 8.0).round() as usize;
         put(buf, area, x, y, EIGHTHS[e], Style::default().fg(t.value));
-        put(buf, area, x, y + 1, "─", Style::default().fg(t.border_dim));
+        if seen[c] && !read[c] {
+            // The stream broke in it (critical, as the load's sparkline
+            // marks a cut) or the decoder had no room for it (warning).
+            let ink = if cut[c] { t.status_crit } else { t.status_warn };
+            put(buf, area, x, y + 1, "×", Style::default().fg(ink));
+        } else {
+            put(buf, area, x, y + 1, "─", Style::default().fg(t.border_dim));
+        }
         // Odd hangs from the rule.
         let o = ((odd[c] as f64 / top) * 8.0).round() as usize;
         if let Some(glyph) = hanging(o) {
@@ -592,5 +606,51 @@ mod tests {
         assert_eq!(set.len(), 1);
         let hm = (set[0] - day) / 60.0;
         assert!((hm - (15.0 * 60.0 + 19.0)).abs() < 10.0, "{hm}");
+    }
+
+    /// A column whose cycles were all cut is marked on the activity rule in
+    /// critical ink, one only skipped in warning ink; a column with a
+    /// decoded cycle keeps its rule.
+    #[test]
+    fn a_column_never_read_is_marked_not_drawn_quiet() {
+        let mut m = SdrMetrics::fixture().streaming().ft8_hour();
+        let theme = crate::Theme::sdr();
+        let hour = std::sync::Arc::make_mut(&mut m.ft8.cycle_hour);
+        let n = hour.len();
+        // Ten minutes cut, then ten skipped, in the middle of the hour.
+        for (k, c) in hour.iter_mut().enumerate() {
+            if (n / 3..n / 3 + 40).contains(&k) {
+                c.outcome = CycleOutcome::Cut;
+                c.decodes = 0;
+            } else if (n / 3 + 40..n / 3 + 80).contains(&k) {
+                c.outcome = CycleOutcome::Skipped;
+                c.decodes = 0;
+            }
+        }
+        let buf = crate::state::fixture::draw_buffer(Ft8ReachPanel, 191, 26, &m);
+        let row = |y: u16| {
+            (0..191u16)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        };
+        let y = (0..26u16)
+            .find(|&y| row(y).contains("decodes"))
+            .expect("the activity rule");
+        let marks: Vec<_> = (0..191u16)
+            .filter(|&x| buf[(x, y)].symbol() == "×")
+            .map(|x| buf[(x, y)].fg)
+            .collect();
+        assert!(marks.contains(&theme.status_crit), "{}", row(y));
+        assert!(marks.contains(&theme.status_warn), "{}", row(y));
+        assert!(row(y).contains('─'), "{}", row(y));
+        // Without them, no column is marked.
+        let clean = SdrMetrics::fixture().streaming().ft8_hour();
+        let buf = crate::state::fixture::draw_buffer(Ft8ReachPanel, 191, 26, &clean);
+        let row = |y: u16| {
+            (0..191u16)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        };
+        assert!(!row(y).contains('×'), "{}", row(y));
     }
 }

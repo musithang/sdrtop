@@ -278,7 +278,10 @@ session has; nothing is kept between sessions.
   dot where decodes fell, coloured by their SNR. An opening is a cloud
   climbing; the skip zone is the empty band under it. Only stations that
   sent a locator are placed, the rest are counted in the title. Under it,
-  on the same clock, decodes a cycle (even above the line, odd below), the
+  on the same clock, decodes a cycle (even above the line, odd below; a
+  `×` on the line where no cycle was read at all, in the critical colour
+  where the stream broke and the warning colour where the decoder was
+  still busy; a quiet stretch and a deaf one are not the same thing), the
   noise under the band, and the farthest station of each quarter hour.
 - **The noise under the band** is in dBFS of the radio's word per Hz, so it
   only compares with itself while nothing in the radio changes. Touch the
