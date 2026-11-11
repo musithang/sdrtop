@@ -238,8 +238,7 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
             report.band = spec.band(BAND_BIN_HZ, 3000.0);
             report.floor_db_hz = super::floor::read(&x);
         }
-        let mut cands = search::candidates(&spec);
-        cands.truncate(settings.max_candidates);
+        let cands = search::candidates_up_to(&spec, settings.max_candidates);
         report.candidates += cands.len();
         let bb = Baseband::new(&x);
         let mut new: Vec<Found> = Vec::new();
@@ -504,6 +503,54 @@ fn the_all_zero_codeword_and_an_unsynced_osd_are_not_believed() {
     assert!(believed(&d(0x1234, Some(2), 20), OSD_MIN_COSTAS));
     assert!(!believed(&d(0x1234, Some(2), 20), OSD_MIN_COSTAS - 1));
     assert!(!believed(&d(0x1234, Some(2), OSD_MAX_REPAIRED + 1), 21));
+}
+
+/// What one candidate came to, read as a pass reads it: whether it passed
+/// the power floor, whether the code gave a codeword, whether a guard
+/// refused one, and the codeword believed (payload, Costas symbols on their
+/// tone, OSD order, bits repaired). For finding out where a decode is lost.
+#[cfg(test)]
+pub(super) struct Explained {
+    pub synced: bool,
+    pub coded: bool,
+    pub refused_zero: bool,
+    pub refused_osd: bool,
+    pub believed: Option<(u128, u8, Option<u8>, u32)>,
+}
+
+#[cfg(test)]
+pub(super) fn explain(bb: &Baseband, c: &search::Candidate, settings: &Settings) -> Explained {
+    let mut tally = Tally::default();
+    let hit = try_candidate(bb, c, 1, settings, &HashSet::new(), &mut tally);
+    Explained {
+        synced: tally.synced,
+        coded: tally.coded,
+        refused_zero: tally.zero,
+        refused_osd: tally.unsynced_osd,
+        believed: match hit {
+            Some(Hit::Found(f)) => Some((f.payload, f.costas, f.decoded.osd, f.decoded.repaired)),
+            _ => None,
+        },
+    }
+}
+
+/// Take a reported decode out of `x`, as its pass did.
+#[cfg(test)]
+pub(super) fn take_out_decode(x: &mut [Complex<f32>], d: &Decode) {
+    let w = Waveform {
+        f0: d.physics.f0,
+        start: d.physics.start,
+        amplitude: 1.0,
+        drift: d.physics.drift,
+        phase: 0.0,
+    };
+    let seconds = if d.physics.fading() {
+        FADING_GAIN_SECONDS
+    } else {
+        GAIN_SECONDS
+    };
+    let tones = demod::tones_of(crate::signal::ft8::crc::with_crc(d.payload));
+    take_out(x, &tones, &w, seconds);
 }
 
 /// Take a decoded transmission out of the cycle.

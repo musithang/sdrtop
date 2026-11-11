@@ -760,7 +760,7 @@ fn measure_the_decoder() {
         for _ in 0..6 {
             let sent = readable(12, snr, &mut rng);
             let x = cycle(&sent, &mut rng);
-            rows.add(&sent, &x, &cycle::Settings::DEFAULT);
+            rows.add(&sent, &x, &settings_from_env());
         }
         println!(
             "{snr:>5} {:>3}/{:<3} {:>4} {:>3}  {:>+5.2} / {:>4.2} dB  {:>5.1} ms  {:>6.3} Hz  {:>6.2}        {:>4.2}",
@@ -797,15 +797,40 @@ fn measure_the_llr_scale() {
     }
 }
 
-/// Noise alone, every candidate decoded: what comes out is false.
+/// The decoder's settings with any of these from the environment, to try
+/// other numbers on the rows and on a recording: `FT8_CANDS` (the most
+/// candidates a pass reads), `FT8_PASSES`, `FT8_MIN_POWER`, `FT8_GATE` (the
+/// Costas count a candidate needs to be tried again), `FT8_RESYNC=0`.
+pub(crate) fn settings_from_env() -> cycle::Settings {
+    fn var<T: std::str::FromStr>(name: &str, default: T) -> T {
+        std::env::var(name).map_or(default, |v| {
+            v.parse()
+                .unwrap_or_else(|_| panic!("{name}: not a number: {v}"))
+        })
+    }
+    let d = cycle::Settings::DEFAULT;
+    cycle::Settings {
+        max_candidates: var("FT8_CANDS", d.max_candidates),
+        max_passes: var("FT8_PASSES", d.max_passes),
+        min_power: var("FT8_MIN_POWER", d.min_power),
+        resync_min_costas: var("FT8_GATE", d.resync_min_costas),
+        resync: std::env::var("FT8_RESYNC").map_or(d.resync, |v| v != "0"),
+        ..d
+    }
+}
+
+/// Noise alone, every candidate decoded: what comes out is false. 40
+/// cycles, or `FT8_NOISE_CYCLES`; the settings as [`settings_from_env`].
 #[test]
 #[ignore]
 fn measure_false_decodes() {
     let mut rng = Rng::new(53);
     let (mut false_decodes, mut malformed, mut cycles) = (0, 0, 0);
-    for _ in 0..40 {
+    let settings = settings_from_env();
+    let n: usize = std::env::var("FT8_NOISE_CYCLES").map_or(40, |v| v.parse().unwrap());
+    for _ in 0..n {
         let x = cycle(&[], &mut rng);
-        let r = cycle::decode(&x, &mut HashBook::new());
+        let r = cycle::decode_with(&x, &mut HashBook::new(), &settings);
         false_decodes += r.decodes.len();
         malformed += r.malformed;
         cycles += 1;
@@ -841,7 +866,7 @@ fn measure_a_crowded_band() {
             sent[2 * k + 1].snr_db = sent[2 * k].snr_db - 6.0;
         }
         let x = cycle(&sent, &mut rng);
-        rows.add(&sent, &x, &cycle::Settings::DEFAULT);
+        rows.add(&sent, &x, &settings_from_env());
     }
     println!(
         "crowded: {}/{} decoded, {} wrong, {} duplicates, {:.2} s/cycle",

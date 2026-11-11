@@ -167,8 +167,13 @@ pub struct Candidate {
     pub sync: f32,
 }
 
-/// The cycle's candidates, strongest first.
+/// The cycle's candidates, strongest first, at most [`MAX_CANDIDATES`].
 pub fn candidates(spec: &Spectrogram) -> Vec<Candidate> {
+    candidates_up_to(spec, MAX_CANDIDATES)
+}
+
+/// The cycle's candidates, strongest first, at most `limit`.
+pub fn candidates_up_to(spec: &Spectrogram, limit: usize) -> Vec<Candidate> {
     let step_s = STEP as f64 / RATE;
     let frames = (START_MIN / step_s).floor() as i64..=(START_MAX / step_s).ceil() as i64;
     let bins = (F_MIN / BIN_HZ).floor() as usize..=(F_MAX / BIN_HZ).ceil() as usize;
@@ -215,7 +220,7 @@ pub fn candidates(spec: &Spectrogram) -> Vec<Candidate> {
         });
         if !near {
             out.push(Candidate { start, f0, sync: s });
-            if out.len() == MAX_CANDIDATES {
+            if out.len() >= limit {
                 break;
             }
         }

@@ -263,15 +263,10 @@ fn hhmmss(unix: f64) -> String {
     format!("{:02}{:02}{:02}", s / 3600, (s / 60) % 60, s % 60)
 }
 
-/// The decoder's settings, `FT8_RESYNC=0` taking the second and third
-/// attempts away, to measure what they cost and bring.
+/// The decoder's settings, any of them from the environment
+/// ([`super::conformance::settings_from_env`]).
 fn settings() -> Settings {
-    Settings {
-        resync: std::env::var("FT8_RESYNC").map_or(true, |v| v != "0"),
-        resync_min_costas: std::env::var("FT8_GATE")
-            .map_or(cycle::RESYNC_MIN_COSTAS, |v| v.parse().unwrap()),
-        ..Settings::DEFAULT
-    }
+    super::conformance::settings_from_env()
 }
 
 fn decode_lines(label: &str, x: &[Complex<f32>], book: &mut HashBook) -> Vec<String> {
@@ -415,6 +410,191 @@ fn upper_sideband_audio_round_trips() {
         .unwrap();
     assert_eq!(peak, 1500);
     assert!(buf[n - 1500].norm() < buf[1500].norm() * 1e-3);
+}
+
+/// Where the decodes another decoder made and ours did not are lost. For
+/// each line of `FT8_MISSES` (`hhmmss f0 dt text`, jt9's columns, from the
+/// WAVs in `FT8_WAVS`): pass by pass, on what our own decodes of the
+/// earlier passes left, the nearest candidate the search put there (its
+/// rank of how many, its Costas score) and what reading it came to; then a
+/// candidate placed by hand at jt9's own place, read the same way.
+///
+/// `FT8_WAVS=<dir> FT8_MISSES=<file> cargo test --release
+/// why_the_other_decodes_are_missed -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn why_the_other_decodes_are_missed() {
+    use super::fields::G15;
+    use super::message::{pack::pack, Call, Message, Suffix};
+    use super::search::{self, Baseband, Candidate, Spectrogram, DOWN_RATE};
+    use super::{crc, demod, ldpc};
+    // The payload of a plain two-call message, from its text: `None` for
+    // anything else (a hashed call, free text).
+    let truth = |text: &[&str]| -> Option<u128> {
+        let call = |w: &str| -> Option<Call> {
+            if w.contains('<') {
+                return None;
+            }
+            let (c, suffix) = match w.split_once('/') {
+                Some((c, "P")) => (c, Some(Suffix::P)),
+                Some((c, "R")) => (c, Some(Suffix::R)),
+                Some(_) => return None,
+                None => (w, None),
+            };
+            Some(Call::Std {
+                call: c.to_string(),
+                suffix,
+            })
+        };
+        let [to, from, last] = text else {
+            return None;
+        };
+        let (ack, word) = match *last {
+            "RR73" => (false, G15::Rr73),
+            "RRR" => (false, G15::Rrr),
+            "73" => (false, G15::R73),
+            w if w.starts_with("R+") || w.starts_with("R-") => {
+                (true, G15::Report(w[1..].parse().ok()?))
+            }
+            w if w.starts_with('+') || w.starts_with('-') => (false, G15::Report(w.parse().ok()?)),
+            w if w.len() == 4 => (false, G15::Grid(w.to_string())),
+            _ => return None,
+        };
+        Some(pack(&Message::Standard {
+            to: call(to)?,
+            from: call(from)?,
+            ack,
+            word,
+        }))
+    };
+    // Read at a place: wrong hard decisions against the truth per block, and
+    // whether the code alone (no guard) comes back with the truth.
+    let against = |bb: &Baseband, start: f64, f0: f64, payload: u128| -> String {
+        let word = ldpc::encode(crc::with_crc(payload));
+        let (y, at_zero) = bb.around(f0);
+        let z = demod::correlate(&y, (start * DOWN_RATE).round() as i64, f0 - at_zero);
+        let mut out = format!("costas {:2}", demod::costas_matched(&z));
+        for b in 1..=3 {
+            let llr = demod::soft_bits(&z, b, demod::LLR_SCALE);
+            let wrong = llr
+                .iter()
+                .zip(word.iter())
+                .filter(|(l, &w)| (**l > 0.0) != (w == 1))
+                .count();
+            let d = ldpc::decode(&llr, 30, 2);
+            let got = match d {
+                Some(d) if d.payload == payload => {
+                    if d.osd.is_some() {
+                        "OSD"
+                    } else {
+                        "BP"
+                    }
+                }
+                Some(_) => "other",
+                None => "-",
+            };
+            out += &format!("  b{b} {wrong:3} wrong {got}");
+        }
+        out
+    };
+    let (Ok(wavs), Ok(misses)) = (std::env::var("FT8_WAVS"), std::env::var("FT8_MISSES")) else {
+        return;
+    };
+    let settings = settings();
+    let say = |e: &cycle::Explained| -> String {
+        match e.believed {
+            Some((p, costas, osd, rep)) => {
+                let text = super::message::unpack(p, &HashBook::new())
+                    .map_or("malformed".to_string(), |m| m.text());
+                format!("DECODES {text:?} costas {costas} osd {osd:?} repaired {rep}")
+            }
+            None if !e.synced => "below the power floor".to_string(),
+            None if e.refused_zero => "refused: all-zero codeword".to_string(),
+            None if e.refused_osd => "refused: OSD without its sync".to_string(),
+            None if e.coded => "coded, not believed".to_string(),
+            None => "no codeword".to_string(),
+        }
+    };
+    for line in std::fs::read_to_string(misses).unwrap().lines() {
+        let mut it = line.split_whitespace();
+        let (Some(t), Some(f0), Some(dt)) = (it.next(), it.next(), it.next()) else {
+            continue;
+        };
+        let text: Vec<&str> = it.collect();
+        let f0: f64 = f0.parse().unwrap();
+        let start = dt.parse::<f64>().unwrap() + super::modulate::NOMINAL_START;
+        let path = std::fs::read_dir(&wavs)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.to_string_lossy().ends_with(&format!("{t}.wav")))
+            .unwrap_or_else(|| panic!("no WAV for {t}"));
+        let mut a = read_wav(&path);
+        a.resize(CYCLE, 0.0);
+        let mut x = analytic(&a);
+        let report = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+        println!("{t} {f0} Hz dt {dt} {}", text.join(" "));
+        for pass in 1..=settings.max_passes as u8 {
+            if pass > 1 {
+                for d in report.decodes.iter().filter(|d| d.pass == pass - 1) {
+                    cycle::take_out_decode(&mut x, d);
+                }
+            }
+            let spec = Spectrogram::new(&x);
+            let all = search::candidates_up_to(&spec, usize::MAX);
+            let bb = Baseband::new(&x);
+            let near = all
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| (c.f0 - f0).abs() < 5.0 && (c.start - start).abs() < 0.2)
+                .min_by(|a, b| {
+                    let d =
+                        |c: &Candidate| (c.f0 - f0).abs() / 6.25 + (c.start - start).abs() / 0.16;
+                    d(a.1).total_cmp(&d(b.1))
+                });
+            let truth_at = |start: f64, f0: f64| -> String {
+                truth(&text).map_or(String::new(), |p| {
+                    format!("\n          truth there: {}", against(&bb, start, f0, p))
+                })
+            };
+            let refined = near.map(|(_, c)| {
+                let s = search::refine(&bb, c);
+                format!(
+                    "\n          refined {:+.2} Hz {:+.1} ms power {:.2}{}",
+                    s.f0 - f0,
+                    (s.start - start) * 1e3,
+                    s.power,
+                    truth_at(s.start, s.f0)
+                )
+            });
+            let found = match near {
+                Some((rank, c)) => format!(
+                    "cand #{rank} of {} ({:+.1} Hz {:+.0} ms sync {:.2}){}: {}",
+                    all.len(),
+                    c.f0 - f0,
+                    (c.start - start) * 1e3,
+                    c.sync,
+                    if rank >= settings.max_candidates {
+                        " PAST THE CAP"
+                    } else {
+                        ""
+                    },
+                    say(&cycle::explain(&bb, c, &settings))
+                ),
+                None => format!("no candidate near (of {})", all.len()),
+            };
+            let placed = Candidate {
+                start,
+                f0,
+                sync: 0.0,
+            };
+            println!(
+                "  pass {pass}: {found}{}\n          placed by hand: {}{}",
+                refined.unwrap_or_default(),
+                say(&cycle::explain(&bb, &placed, &settings)),
+                truth_at(start, f0)
+            );
+        }
+    }
 }
 
 /// Where a decode is lost, cycle by cycle, on simulated cycles of one known
