@@ -68,6 +68,13 @@ struct Code {
     generator: [u128; M],
     /// Check `c`: the codeword bits it sums.
     checks: Vec<Vec<usize>>,
+    /// Check `c`, bit by bit as [`Code::checks`] lists them: where `c` sits
+    /// among that bit's three checks, the index of the messages between the
+    /// two. Worked out once here rather than looked up on every message.
+    slots: Vec<Vec<usize>>,
+    /// Check `c` as a mask over the codeword: the word fails `c` when the
+    /// bits under the mask hold an odd number of ones.
+    masks: [Bits; M],
     /// Bit `v`: its three checks.
     bit_checks: [[usize; 3]; N],
     /// The systematic generator, one row per message bit: the codeword of a
@@ -86,6 +93,26 @@ fn code() -> &'static Code {
                 checks[c].push(v);
             }
         }
+        let slots = checks
+            .iter()
+            .enumerate()
+            .map(|(c, vs)| {
+                vs.iter()
+                    .map(|&v| {
+                        bit_checks[v]
+                            .iter()
+                            .position(|&x| x == c)
+                            .expect("bit in its check")
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut masks = [[0u64; 3]; M];
+        for (mask, vs) in masks.iter_mut().zip(&checks) {
+            for &v in vs {
+                set(mask, v);
+            }
+        }
         let mut rows = [[0u64; 3]; K];
         for (j, row) in rows.iter_mut().enumerate() {
             set(row, j);
@@ -98,6 +125,8 @@ fn code() -> &'static Code {
         Code {
             generator,
             checks,
+            slots,
+            masks,
             bit_checks,
             rows,
         }
@@ -156,9 +185,16 @@ pub fn encode(word91: u128) -> [u8; N] {
 /// How many checks a 174-bit word fails.
 fn failed_checks(bits: &Bits) -> usize {
     code()
-        .checks
+        .masks
         .iter()
-        .filter(|vs| vs.iter().filter(|&&v| get(bits, v)).count() % 2 == 1)
+        .filter(|mask| {
+            mask.iter()
+                .zip(bits)
+                .map(|(m, b)| (m & b).count_ones())
+                .sum::<u32>()
+                % 2
+                == 1
+        })
         .count()
 }
 
@@ -259,7 +295,10 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
 /// decisions were already one).
 fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)> {
     let c = code();
-    let prior: Vec<f32> = llr.iter().map(|l| -l).collect();
+    let mut prior = [0f32; N];
+    for (p, l) in prior.iter_mut().zip(llr) {
+        *p = -l;
+    }
     // Bit-to-check and check-to-bit messages, indexed by the bit's position
     // in its three checks.
     let mut to_check = [[0f32; 3]; N];
@@ -267,13 +306,8 @@ fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)
     for v in 0..N {
         to_check[v] = [prior[v]; 3];
     }
-    // Where bit v sits among check c's bits, to index the messages.
-    let slot = |v: usize, check: usize| -> usize {
-        c.bit_checks[v]
-            .iter()
-            .position(|&x| x == check)
-            .expect("bit in its check")
-    };
+    // A check has six or seven bits.
+    let mut t = [0f32; 7];
 
     for iteration in 0..=max_iterations {
         // Posterior and hard decision.
@@ -290,13 +324,14 @@ fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)
         if iteration == max_iterations {
             break;
         }
-        // Check update: the tanh rule over the other bits of each check.
-        for (check, vs) in c.checks.iter().enumerate() {
-            let t: Vec<f32> = vs
-                .iter()
-                .map(|&v| (to_check[v][slot(v, check)] / 2.0).tanh())
-                .collect();
-            for (k, &v) in vs.iter().enumerate() {
+        // Check update: the tanh rule over the other bits of each check,
+        // the product taken in the bits' order, the one left out skipped.
+        for (vs, slots) in c.checks.iter().zip(&c.slots) {
+            let t = &mut t[..vs.len()];
+            for ((x, &v), &s) in t.iter_mut().zip(vs).zip(slots) {
+                *x = (to_check[v][s] / 2.0).tanh();
+            }
+            for (k, (&v, &s)) in vs.iter().zip(slots).enumerate() {
                 let p: f32 = t
                     .iter()
                     .enumerate()
@@ -304,7 +339,7 @@ fn belief_propagation(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)
                     .map(|(_, x)| x)
                     .product();
                 let p = p.clamp(-0.999_999, 0.999_999);
-                to_bit[v][slot(v, check)] = 2.0 * p.atanh();
+                to_bit[v][s] = 2.0 * p.atanh();
             }
         }
         // Bit update: everything the bit knows except what this check said.
@@ -436,6 +471,115 @@ mod tests {
     fn sigma_for(eb_n0_db: f64) -> f64 {
         let rate = K as f64 / N as f64;
         (1.0 / (2.0 * rate * 10f64.powf(eb_n0_db / 10.0))).sqrt()
+    }
+
+    /// Belief propagation as it was first written: the slot of a bit in
+    /// its check looked up on every message, the tanh terms collected
+    /// afresh for every check. The decoder must agree with it bit for bit.
+    fn belief_propagation_reference(llr: &[f32; N], max_iterations: u32) -> Option<(Bits, u32)> {
+        let c = code();
+        let prior: Vec<f32> = llr.iter().map(|l| -l).collect();
+        // Bit-to-check and check-to-bit messages, indexed by the bit's position
+        // in its three checks.
+        let mut to_check = [[0f32; 3]; N];
+        let mut to_bit = [[0f32; 3]; N];
+        for v in 0..N {
+            to_check[v] = [prior[v]; 3];
+        }
+        // Where bit v sits among check c's bits, to index the messages.
+        let slot = |v: usize, check: usize| -> usize {
+            c.bit_checks[v]
+                .iter()
+                .position(|&x| x == check)
+                .expect("bit in its check")
+        };
+
+        for iteration in 0..=max_iterations {
+            // Posterior and hard decision.
+            let mut bits = [0u64; 3];
+            for v in 0..N {
+                let total = prior[v] + to_bit[v].iter().sum::<f32>();
+                if total < 0.0 {
+                    set(&mut bits, v);
+                }
+            }
+            if failed_checks_reference(&bits) == 0 {
+                return Some((bits, iteration));
+            }
+            if iteration == max_iterations {
+                break;
+            }
+            // Check update: the tanh rule over the other bits of each check.
+            for (check, vs) in c.checks.iter().enumerate() {
+                let t: Vec<f32> = vs
+                    .iter()
+                    .map(|&v| (to_check[v][slot(v, check)] / 2.0).tanh())
+                    .collect();
+                for (k, &v) in vs.iter().enumerate() {
+                    let p: f32 = t
+                        .iter()
+                        .enumerate()
+                        .filter(|&(i, _)| i != k)
+                        .map(|(_, x)| x)
+                        .product();
+                    let p = p.clamp(-0.999_999, 0.999_999);
+                    to_bit[v][slot(v, check)] = 2.0 * p.atanh();
+                }
+            }
+            // Bit update: everything the bit knows except what this check said.
+            for v in 0..N {
+                let total = prior[v] + to_bit[v].iter().sum::<f32>();
+                for s in 0..3 {
+                    to_check[v][s] = total - to_bit[v][s];
+                }
+            }
+        }
+        None
+    }
+
+    /// The check count as it was first written, bit by bit, to hold the
+    /// masks to.
+    fn failed_checks_reference(bits: &Bits) -> usize {
+        code()
+            .checks
+            .iter()
+            .filter(|vs| vs.iter().filter(|&&v| get(bits, v)).count() % 2 == 1)
+            .count()
+    }
+
+    /// The decoder's belief propagation and the one first written give the
+    /// same codeword in the same iterations, or both give up, on noisy
+    /// codewords from clean to hopeless and on noise alone; and the masks
+    /// count failed checks as the bit-by-bit count does.
+    #[test]
+    fn belief_propagation_is_the_first_written_bit_for_bit() {
+        let mut rng = Rng::new(7);
+        let mut converged = 0;
+        for trial in 0..600 {
+            let w = crc::with_crc(random_payload(&mut rng));
+            let cw = encode(w);
+            let llr = if trial % 6 == 5 {
+                let mut l = [0f32; N];
+                for x in &mut l {
+                    *x = (3.0 * rng.normal_pair().0) as f32;
+                }
+                l
+            } else {
+                through_awgn(&cw, sigma_for(0.5 + 0.5 * (trial % 6) as f64), &mut rng)
+            };
+            let got = belief_propagation(&llr, 30);
+            assert_eq!(got, belief_propagation_reference(&llr, 30), "trial {trial}");
+            converged += usize::from(got.is_some());
+            let mut hard = [0u64; 3];
+            for (v, &l) in llr.iter().enumerate() {
+                if l > 0.0 {
+                    set(&mut hard, v);
+                }
+            }
+            assert_eq!(failed_checks(&hard), failed_checks_reference(&hard));
+        }
+        // Both ways were exercised.
+        assert!(converged > 100 && converged < 550, "{converged}");
     }
 
     #[test]
