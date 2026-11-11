@@ -58,7 +58,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 |---|---|
 | [The demodulator](demodulator.md) | The signal chain behind the FM, RDS, CTCSS and AM readings, written from scratch in Rust |
 | [The pager](radio-pocsag.md) | POCSAG pages on a pager's own face, and the link each one came on |
-| [FT8](radio-ft8.md) | The world's FT8 stations on a map around you, and the clock as the stations judge it |
+| [FT8](radio-ft8.md) | The world's FT8 stations on a map around you, the clock as the stations judge it, and the FT8 Lab: one transmission tone by tone, the band's reach over the hour, your own station |
 
 ## NET: the 2.4 GHz band
 

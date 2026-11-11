@@ -211,6 +211,127 @@ stops altogether. Fewer than five decodes and it does not judge at all. If
 it says you are late by seconds, check that your computer's clock is synced
 before blaming the radio.
 
+## The FT8 Lab
+
+World shows who is out there. The Lab shows what the decoder made of them:
+one transmission tone by tone, the band over the last hour, and your own
+station as FT8 judges it. It is in the menu as **Lab › FT8**, under the
+heading *Measure a mode*, or one key away: `L` goes from World to the Lab
+and back, each time to the view you last left, with the same station
+chosen. The Lab runs on World's decoder, so nothing starts over when you
+cross. Three views, `1` `2` `3`:
+
+| Key | View | The question it answers |
+|-----|------|--------------------------|
+| `1` | **Signal** | What did that one transmission actually look like? |
+| `2` | **Band** | Where is the band open to, and is that changing? |
+| `3` | **Receiver** | Can I trust my own station? |
+
+World's keys mostly work here too: `↑` `↓` choose a station, `←` `→` step
+the band, `o` writes the decodes, `c` forgets everything. The map's keys
+stay on World, since the Lab has no map. Under 150 columns each view's side
+column gives way, and the panels that are left take the room.
+
+What none of it is, so nobody has to find out the hard way:
+
+- **The SNR is sdrtop's**, in 2500 Hz, measured as [above](#how-a-cycle-is-read).
+  Not dBm, not S units: the radio's samples are not calibrated to the
+  antenna, and a number that looked like a power at the antenna would be
+  one we made up.
+- **The clock is the clock as heard**: this computer's and the receive
+  path's together, as on [the strip](#the-clock).
+- **No transmitter's frequency error.** Every station picks its own tone
+  anywhere in the band, so there is nothing to compare it with, and your
+  radio's own frequency error cannot be checked from FT8 either.
+
+### Signal (`1`)
+
+The chosen station's newest transmission, as the decoder saw it. Pick
+another with `↑` `↓`.
+
+- **The ladder**, across the top: the 79 symbols across, the eight tones up
+  with a guard tone either side (where a neighbour or a dirty transmitter
+  shows), each cell that tone's energy over the noise on the waterfall's
+  colours. The tone the code sent is a dark line through it. Above it the
+  three Costas arrays; below it `×` where a sync symbol's strongest tone was
+  not its own, `▲` where the code repaired a bit, and each symbol's
+  **margin**, its winning tone over the runner-up. The least of them is the
+  closest call the decode survived.
+- **The track**: tone 0 through the 12.64 s against the line the decode
+  fitted, so drift shows as a slope. Each point carries its own spread, and
+  a point too weak to place is not drawn but counted.
+- **The power**, half a symbol at a time over the transmission's mean,
+  coloured like the ladder: a fade through the transmission shows as
+  itself, and the path is judged steady or fading.
+- **The numbers**: everything on World's card, then every transmission of
+  the same station the list still holds.
+
+Once a station's decodes have left the list (the newest 500 stay), its
+trace is gone too, and the view says so rather than drawing an older one.
+
+### Band (`2`)
+
+The last hour as this antenna heard it, or as much of the hour as the
+session has; nothing is kept between sessions.
+
+- **The reach**: time across, distance up on World's logarithmic scale, a
+  dot where decodes fell, coloured by their SNR. An opening is a cloud
+  climbing; the skip zone is the empty band under it. Only stations that
+  sent a locator are placed, the rest are counted in the title. Under it,
+  on the same clock, decodes a cycle (even above the line, odd below), the
+  noise under the band, and the farthest station of each quarter hour.
+- **The noise under the band** is in dBFS of the radio's word per Hz, so it
+  only compares with itself while nothing in the radio changes. Touch the
+  attenuator or a gain stage and a `┊` marks where the scale changed; a
+  cycle in which the radio turned its own gain down (its peak reached the
+  ceiling) is a `×`, its level refused. It is a trend line for one
+  evening, not a calibrated noise figure.
+- **The slots**: the band in 50 Hz slots, how often each was busy over the
+  last ten minutes, even and odd apart, and the quietest of each named.
+  Quiet *here*, that is: a slot empty at your antenna can be wall to wall
+  3 000 km away, which is the one thing about FT8 everyone learns by
+  calling on top of somebody.
+- **The bearings**: the hour's placed stations in sixteen directions, a bar
+  for how many, coloured by their median best SNR. The busiest direction is
+  named in the title from twenty stations up; under that it is a handful,
+  not a direction.
+- **SNR against distance**: each station at its best decode. No curve is
+  fitted through it, because the dots carry no model to fit.
+- **The hour in numbers**: stations each quarter hour, decodes a cycle, and
+  the share calling CQ.
+
+Distances and bearings need your position (Options › Station); without it
+the panels say so and keep what needs none.
+
+### Receiver (`3`)
+
+Your own station, judged by the stations it hears.
+
+- **Clock as heard**: the hour's DTs as a histogram from -1 to +1 s, the
+  median marked, and the same verdict the strip gives, over the hour rather
+  than the last few cycles. Decodes past a second are counted at the foot.
+- **Sensitivity**: the hour's decodes by SNR, with the level where this
+  decoder reads half of what is sent (-21.2 dB, measured on simulated
+  cycles) drawn across it. A decode under the line is not a mistake: the
+  line is where half get through, not where they all stop.
+- **Decoder**: what became of the candidates over the cycles kept (in sync,
+  read to a codeword, decoded, by which pass), and how hard the held decodes
+  were to read. The share that needed the ordered-statistics search is said
+  plainly, since that is where [false decodes](#how-a-cycle-is-read) come
+  from; a band where a third need it is a band to read with an eyebrow
+  raised.
+- **Load**: how long a cycle's decode took, median and slowest, against the
+  fifteen seconds it has, the cycles skipped while the decoder was still
+  busy, and what the sample feed lost. On this machine, now: a measurement,
+  not a benchmark.
+- **The radio**: the peak against the radio's ceiling in the RF bench's own
+  words, and how many of the hour's cycles reached it; on a radio whose
+  gain stages are digital (the HF+), a reminder that they place the level
+  and do not set the SNR. Then the strongest signal anywhere in the capture
+  outside the FT8 band, the thing that pushes a radio's own gain control
+  while the decoder never sees it. Then the frequency correction in force,
+  if any, and the timing bench's figures.
+
 ## Taking the decodes away
 
 `o` writes every decode the view still holds (the newest 500) to
@@ -246,6 +367,5 @@ has no `held` and no floor. A blank is an answer; a zero would be a lie.
 
 No transmitting, and no audio. Only FT8: no FT4, no WSPR, no JT65. Every
 message type the protocol defines is read; a message whose check passed but
-whose fields mean nothing in the protocol is counted, never guessed at. A Lab page will
-look at the signal itself: one transmission's 79 tones, the clock's spread,
-SNR against distance.
+whose fields mean nothing in the protocol is counted, never guessed at. The
+Lab measures what it hears; it does not tell you whom to call.

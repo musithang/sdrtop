@@ -131,7 +131,8 @@ other view these keys go on doing what they do there:
 
 The display's light and colour are kept in the config's `[pager]` block.
 
-**On [FT8](radio-ft8.md)** (Radio › Digital modes › FT8) its keys work the moment the view
+**On [FT8](radio-ft8.md)** (Radio › Digital modes › FT8, and the [FT8
+Lab](radio-ft8.md#the-ft8-lab) under Lab) its keys work the moment the view
 is on screen, no focus needed. Here `↑` `↓` choose a station rather than
 step the gain; pick a gain stage with `,` `.` and they move that stage again
 until you let it go (back to `chain`), which is how the first stage (the
@@ -142,7 +143,8 @@ doing what they do there:
 |-----|--------|
 | `↑` `↓` | Choose a station, down the list as it reads: the map rings it, the river and the list light it, the card shows it |
 | `←` `→` | The next FT8 band down or up that this radio reaches: the one key here that tunes. Opening the view tunes nothing |
-| `z` | The map's range: the whole world on a logarithmic scale, then 1 500, 3 000 and 9 000 km to the edge |
+| `L` | World to the FT8 Lab and back, each to the view last left there, the chosen station kept |
+| `z` | The map's range: the whole world on a logarithmic scale, then 1 500, 3 000 and 9 000 km to the edge. World only, as is `m` |
 | `u` | Only the messages that name your call, or every one again. Needs your call under Options, Station |
 | `c` | Forget what was heard: the decodes, the stations, the map |
 | `m` | Focus the map: what it draws, [below](#ft8-map-focus-mode) |

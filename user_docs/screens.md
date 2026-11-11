@@ -43,7 +43,7 @@ whole path is on screen. The line above the columns says the path in words.
 | Tile | Under it |
 |------|----------|
 | **Radio** | Listening to the air. **Pagers › POCSAG** is [the pager](radio-pocsag.md), **Digital modes › FT8** is [FT8](radio-ft8.md); the rest (FM broadcast, aviation, marine, the ham bands, walkie-talkies) are listed as *later*, to say what the tile will hold |
-| **Lab** | Measuring and decoding. **Spectrum** (the general views), **Sweep**, **Receiver** (the four benches), **Bluetooth › 2.4 GHz** (Overview, Low Energy, Classic, Long range), **Wi-Fi › 2.4 GHz** (Channel; Room, Network and Transmitter later, and 5 GHz) and **Compact** (large type, for a small window) |
+| **Lab** | Measuring and decoding. **Spectrum** (the general views), **Sweep**, **Receiver** (the four benches), **Bluetooth › 2.4 GHz** (Overview, Low Energy, Classic, Long range), **Wi-Fi › 2.4 GHz** (Channel; Room, Network and Transmitter later, and 5 GHz), **FT8** under *Measure a mode* ([the FT8 Lab](radio-ft8.md#the-ft8-lab)) and **Compact** (large type, for a small window) |
 | **Options** | The radio's own settings, where it has any: a tinySA's, the Airspy R2's bias tee and packing, the HF+ Discovery's Library DSP |
 | **Keys** | Every key, the group you are in first: each panel's focus letter and what it adds, then the general keys |
 | **Quit** | What quitting saves, and `Enter` quits. Plain `q` quits from anywhere, as on the deck |
@@ -408,6 +408,14 @@ screen. No two views share a title, and none is called what its group is.
 | `2` | Frames | `wifi_frames` | A capture at a time: the river of its air · its frames in time order, with their format, signalling, gap, airtime, offset and SNR · frames a second by format, and the selected frame field by field |
 | `3` | Airtime | `wifi_airtime` | A column a second, the busy share beside the frames' airtime by format · the ledger, a row a format and rate · the share of the time with its 1 sigma, and the rhythm of the gaps between frames |
 
+**Lab › FT8** ([the FT8 Lab](radio-ft8.md#the-ft8-lab))
+
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Signal | `lab_ft8_signal` | One transmission symbol by symbol: every tone's energy, the tone sent, the repairs and the margin · the frequency track · the power through the transmission · its numbers and the station's other transmissions |
+| `2` | Band | `lab_ft8_band` | The hour's decodes by time and distance, with decodes a cycle, the noise under the band and the farthest station · room in the passband by 50 Hz slot · the bearings · SNR against distance · the hour in numbers |
+| `3` | Receiver | `lab_ft8_receiver` | The clock as the hour's stations judge it · the decoder's funnel and effort · sensitivity against the half-decode line · the decoder's load · the radio under it |
+
 **Lab › Compact**
 
 | Key | Title | Preset | What's in it |
@@ -430,7 +438,7 @@ screen. No two views share a title, and none is called what its group is.
 | `1` | World | `radio_ft8` | FT8 on a map of the world around you, every station where it said it was, the land lit by the sun · the minute's cycles and the clock as the stations heard judge it · the band as a river · the decodes cycle by cycle · the chosen station's card |
 
 `p` steps to the next layout in whichever group you are in, and wraps at the
-end. A thirtieth preset, `observer`, is marked hidden, so it has no group and no
+end. A thirty-third preset, `observer`, is marked hidden, so it has no group and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 

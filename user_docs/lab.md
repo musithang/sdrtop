@@ -18,6 +18,9 @@ Sweep**. The key is the number to press while you are in that group:
 | `Receiver 4` | **Signal quality** | What is that signal, and what's inside it? |
 | `Sweep 1` | **Band sweep** | What's out there across a band too wide to see at once? |
 
+One mode has a Lab of its own: **Lab › FT8** measures what the FT8 decoder
+hears, and lives with the rest of FT8 in [its page](radio-ft8.md#the-ft8-lab).
+
 [What you see on screen](screens.md) says which panel is which and where it sits.
 This page is about what the readings *mean* and what to do about them.
 
