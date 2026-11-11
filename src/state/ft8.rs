@@ -602,24 +602,40 @@ impl Ft8State {
             (Some(a), Some(b)) => a != b,
             _ => false,
         } || cycle.setting_changed;
-        let segment = self
-            .cycle_hour
-            .back()
-            .map_or(0, |c| c.segment + u32::from(changed));
         if cycle.setting.is_some() {
             self.last_setting = cycle.setting.clone();
         }
         {
+            // In time order, as the ring below: a cycle cut or skipped while
+            // the decoder was on the one before is published first, and the
+            // hour's views read the last mark as the newest.
             let hour = Arc::make_mut(&mut self.cycle_hour);
-            hour.push_back(CycleMark {
-                start_unix: cycle.start_unix,
-                dial_hz: cycle.dial_hz,
-                outcome: cycle.outcome,
-                decodes: decodes.len(),
-                floor_db_hz: cycle.floor_db_hz,
-                held: cycle.held,
-                segment,
-            });
+            let at = hour
+                .iter()
+                .position(|c| c.start_unix > cycle.start_unix)
+                .unwrap_or(hour.len());
+            let segment = at
+                .checked_sub(1)
+                .map_or(0, |i| hour[i].segment + u32::from(changed));
+            // A new segment opened before marks already there moves them on
+            // with it, so each change is one boundary, not two.
+            if changed {
+                for c in hour.iter_mut().skip(at) {
+                    c.segment += 1;
+                }
+            }
+            hour.insert(
+                at,
+                CycleMark {
+                    start_unix: cycle.start_unix,
+                    dial_hz: cycle.dial_hz,
+                    outcome: cycle.outcome,
+                    decodes: decodes.len(),
+                    floor_db_hz: cycle.floor_db_hz,
+                    held: cycle.held,
+                    segment,
+                },
+            );
             let newest = hour.iter().map(|c| c.start_unix).fold(f64::MIN, f64::max);
             while hour
                 .front()
@@ -824,11 +840,6 @@ impl Ft8State {
         out
     }
 
-    /// Move the selection to the station before or after the selected one,
-    /// in the order the list first shows each; with none selected, the first
-    /// row's. A station heard in several cycles is one step, not one per
-    /// row: stepping by rows found the selected call's first row and went
-    /// back and forth between it and the next one forever.
     /// The transmission the Lab's Signal view shows.
     pub fn shown(&self) -> Shown {
         match &self.view.selected {
@@ -848,6 +859,11 @@ impl Ft8State {
         }
     }
 
+    /// Move the selection to the station before or after the selected one,
+    /// in the order the list first shows each; with none selected, the first
+    /// row's. A station heard in several cycles is one step, not one per
+    /// row: stepping by rows found the selected call's first row and went
+    /// back and forth between it and the next one forever.
     pub fn select_step(&mut self, down: bool) {
         let rows = self.listed();
         let mut calls: Vec<String> = Vec::new();
@@ -1272,6 +1288,49 @@ mod tests {
         s.push_cycle(cycle(15.0), vec![], None, now, None);
         let starts: Vec<f64> = s.cycles.iter().map(|c| c.start_unix).collect();
         assert_eq!(starts, vec![0.0, 15.0, 30.0]);
+    }
+
+    /// The hour's marks keep time order too: a cycle cut or skipped while
+    /// the decoder was still on the one before is published first, and the
+    /// hour's views take its last mark as the newest.
+    #[test]
+    fn the_hours_marks_keep_time_order_whatever_order_they_finish_in() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        s.push_cycle(cycle(0.0), vec![], None, now, None);
+        let mut skipped = cycle(30.0);
+        skipped.outcome = CycleOutcome::Skipped;
+        s.push_cycle(skipped, vec![], None, now, None);
+        s.push_cycle(cycle(15.0), vec![], None, now, None);
+        let starts: Vec<f64> = s.cycle_hour.iter().map(|c| c.start_unix).collect();
+        assert_eq!(starts, vec![0.0, 15.0, 30.0]);
+    }
+
+    /// A setting change in the cycle that finished late is one boundary:
+    /// the skipped cycle published before it moves into the new segment
+    /// with it.
+    #[test]
+    fn a_late_cycle_that_changed_the_setting_moves_the_later_marks_on() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        let at = |gain: f64| Setting {
+            dial_hz: 7_074_000,
+            rate_hz: 192_000.0,
+            gains: vec![gain],
+            gain_curve: None,
+            boost: false,
+        };
+        let mut a = cycle(0.0);
+        a.setting = Some(at(0.0));
+        s.push_cycle(a, vec![], None, now, None);
+        let mut skipped = cycle(30.0);
+        skipped.outcome = CycleOutcome::Skipped;
+        s.push_cycle(skipped, vec![], None, now, None);
+        let mut b = cycle(15.0);
+        b.setting = Some(at(-6.0));
+        s.push_cycle(b, vec![], None, now, None);
+        let segments: Vec<u32> = s.cycle_hour.iter().map(|c| c.segment).collect();
+        assert_eq!(segments, vec![0, 1, 1]);
     }
 
     #[test]

@@ -45,17 +45,14 @@ const FT8_BAND_HZ: (f64, f64) = (-200.0, 3_200.0);
 /// from the dial, Hz, and its level, dBFS.
 pub fn strongest(m: &SdrMetrics) -> Option<(f64, f32)> {
     let frame = m.waterfall.last_fft.as_ref()?;
-    let n = frame.bins_dbfs.len();
-    if n == 0 {
-        return None;
-    }
-    let bin = frame.sample_rate / n as f64;
     let dial = m.radio.frequency as f64;
+    // Each bin at the frequency the frame itself gives it, as the spectrum
+    // reads it: one witness for where a bin is.
     frame
         .bins_dbfs
         .iter()
         .enumerate()
-        .map(|(k, &db)| (frame.axis_start_hz + (k as f64 + 0.5) * bin - dial, db))
+        .filter_map(|(k, &db)| Some((frame.frequency_of_bin(k)? - dial, db)))
         .filter(|(hz, _)| !(FT8_BAND_HZ.0..FT8_BAND_HZ.1).contains(hz))
         .max_by(|a, b| a.1.total_cmp(&b.1))
 }
@@ -362,5 +359,29 @@ mod tests {
         assert_eq!(buf[(dot, y)].fg, theme.status_ok);
         let all = draw(Ft8RadioPanel, 86, 12, &m).join("\n");
         assert!(all.contains("+1.25 ppm ± 0.04, by DCF77"), "{all}");
+    }
+
+    /// The strongest bin sits at the frequency the frame gives it, as the
+    /// spectrum reads it, not half a bin beside it.
+    #[test]
+    fn the_slice_reads_a_bin_where_the_spectrum_does() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(25_000.0, 40.0);
+        let dial = m.radio.frequency;
+        let fr = m.waterfall.last_fft.as_mut().unwrap();
+        fr.axis_start_hz += dial as f64 - fr.center_freq_hz as f64;
+        fr.center_freq_hz = dial;
+        let fr = m.waterfall.last_fft.as_ref().unwrap();
+        let top = fr
+            .bins_dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        let want = fr.frequency_of_bin(top).unwrap() - dial as f64;
+        let (hz, _) = strongest(&m).unwrap();
+        assert_eq!(hz, want);
     }
 }

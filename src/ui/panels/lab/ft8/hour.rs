@@ -14,6 +14,7 @@ use std::collections::BTreeSet;
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::{say, window};
+use crate::state::ft8::CycleOutcome;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
@@ -47,7 +48,15 @@ pub fn figures(m: &SdrMetrics) -> Option<Figures> {
         per_quarter.push((b, calls.len()));
         b += 900.0;
     }
-    let mut counts: Vec<usize> = m.ft8.cycle_hour.iter().map(|c| c.decodes).collect();
+    // Decoded cycles only: a cut or skipped one was never read, and counting
+    // it as a cycle of no decodes would call it quiet (POLICY.md, rule 2).
+    let mut counts: Vec<usize> = m
+        .ft8
+        .cycle_hour
+        .iter()
+        .filter(|c| c.outcome == CycleOutcome::Decoded)
+        .map(|c| c.decodes)
+        .collect();
     counts.sort_unstable();
     let cq = m
         .ft8
@@ -183,6 +192,33 @@ mod tests {
         let lines = draw(Ft8HourPanel, 44, 5, &m);
         assert!(lines[1].contains(&newest), "{}", lines[1]);
         assert!(lines[1].ends_with('│'), "{}", lines[1]);
+    }
+
+    /// A cut or skipped cycle was never decoded: it is not a cycle with no
+    /// decodes, and it does not pull the figures down.
+    #[test]
+    fn cycles_not_decoded_are_not_counted_as_empty() {
+        use crate::state::ft8::CycleOutcome;
+        let mut m = SdrMetrics::fixture().streaming().ft8_hour();
+        let decoded: Vec<usize> = m.ft8.cycle_hour.iter().map(|c| c.decodes).collect();
+        let hour = std::sync::Arc::make_mut(&mut m.ft8.cycle_hour);
+        // As many again, every one cut or skipped.
+        let marks: Vec<_> = hour.iter().copied().collect();
+        for (k, mut c) in marks.into_iter().enumerate() {
+            c.start_unix += 7.0;
+            c.decodes = 0;
+            c.outcome = if k % 2 == 0 {
+                CycleOutcome::Cut
+            } else {
+                CycleOutcome::Skipped
+            };
+            hour.push_back(c);
+        }
+        let mut sorted = decoded.clone();
+        sorted.sort_unstable();
+        let fig = figures(&m).unwrap();
+        assert_eq!(fig.median_decodes, sorted[sorted.len() / 2]);
+        assert_eq!(fig.most_decodes, *sorted.last().unwrap());
     }
 
     #[test]

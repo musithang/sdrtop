@@ -100,7 +100,11 @@ impl Panel for Ft8DecoderPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let (_, _, cycles) = summed(state);
         let mut chrome = PanelChrome::new("Decoder").stale_when(Staleness::NotStreaming);
-        chrome.suffix = Some(format!("  the last {cycles} decoded cycles"));
+        chrome.suffix = Some(if cycles == 1 {
+            "  the last decoded cycle".to_string()
+        } else {
+            format!("  the last {cycles} decoded cycles")
+        });
         chrome
     }
 
@@ -305,7 +309,7 @@ mod tests {
             all.contains("needed OSD, where false decodes come from"),
             "{all}"
         );
-        assert!(all.contains("the last 1 decoded cycles"), "{all}");
+        assert!(all.contains("the last decoded cycle"), "{all}");
     }
 
     #[test]

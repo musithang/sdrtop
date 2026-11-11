@@ -269,4 +269,120 @@ mod tests {
         assert_eq!(hanging(4), Some("▀"));
         assert_eq!(hanging(8), Some("█"));
     }
+
+    /// Every FT8 Lab panel at every size from one cell up, in the states
+    /// most likely to be got wrong (nothing heard, one cycle, an hour, a
+    /// radio with a ceiling, one without, no position set): none panics and
+    /// none draws outside its own rectangle.
+    #[test]
+    fn every_panel_at_every_size_stays_inside_and_never_panics() {
+        use crate::state::SdrMetrics;
+        let panels: [fn(&mut crate::ui::PanelRegistry); 14] = [
+            |r| r.register(super::ladder::Ft8LadderPanel),
+            |r| r.register(super::track::Ft8TrackPanel),
+            |r| r.register(super::power::Ft8PowerPanel),
+            |r| r.register(super::decode::Ft8DecodePanel),
+            |r| r.register(super::reach::Ft8ReachPanel),
+            |r| r.register(super::slots::Ft8SlotsPanel),
+            |r| r.register(super::bearings::Ft8BearingsPanel),
+            |r| r.register(super::skip::Ft8SkipPanel),
+            |r| r.register(super::hour::Ft8HourPanel),
+            |r| r.register(super::clock::Ft8ClockPanel),
+            |r| r.register(super::sensitivity::Ft8SensitivityPanel),
+            |r| r.register(super::decoder::Ft8DecoderPanel),
+            |r| r.register(super::load::Ft8LoadPanel),
+            |r| r.register(super::radio::Ft8RadioPanel),
+        ];
+        let mut nowhere = SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .ft8_traced()
+            .ft8_hour();
+        nowhere.home.latitude = None;
+        let states = [
+            ("nothing", SdrMetrics::fixture()),
+            ("one cycle", SdrMetrics::fixture().streaming().ft8_traced()),
+            ("an hour", SdrMetrics::fixture().streaming().ft8_hour()),
+            (
+                "hf+",
+                SdrMetrics::fixture()
+                    .airspyhf()
+                    .streaming()
+                    .with_carrier(25_000.0, 40.0)
+                    .ft8_traced()
+                    .ft8_hour(),
+            ),
+            (
+                "rtl-sdr",
+                SdrMetrics::fixture()
+                    .rtlsdr()
+                    .streaming()
+                    .ft8_traced()
+                    .ft8_hour(),
+            ),
+            ("no position", nowhere),
+        ];
+        let widths = [
+            1u16, 2, 3, 4, 5, 7, 9, 12, 16, 20, 26, 33, 40, 49, 50, 64, 80, 101, 149, 150, 190, 260,
+        ];
+        let heights = [1u16, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 16, 20, 26, 40];
+        let theme = crate::Theme::sdr();
+        let mut failures = Vec::new();
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        for add in &panels {
+            let mut registry = crate::ui::PanelRegistry::new();
+            add(&mut registry);
+            let name = registry.panels_iter().next().unwrap().name();
+            for (state, m) in &states {
+                for &w in &widths {
+                    for &h in &heights {
+                        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let backend = ratatui::backend::TestBackend::new(w + 4, h + 4);
+                            let mut t = ratatui::Terminal::new(backend).unwrap();
+                            t.draw(|f| {
+                                registry.render_panel(
+                                    name,
+                                    f,
+                                    Rect::new(2, 2, w, h),
+                                    m,
+                                    &theme,
+                                    false,
+                                )
+                            })
+                            .unwrap();
+                            let buf = t.backend().buffer().clone();
+                            (0..h + 4)
+                                .flat_map(|y| (0..w + 4).map(move |x| (x, y)))
+                                .filter(|&(x, y)| {
+                                    !(2..w + 2).contains(&x) || !(2..h + 2).contains(&y)
+                                })
+                                .find(|&p| buf[p] != ratatui::buffer::Cell::default())
+                        }));
+                        match run {
+                            Err(e) => {
+                                let why = e
+                                    .downcast_ref::<String>()
+                                    .cloned()
+                                    .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                                    .unwrap_or_default();
+                                failures.push(format!("{name} {state} {w}x{h}: panic {why}"));
+                            }
+                            Ok(Some(p)) => {
+                                failures.push(format!("{name} {state} {w}x{h}: drew at {p:?}"))
+                            }
+                            Ok(None) => {}
+                        }
+                    }
+                }
+            }
+        }
+        std::panic::set_hook(hook);
+        assert!(
+            failures.is_empty(),
+            "{} failures:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
 }
