@@ -508,7 +508,6 @@ fn the_all_zero_codeword_and_an_unsynced_osd_are_not_believed() {
 
 /// Take a decoded transmission out of the cycle.
 fn subtract(x: &mut [Complex<f32>], f: &Found) {
-    let mut r = vec![Complex::new(0.0f32, 0.0); x.len()];
     let w = Waveform {
         f0: f.physics.f0,
         start: f.start,
@@ -516,14 +515,60 @@ fn subtract(x: &mut [Complex<f32>], f: &Found) {
         drift: f.physics.drift,
         phase: 0.0,
     };
-    modulate::add(&f.tones, &w, RATE, &mut r);
-    // g = low-pass of x r*, a centred moving average by prefix sums.
-    let n = x.len();
     let seconds = if f.physics.fading() {
         FADING_GAIN_SECONDS
     } else {
         GAIN_SECONDS
     };
+    take_out(x, &f.tones, &w, seconds);
+}
+
+/// Take the transmission `tones` sent as `w` (unit amplitude) out of `x`, its
+/// gain and phase followed by a centred average over `seconds`. Only the
+/// transmission's own samples are touched or summed: outside them the
+/// reference is exactly zero, every product with it a zero that leaves a
+/// running sum as it was, so sums over the transmission alone are the sums
+/// over the whole cycle.
+fn take_out(x: &mut [Complex<f32>], tones: &[u8; SYMBOLS], w: &Waveform, seconds: f64) {
+    let Some((first, last)) = modulate::span(w, RATE, x.len()) else {
+        return;
+    };
+    let len = last + 1 - first;
+    let mut r = vec![Complex::new(0.0f32, 0.0); len];
+    modulate::add_at(tones, w, RATE, &mut r, first, x.len());
+    let x = &mut x[first..=last];
+    // g = low-pass of x r*, a centred moving average by prefix sums.
+    let half = (seconds * RATE / 2.0) as usize;
+    let mut prefix = vec![Complex::new(0.0f64, 0.0); len + 1];
+    let mut weight = vec![0f64; len + 1];
+    for i in 0..len {
+        let p = x[i] * r[i].conj();
+        prefix[i + 1] = prefix[i] + Complex::new(f64::from(p.re), f64::from(p.im));
+        weight[i + 1] = weight[i] + f64::from(r[i].norm_sqr());
+    }
+    for i in 0..len {
+        if r[i].norm_sqr() == 0.0 {
+            continue;
+        }
+        let a = i.saturating_sub(half);
+        let b = (i + half + 1).min(len);
+        let wsum = weight[b] - weight[a];
+        if wsum <= 0.0 {
+            continue;
+        }
+        let g = (prefix[b] - prefix[a]) / wsum;
+        let gr = g * Complex::new(f64::from(r[i].re), f64::from(r[i].im));
+        x[i] -= Complex::new(gr.re as f32, gr.im as f32);
+    }
+}
+
+/// The subtraction as first written: the reference and both running sums
+/// over the whole cycle. [`take_out`] must agree with it bit for bit.
+#[cfg(test)]
+fn take_out_reference(x: &mut [Complex<f32>], tones: &[u8; SYMBOLS], w: &Waveform, seconds: f64) {
+    let mut r = vec![Complex::new(0.0f32, 0.0); x.len()];
+    modulate::add(tones, w, RATE, &mut r);
+    let n = x.len();
     let half = (seconds * RATE / 2.0) as usize;
     let mut prefix = vec![Complex::new(0.0f64, 0.0); n + 1];
     let mut weight = vec![0f64; n + 1];
@@ -546,4 +591,62 @@ fn subtract(x: &mut [Complex<f32>], f: &Found) {
         let gr = g * Complex::new(f64::from(r[i].re), f64::from(r[i].im));
         x[i] -= Complex::new(gr.re as f32, gr.im as f32);
     }
+}
+
+/// Over the transmission alone or over the whole cycle, the subtraction
+/// leaves the same samples, bit for bit: transmissions early, late, cut by
+/// either end of the buffer, drifting, below and above the band's centre,
+/// in noise and with a second signal under them, with both averaging times.
+#[cfg(test)]
+#[test]
+fn the_subtraction_over_its_span_is_the_whole_cycles_bit_for_bit() {
+    use crate::signal::dsp::testkit::Rng;
+    let mut rng = Rng::new(11);
+    let n = (15.0 * RATE) as usize;
+    let mut tried = 0;
+    for (k, &start) in [0.5, 2.36, -1.2, 3.1, 0.0, 14.0, 16.0].iter().enumerate() {
+        for &seconds in &[GAIN_SECONDS, FADING_GAIN_SECONDS] {
+            let tones: [u8; SYMBOLS] = std::array::from_fn(|_| (rng.next_u64() % 8) as u8);
+            let w = Waveform {
+                f0: -900.0 + 330.0 * k as f64,
+                start,
+                amplitude: 1.0,
+                drift: 0.4 * k as f64 - 1.0,
+                phase: 0.0,
+            };
+            let mut x: Vec<Complex<f32>> = (0..n)
+                .map(|_| {
+                    let (a, b) = rng.normal_pair();
+                    Complex::new(a as f32, b as f32)
+                })
+                .collect();
+            let sent = Waveform {
+                amplitude: 3.0,
+                phase: 1.1,
+                f0: w.f0 + 0.3,
+                ..w
+            };
+            modulate::add(&tones, &sent, RATE, &mut x);
+            let under = Waveform {
+                f0: w.f0 + 20.0,
+                start: 0.7,
+                amplitude: 2.0,
+                drift: 0.0,
+                phase: 0.0,
+            };
+            modulate::add(&[3; SYMBOLS], &under, RATE, &mut x);
+            let mut want = x.clone();
+            take_out_reference(&mut want, &tones, &w, seconds);
+            let before = x.clone();
+            take_out(&mut x, &tones, &w, seconds);
+            let same = x
+                .iter()
+                .zip(&want)
+                .all(|(a, b)| a.re.to_bits() == b.re.to_bits() && a.im.to_bits() == b.im.to_bits());
+            assert!(same, "start {start}, {seconds} s");
+            tried += usize::from(x != before);
+        }
+    }
+    // All but the transmission past the buffer's end took something out.
+    assert_eq!(tried, 12);
 }

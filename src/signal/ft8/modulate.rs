@@ -144,15 +144,38 @@ fn envelope(s: f64) -> f64 {
     }
 }
 
+/// The samples, at `rate` Hz, a transmission starting where `w` says
+/// reaches in a buffer of `len`: first and last, inclusive. `None` when it
+/// reaches none.
+pub fn span(w: &Waveform, rate: f64, len: usize) -> Option<(usize, usize)> {
+    let duration = SYMBOLS as f64 * SYMBOL_SECONDS;
+    let first = ((w.start * rate).ceil().max(0.0)) as usize;
+    let last = (((w.start + duration) * rate).floor() as usize).min(len.saturating_sub(1));
+    (len > 0 && first <= last).then_some((first, last))
+}
+
 /// Add a transmission of `tones` to `out`, sampled at `rate` Hz. Samples the
 /// transmission does not reach are left as they were.
 pub fn add(tones: &[u8; SYMBOLS], w: &Waveform, rate: f64, out: &mut [Complex<f32>]) {
-    let duration = SYMBOLS as f64 * SYMBOL_SECONDS;
-    let first = ((w.start * rate).ceil().max(0.0)) as usize;
-    let last = (((w.start + duration) * rate).floor() as usize).min(out.len().saturating_sub(1));
-    if out.is_empty() || first > last {
+    let len = out.len();
+    add_at(tones, w, rate, out, 0, len);
+}
+
+/// [`add`] into a window of a longer buffer: `out[0]` is sample `offset` of a
+/// buffer of `len`, and `out` covers at least the [`span`] of that buffer.
+/// The samples are those [`add`] would write into the whole buffer, bit for
+/// bit: the phase is integrated from the transmission's start either way.
+pub fn add_at(
+    tones: &[u8; SYMBOLS],
+    w: &Waveform,
+    rate: f64,
+    out: &mut [Complex<f32>],
+    offset: usize,
+    len: usize,
+) {
+    let Some((first, last)) = span(w, rate, len) else {
         return;
-    }
+    };
     // Integrate the instantaneous frequency sample by sample, from the
     // transmission's start (a buffer that begins later still gets the phase
     // the signal has there).
@@ -165,9 +188,12 @@ pub fn add(tones: &[u8; SYMBOLS], w: &Waveform, rate: f64, out: &mut [Complex<f3
         if i >= first as i64 {
             let a = w.amplitude * envelope(s);
             let z = Complex::from_polar(a, phase);
-            out[i as usize] += Complex::new(z.re as f32, z.im as f32);
+            out[i as usize - offset] += Complex::new(z.re as f32, z.im as f32);
         }
-        phase = (phase + TAU * f / rate) % TAU;
+        // Inside one turn the remainder is the phase itself, sign and all,
+        // so the division is left to the step that leaves the turn.
+        let next = phase + TAU * f / rate;
+        phase = if next.abs() < TAU { next } else { next % TAU };
     }
 }
 
@@ -311,6 +337,76 @@ mod tests {
         let off = (3.0 * RATE) as usize;
         for i in [0, 1000, 50_000, 100_000] {
             assert!((part[i] - whole[i + off]).norm() < 1e-4, "{i}");
+        }
+    }
+
+    /// [`add`] as first written: the phase's remainder taken on every
+    /// sample, into the whole buffer.
+    fn add_reference(tones: &[u8; SYMBOLS], w: &Waveform, rate: f64, out: &mut [Complex<f32>]) {
+        let duration = SYMBOLS as f64 * SYMBOL_SECONDS;
+        let first = ((w.start * rate).ceil().max(0.0)) as usize;
+        let last =
+            (((w.start + duration) * rate).floor() as usize).min(out.len().saturating_sub(1));
+        if out.is_empty() || first > last {
+            return;
+        }
+        let start_sample = (w.start * rate).ceil() as i64;
+        let mut phase = w.phase;
+        for i in start_sample..=last as i64 {
+            let t = i as f64 / rate - w.start;
+            let s = t / SYMBOL_SECONDS;
+            let f =
+                w.f0 + w.drift * (s / SYMBOLS as f64 - 0.5) + TONE_SPACING * deviation(tones, s);
+            if i >= first as i64 {
+                let a = w.amplitude * envelope(s);
+                let z = Complex::from_polar(a, phase);
+                out[i as usize] += Complex::new(z.re as f32, z.im as f32);
+            }
+            phase = (phase + TAU * f / rate) % TAU;
+        }
+    }
+
+    /// Into the whole buffer or into the transmission's window, the samples
+    /// are the first-written ones bit for bit, the phase's turns counted
+    /// either way: tones above and below the centre, a start before the
+    /// buffer, an end past it, a phase that starts beyond a turn.
+    #[test]
+    fn the_samples_are_the_first_written_bit_for_bit() {
+        let n = (15.0 * RATE) as usize;
+        let bits = |v: &[Complex<f32>]| -> Vec<(u32, u32)> {
+            v.iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect()
+        };
+        for (k, &(f0, start, phase)) in [
+            (1200.0, 0.5, 0.0),
+            (-1500.0, 2.36, 1.0),
+            (-20.0, -1.2, -7.0),
+            (2900.0, 3.1, 9.0),
+            (0.0, 0.0, 0.0),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let w = Waveform {
+                f0,
+                start,
+                amplitude: 1.5,
+                drift: k as f64 - 2.0,
+                phase,
+            };
+            let t = tones_of(1000 + k as u128);
+            let mut want = vec![Complex::new(0.0, 0.0); n];
+            add_reference(&t, &w, RATE, &mut want);
+            let mut whole = vec![Complex::new(0.0, 0.0); n];
+            add(&t, &w, RATE, &mut whole);
+            assert_eq!(bits(&whole), bits(&want), "{f0} Hz, whole");
+            let (first, last) = span(&w, RATE, n).expect("in the buffer");
+            let mut window = vec![Complex::new(0.0, 0.0); last + 1 - first];
+            add_at(&t, &w, RATE, &mut window, first, n);
+            assert_eq!(bits(&window), bits(&want[first..=last]), "{f0} Hz, window");
+            assert!(want[..first]
+                .iter()
+                .chain(&want[last + 1..])
+                .all(|z| z.norm() == 0.0));
         }
     }
 }
