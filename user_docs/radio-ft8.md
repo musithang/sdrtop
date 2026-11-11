@@ -234,11 +234,13 @@ One row per decode, oldest first, whatever the list's filter:
 | `locator` | The locator this message carried, if any |
 | `station_locator`, `lat`, `lon`, `km`, `bearing_deg` | The last locator the sender sent itself, as known when the file was written, its middle, and its distance and bearing from you |
 | `clock_median_dt_s`, `clock_spread_s`, `clock_decodes` | The clock verdict the cycle was read with |
+| `margin_min_db` | The closest call among the data symbols: the winning tone over the runner-up, dB, as the FT8 Lab's ladder shows it under "least" |
+| `held`, `floor_db_hz` | Whether the radio held its own level inside the cycle (the peak reached its ceiling), and the noise under the band in dBFS of the radio's word per Hz. Blank floor when held, when a setting changed mid-cycle or when the cycle was not decoded: those levels compare with nothing |
 
 Anything not heard is left blank: a sender that never said where it is has
-no place, without your position nobody has a distance, and a cycle older
-than the forty kept has no clock verdict on record. A blank is an answer; a
-zero would be a lie.
+no place, without your position nobody has a distance, a cycle older than
+the forty kept has no clock verdict on record, and one older than the hour
+has no `held` and no floor. A blank is an answer; a zero would be a lie.
 
 ## What it does not do
 

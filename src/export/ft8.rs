@@ -8,10 +8,13 @@
 //! **What each decode measured, beside what it said** (POLICY.md, rule 3):
 //! SNR, DT, tone and its spread, drift, the path's coherence, the Costas
 //! tones on their tone, the LDPC's iterations and repairs, OSD's order, and
-//! the clock verdict the cycle was read with. **Blank wherever nothing was heard** (rule 2): a
+//! the clock verdict the cycle was read with; the least margin a data
+//! symbol was decided by, and whether the radio held its level in the
+//! cycle and the noise under the band. **Blank wherever nothing was heard** (rule 2): a
 //! message with no locator has no `locator`; a station that never sent one
 //! has no place, no distance and no bearing; without your position there is
-//! no distance either; OSD not needed is blank, not zero.
+//! no distance either; OSD not needed is blank, not zero; a cycle gone from
+//! the hour has no `held`, and one held, changed or refused has no floor.
 //!
 //! `locator` is the one this message carried. `station_locator` is the last
 //! one the sender sent itself, as known when the file was written: what the
@@ -23,7 +26,7 @@ use crate::state::SdrMetrics;
 pub const HEADER: &str = "utc,cycle,band,dial_hz,tone_hz,tone_sigma_hz,\
 snr_db,dt_s,drift_hz,coherence,sync_of_21,ldpc_iterations,bits_repaired,osd_order,\
 block,pass,message,from,to,for_me,locator,station_locator,lat,lon,km,\
-bearing_deg,clock_median_dt_s,clock_spread_s,clock_decodes";
+bearing_deg,clock_median_dt_s,clock_spread_s,clock_decodes,margin_min_db,held,floor_db_hz";
 
 /// `YYYY-MM-DDTHH:MM:SSZ` of a Unix time.
 fn iso(unix: f64) -> String {
@@ -71,6 +74,10 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .iter()
                 .find(|c| c.start_unix == e.cycle_unix)
                 .and_then(|c| c.clock);
+            // The hour's mark of the cycle: whether the radio held its level
+            // in it, and the noise under the band. Older than the hour, or
+            // held, changed or refused: blank.
+            let mark = f.cycle_hour.iter().find(|c| c.start_unix == e.cycle_unix);
             let opt = |v: Option<String>| v.unwrap_or_default();
             [
                 iso(e.cycle_unix),
@@ -109,6 +116,9 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 opt(clock.map(|c| format!("{:.3}", c.median_dt))),
                 opt(clock.map(|c| format!("{:.3}", c.spread))),
                 opt(clock.map(|c| c.decodes.to_string())),
+                format!("{:.1}", d.trace.least_margin_db()),
+                opt(mark.map(|c| c.held.to_string())),
+                opt(mark.and_then(|c| c.floor_db_hz).map(|v| format!("{v:.1}"))),
             ]
             .join(",")
         })
@@ -216,6 +226,55 @@ mod tests {
         );
         assert!(text.contains(&format!("\n{HEADER}\n")), "{text}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The new columns: the least margin on every row; `held` and the floor
+    /// from the hour's mark of the cycle, the floor blank where the radio
+    /// held its level, both blank for a cycle the hour no longer has.
+    #[test]
+    fn the_cycle_columns_come_from_the_hours_marks() {
+        use crate::state::ft8::{CycleMark, CycleOutcome};
+        let mut m = evening();
+        let cycles: Vec<f64> = {
+            let mut v: Vec<f64> = m.ft8.decodes.iter().map(|e| e.cycle_unix).collect();
+            v.dedup();
+            v
+        };
+        assert_eq!(cycles.len(), 2, "{cycles:?}");
+        let mark = |start_unix: f64, held: bool, floor: Option<f32>| CycleMark {
+            start_unix,
+            dial_hz: 14_074_000,
+            outcome: CycleOutcome::Decoded,
+            decodes: 1,
+            floor_db_hz: floor,
+            held,
+            segment: 0,
+        };
+        let hour = std::sync::Arc::make_mut(&mut m.ft8.cycle_hour);
+        hour.clear();
+        hour.push_back(mark(cycles[0], true, None));
+        hour.push_back(mark(cycles[1], false, Some(-85.04)));
+        let held = column(HEADER, "held");
+        let floor = column(HEADER, "floor_db_hz");
+        let margin = column(HEADER, "margin_min_db");
+        for (e, r) in m.ft8.decodes.iter().zip(rows(&m)) {
+            let f: Vec<&str> = r.split(',').collect();
+            let want = format!("{:.1}", e.decode.trace.least_margin_db());
+            assert_eq!(f[margin], want, "{r}");
+            let want = if e.cycle_unix == cycles[0] {
+                ("true", "")
+            } else {
+                ("false", "-85.0")
+            };
+            assert_eq!((f[held], f[floor]), want, "{r}");
+        }
+        // Once the hour has let the cycles go, neither is on record.
+        std::sync::Arc::make_mut(&mut m.ft8.cycle_hour).clear();
+        for r in rows(&m) {
+            let f: Vec<&str> = r.split(',').collect();
+            assert_eq!((f[held], f[floor]), ("", ""), "{r}");
+            assert!(!f[margin].is_empty(), "{r}");
+        }
     }
 
     #[test]

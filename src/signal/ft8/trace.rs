@@ -101,6 +101,13 @@ impl Trace {
         })
     }
 
+    /// The least of the data symbols' margins, dB: the symbol the decision
+    /// was closest on. The Costas symbols carry no data and are left out.
+    pub fn least_margin_db(&self) -> f32 {
+        let m = self.margin_db();
+        data_positions().map(|s| m[s]).fold(f32::MAX, f32::min)
+    }
+
     /// A trace of nothing, for tests that build a decode by hand.
     #[cfg(test)]
     pub fn empty() -> Self {
@@ -410,5 +417,23 @@ mod tests {
         t.energies[3][1..=8].copy_from_slice(&[1.0, 10.0, 1.0, 1.0, 100.0, 1.0, 1.0, 1.0]);
         let m = t.margin_db();
         assert!((m[3] - 10.0).abs() < 1e-4, "{}", m[3]);
+    }
+
+    /// The least margin is over the data symbols alone: a Costas symbol
+    /// closer to a tie does not count.
+    #[test]
+    fn the_least_margin_leaves_the_costas_symbols_out() {
+        let mut t = Trace::empty();
+        for s in 0..SYMBOLS {
+            t.energies[s][1..=8].copy_from_slice(&[100.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        }
+        // Symbol 2 is a Costas symbol, 50 a data symbol.
+        t.energies[2][1..=8].copy_from_slice(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        t.energies[50][1..=8].copy_from_slice(&[10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        assert!(
+            (t.least_margin_db() - 10.0).abs() < 1e-4,
+            "{}",
+            t.least_margin_db()
+        );
     }
 }

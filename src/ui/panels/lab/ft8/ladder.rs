@@ -281,10 +281,7 @@ fn draw(
         }
     }
     if fit.notes {
-        let least = (0..SYMBOLS)
-            .filter(|&s| costas_tone(s).is_none())
-            .map(|s| margin[s])
-            .fold(f32::MAX, f32::min);
+        let least = tr.least_margin_db();
         let x = put(buf, area, xn, y, "least ", label);
         put(buf, area, x, y, &format!("{least:.1} dB"), value);
     }
