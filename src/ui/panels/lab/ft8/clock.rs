@@ -13,7 +13,9 @@
 //! over the hour where the cycle row takes the last few cycles, and each
 //! names its window. Past a second FT8 starts losing decodes, past two it
 //! stops, and the verdict turns colour at those marks; decodes past +-1 s
-//! are counted, not drawn off the edge.
+//! are counted, not drawn off the edge. The verdict's spread is a bracket
+//! over the histogram with the median on it, and the columns under it are
+//! bright: the decodes the verdict was read from.
 //!
 //! Distance does not enter: over two hours of 40 m the slope of DT against
 //! distance came out far inside its own error (-82 +- 136 ms per 1 000 km
@@ -150,14 +152,29 @@ impl Panel for Ft8ClockPanel {
         let rows = area.height - 4;
         let (counts, beyond) = bins(&dts, cols);
         let top = counts.iter().copied().max().unwrap_or(0).max(1) as f64;
-        let value = Style::default().fg(theme.value);
+        // The columns inside the verdict's spread are the bulk the median
+        // and its spread were read from: bright; the tails plain.
+        let spread = verdict(&dts).map(|v| (v.median_dt - v.spread, v.median_dt + v.spread));
+        let bin_s = 2.0 * SPAN_S / cols as f64;
         for (c, &n) in counts.iter().enumerate() {
+            let centre = -SPAN_S + (c as f64 + 0.5) * bin_s;
+            let ink = match spread {
+                Some((lo, hi)) if (lo..=hi).contains(&centre) => theme.value_hi,
+                _ => theme.value,
+            };
             let full = n as f64 / top * f64::from(rows) * 8.0;
             for r in 0..rows {
                 let lo = f64::from(rows - 1 - r) * 8.0;
                 let e = (full - lo).clamp(0.0, 8.0).round() as usize;
                 if e > 0 {
-                    put(buf, area, x0 + c as u16, y + 2 + r, EIGHTHS[e], value);
+                    put(
+                        buf,
+                        area,
+                        x0 + c as u16,
+                        y + 2 + r,
+                        EIGHTHS[e],
+                        Style::default().fg(ink),
+                    );
                 }
             }
         }
@@ -173,6 +190,24 @@ impl Panel for Ft8ClockPanel {
             x0 + ((((d + SPAN_S) / (2.0 * SPAN_S)) * cols as f64) as usize).min(cols - 1) as u16
         };
         if let Some(v) = verdict(&dts) {
+            // The spread as a bracket over the bulk, the median on it.
+            let hi = Style::default().fg(theme.value_hi);
+            let (a, b) = (
+                col_of((v.median_dt - v.spread).max(-SPAN_S)),
+                col_of((v.median_dt + v.spread).min(SPAN_S)),
+            );
+            if b > a + 1 {
+                put(buf, area, a, y + 1, "├", hi);
+                put(
+                    buf,
+                    area,
+                    a + 1,
+                    y + 1,
+                    &"─".repeat(usize::from(b - a - 1)),
+                    hi,
+                );
+                put(buf, area, b, y + 1, "┤", hi);
+            }
             if v.median_dt.abs() <= SPAN_S {
                 put(
                     buf,
@@ -300,5 +335,41 @@ mod tests {
     fn before_any_decode_it_waits() {
         let all = draw(Ft8ClockPanel, 104, 18, &SdrMetrics::fixture()).join("\n");
         assert!(all.contains("waiting for a decode"), "{all}");
+    }
+
+    /// The verdict's spread is drawn as a bracket over the histogram, and the
+    /// columns under it are bright, the tails plain: the colour says which
+    /// decodes the median and its spread came from.
+    #[test]
+    fn the_spread_is_bracketed_and_its_columns_are_bright() {
+        let m = SdrMetrics::fixture().streaming().ft8_hour();
+        let theme = crate::Theme::sdr();
+        let buf = crate::state::fixture::draw_buffer(Ft8ClockPanel, 104, 18, &m);
+        let row = |y: u16| (0..104).map(|x| buf[(x, y)].symbol()).collect::<String>();
+        let yb = (0..18)
+            .find(|&y| row(y).contains('├'))
+            .expect("a bracket row");
+        let line = row(yb);
+        let a = line.chars().position(|c| c == '├').unwrap() as u16;
+        let b = line.chars().position(|c| c == '┤').unwrap() as u16;
+        let med = line.chars().position(|c| c == '▼').unwrap() as u16;
+        assert!(a < med && med < b, "{line}");
+        let (mut bright, mut plain) = (0, 0);
+        for y in yb + 1..18 {
+            for x in 0..104u16 {
+                let c = &buf[(x, y)];
+                if !EIGHTHS[1..].contains(&c.symbol()) {
+                    continue;
+                }
+                if x > a && x < b {
+                    assert_eq!(c.fg, theme.value_hi, "inside at {x},{y}");
+                    bright += 1;
+                } else if x + 1 < a || x > b + 1 {
+                    assert_eq!(c.fg, theme.value, "outside at {x},{y}");
+                    plain += 1;
+                }
+            }
+        }
+        assert!(bright > 0 && plain > 0, "{bright} {plain}");
     }
 }

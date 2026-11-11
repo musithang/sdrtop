@@ -21,6 +21,11 @@
 //!   it, since every station picks its own tone.
 //! - **Timing**: the timing bench's own figures (one witness), and the
 //!   deliveries' lateness the FT8 clock saw.
+//!
+//! Each section opens with a dot: filled where there is something to say
+//! (the placement's in the bench's own verdict colour, a reference in force
+//! in the theme's "good"), hollow where there is nothing yet. The figures are
+//! bright and the words around them plain, so the numbers read first.
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
@@ -94,19 +99,31 @@ impl Panel for Ft8RadioPanel {
         }
         let label = Style::default().fg(theme.label);
         let value = Style::default().fg(theme.value);
+        let hi = Style::default().fg(theme.value_hi);
         let dim = Style::default().fg(theme.border_dim);
+        let ok = Style::default().fg(theme.status_ok);
         let x = area.x + 1;
-        let xv = x + 11;
+        let xv = x + 13;
         let mut y = area.y;
-        let mut row = |name: &str, text: String, style: Style, y: &mut u16| {
-            if *y < area.bottom() {
-                if !name.is_empty() {
-                    put(buf, area, x, *y, name, label);
+        // A row: a dot saying how the section stands (filled when there is
+        // something to say, hollow when there is not), its name, and the
+        // text in pieces so the figures can stand out from the words.
+        let mut row =
+            |dot: Option<(&str, Style)>, name: &str, parts: &[(String, Style)], y: &mut u16| {
+                if *y < area.bottom() {
+                    if let Some((d, st)) = dot {
+                        put(buf, area, x, *y, d, st);
+                    }
+                    if !name.is_empty() {
+                        put(buf, area, x + 2, *y, name, label);
+                    }
+                    let mut xx = xv;
+                    for (t, st) in parts {
+                        xx = put(buf, area, xx, *y, t, *st);
+                    }
                 }
-                put(buf, area, xv, *y, &text, style);
-            }
-            *y += 1;
-        };
+                *y += 1;
+            };
 
         // Placement, in the RF bench's words and colours.
         let held = state.ft8.cycle_hour.iter().filter(|c| c.held).count();
@@ -115,41 +132,52 @@ impl Panel for Ft8RadioPanel {
             .ceiling()
             .map(|c| format!(" ({})", c.part))
             .unwrap_or_default();
-        row(
-            "placement",
-            format!(
-                "peak {:.0} dBFS · ceiling {} dBFS{part}",
-                state.signal.adc_peak_dbfs,
-                state.ceiling_text()
-            ),
-            value,
-            &mut y,
-        );
         let headroom = state.shown_headroom_db();
         let (_, sev) = staging_verdict_for(
             f64::from(state.peak_to_ceiling_db()),
             state.ceiling().map(|c| c.kind),
         );
-        let ink = match sev {
+        let ink = Style::default().fg(match sev {
             2 => theme.status_crit,
             1 => theme.status_warn,
-            _ => theme.value,
-        };
+            _ => theme.status_ok,
+        });
+        row(
+            Some(("●", ink)),
+            "placement",
+            &[
+                ("peak ".into(), label),
+                (format!("{:.0} dBFS", state.signal.adc_peak_dbfs), hi),
+                (" · ceiling ".into(), label),
+                (format!("{} dBFS", state.ceiling_text()), hi),
+                (part, dim),
+            ],
+            &mut y,
+        );
         let side = if headroom >= 0.0 { "under" } else { "over" };
         row(
+            None,
             "",
-            format!(
-                "{:.0} dB {side} it · {held} of the hour's {hour} cycles reached it",
-                headroom.abs()
-            ),
-            Style::default().fg(ink),
+            &[
+                (format!("{:.0} dB {side} it", headroom.abs()), ink),
+                (" · ".into(), label),
+                (
+                    format!("{held}"),
+                    if held > 0 {
+                        Style::default().fg(theme.status_warn)
+                    } else {
+                        hi
+                    },
+                ),
+                (format!(" of {hour} cycles this hour reached it"), label),
+            ],
             &mut y,
         );
         if state.caps.gain.stages_are_digital() {
             row(
+                None,
                 "",
-                "the gain stages place the level, not the SNR".into(),
-                dim,
+                &[("the gain stages place the level, not the SNR".into(), dim)],
                 &mut y,
             );
         }
@@ -157,66 +185,91 @@ impl Panel for Ft8RadioPanel {
         // The slice.
         match strongest(state) {
             Some((hz, db)) => row(
+                Some(("●", hi)),
                 "the slice",
-                format!(
-                    "strongest outside FT8: {} kHz, {db:.0} dBFS",
-                    signed(hz / 1000.0, 1)
-                ),
-                value,
+                &[
+                    ("strongest outside FT8 ".into(), label),
+                    (format!("{} kHz", signed(hz / 1000.0, 1)), hi),
+                    (", ".into(), label),
+                    (format!("{db:.0} dBFS"), hi),
+                ],
                 &mut y,
             ),
-            None => row("the slice", "no spectrum frame yet".into(), dim, &mut y),
+            None => row(
+                Some(("○", dim)),
+                "the slice",
+                &[("no spectrum frame yet".into(), dim)],
+                &mut y,
+            ),
         }
 
         // The reference.
         let per_ppm = state.radio.frequency as f64 * 1e-6;
-        let reference = match &state.radio.reference {
-            Some(r) => format!(
-                "{} ppm ± {:.2}, by {}",
-                signed(r.ppm, 2),
-                r.sigma_ppm,
-                r.source
+        match &state.radio.reference {
+            Some(r) => row(
+                Some(("●", ok)),
+                "reference",
+                &[
+                    (format!("{} ppm", signed(r.ppm, 2)), hi),
+                    (format!(" ± {:.2}, by ", r.sigma_ppm), label),
+                    (r.source.to_string(), value),
+                ],
+                &mut y,
             ),
-            None => "none established".to_string(),
-        };
-        row("reference", reference, value, &mut y);
+            None => row(
+                Some(("○", dim)),
+                "reference",
+                &[("none established".into(), value)],
+                &mut y,
+            ),
+        }
         row(
+            None,
             "",
-            format!("1 ppm is {per_ppm:.1} Hz here; no FT8 measurement can check it"),
-            dim,
+            &[(
+                format!("1 ppm is {per_ppm:.1} Hz here; no FT8 decode can check it"),
+                dim,
+            )],
             &mut y,
         );
 
         // Timing: the timing bench's figures, and the FT8 clock's lateness.
         let t = &state.timing;
-        let clock = if t.sr_known {
-            format!("sample clock {} ppm", signed(t.sr_delta_ppm as f64, 0))
+        let mut parts: Vec<(String, Style)> = if t.sr_known {
+            vec![
+                ("sample clock ".into(), label),
+                (format!("{} ppm", signed(t.sr_delta_ppm as f64, 0)), hi),
+            ]
         } else {
-            "sample clock not known yet".to_string()
+            vec![("sample clock not known yet".into(), dim)]
         };
+        parts.push((" · jitter ".into(), label));
+        parts.push((format!("{} us", t.cb_jitter_us), hi));
+        let lateness = state.ft8.cycles.back().and_then(|c| c.lateness);
         row(
+            Some(if t.sr_known {
+                ("●", ok)
+            } else {
+                ("○", dim)
+            }),
             "timing",
-            format!("{clock} · jitter {} us", t.cb_jitter_us),
-            value,
+            &parts,
             &mut y,
         );
-        let late = state
-            .ft8
-            .cycles
-            .back()
-            .and_then(|c| c.lateness)
-            .map_or_else(
-                || "lateness not known yet".to_string(),
-                |l| {
-                    format!(
-                        "deliveries late {:.1} ms median, {:.1} p90",
-                        l.median_ms, l.p90_ms
-                    )
-                },
-            );
-        row("", late, value, &mut y);
+        let late: Vec<(String, Style)> = match lateness {
+            Some(l) => vec![
+                ("deliveries late ".into(), label),
+                (format!("{:.1} ms", l.median_ms), hi),
+                (" median, ".into(), label),
+                (format!("{:.1}", l.p90_ms), hi),
+                (" p90".into(), label),
+            ],
+            None => vec![("lateness not known yet".into(), dim)],
+        };
+        row(None, "", &late, &mut y);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,9 +297,9 @@ mod tests {
             "{all}"
         );
         assert!(all.contains("none established"), "{all}");
-        assert!(all.contains("no FT8 measurement can check it"), "{all}");
+        assert!(all.contains("no FT8 decode can check it"), "{all}");
         assert!(all.contains("place the level, not the SNR"), "{all}");
-        assert!(all.contains("cycles reached it"), "{all}");
+        assert!(all.contains("cycles this hour reached it"), "{all}");
     }
 
     /// A radio with no part ahead of the converter is measured against the
@@ -268,5 +321,46 @@ mod tests {
         let m = SdrMetrics::fixture().streaming();
         let all = draw(Ft8RadioPanel, 86, 12, &m).join("\n");
         assert!(!all.contains("not the SNR"), "{all}");
+    }
+
+    /// Each section opens with a dot: filled where there is something to
+    /// say, hollow where there is not; a reference in force is a filled dot
+    /// in the theme's "good".
+    #[test]
+    fn each_section_opens_with_a_dot_that_says_how_it_stands() {
+        let mut m = SdrMetrics::fixture().rtlsdr().streaming();
+        m.timing.sr_known = false;
+        let lines = draw(Ft8RadioPanel, 86, 12, &m);
+        let line = |name: &str| lines.iter().find(|l| l.contains(name)).unwrap().clone();
+        assert!(line("placement").contains("● placement"));
+        assert!(line("the slice").contains("○ the slice"));
+        assert!(line("reference").contains("○ reference"));
+        assert!(line("timing").contains("○ timing"));
+
+        m.radio.reference = Some(crate::state::FrequencyReference {
+            ppm: 1.25,
+            sigma_ppm: 0.04,
+            provenance: crate::state::Provenance::Traceable,
+            source: "DCF77".into(),
+            at: std::time::Instant::now(),
+            efficiency: None,
+            trusted: None,
+        });
+        let theme = crate::Theme::sdr();
+        let buf = crate::state::fixture::draw_buffer(Ft8RadioPanel, 86, 12, &m);
+        let y = (0..12u16)
+            .find(|&y| {
+                (0..86u16)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("reference")
+            })
+            .unwrap();
+        let dot = (0..86u16)
+            .find(|&x| buf[(x, y)].symbol() == "●")
+            .expect("a filled dot");
+        assert_eq!(buf[(dot, y)].fg, theme.status_ok);
+        let all = draw(Ft8RadioPanel, 86, 12, &m).join("\n");
+        assert!(all.contains("+1.25 ppm ± 0.04, by DCF77"), "{all}");
     }
 }

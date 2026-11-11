@@ -10,10 +10,14 @@
 //! their transmissions at about [`HALF_DECODE_DB`]; the reference decoder
 //! read about 0.2 dB lower. A decode under the line is not an error: the
 //! line is where half get through, not where all stop.
+//!
+//! Each column is drawn in the Band view's SNR colour
+//! ([`super::snr_colour`]) at its own SNR: one quantity on one scale
+//! across the Lab.
 
 use ratatui::{layout::Rect, style::Style, Frame};
 
-use super::{say, NARROW_BODY};
+use super::{say, snr_colour, NARROW_BODY};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
@@ -100,20 +104,17 @@ impl Panel for Ft8SensitivityPanel {
             counts[usize::from(col_of(s) - x0)] += 1;
         }
         let top = counts.iter().copied().max().unwrap_or(1).max(1) as f64;
+        // Each column in the Band view's SNR colour, at its own SNR: one
+        // quantity on one scale across the Lab.
         for (c, &n) in counts.iter().enumerate() {
+            let snr = lo + (c as f64 + 0.5) / cols as f64 * (hi - lo);
+            let ink = Style::default().fg(snr_colour(theme, snr));
             let full = n as f64 / top * f64::from(rows) * 8.0;
             for r in 0..rows {
                 let l = f64::from(rows - 1 - r) * 8.0;
                 let e = (full - l).clamp(0.0, 8.0).round() as usize;
                 if e > 0 {
-                    put(
-                        buf,
-                        area,
-                        x0 + c as u16,
-                        area.y + r,
-                        EIGHTHS[e],
-                        Style::default().fg(theme.value),
-                    );
+                    put(buf, area, x0 + c as u16, area.y + r, EIGHTHS[e], ink);
                 }
             }
         }
@@ -184,5 +185,29 @@ mod tests {
     fn the_right_column_gives_way_on_a_narrow_body() {
         assert_eq!(Ft8SensitivityPanel.column_width(149), Some(0));
         assert_eq!(Ft8SensitivityPanel.column_width(189), None);
+    }
+
+    /// Every column is drawn in the Band view's SNR colour at its own SNR.
+    #[test]
+    fn each_column_wears_its_snr_colour() {
+        let m = SdrMetrics::fixture().streaming().ft8_hour();
+        let theme = crate::Theme::sdr();
+        let buf = crate::state::fixture::draw_buffer(Ft8SensitivityPanel, 86, 12, &m);
+        // Inside the frame the panel starts at 1; its plot at 3, 80 wide.
+        let (x0, cols) = (3u16, 80.0);
+        let (lo, hi) = RANGE_DB;
+        let mut seen = std::collections::HashSet::new();
+        for y in 1..9u16 {
+            for x in x0..x0 + 80 {
+                let c = &buf[(x, y)];
+                if !EIGHTHS[1..].contains(&c.symbol()) {
+                    continue;
+                }
+                let snr = lo + (f64::from(x - x0) + 0.5) / cols * (hi - lo);
+                assert_eq!(c.fg, snr_colour(&theme, snr), "at {x},{y}");
+                seen.insert(format!("{:?}", c.fg));
+            }
+        }
+        assert!(seen.len() > 3, "{seen:?}");
     }
 }

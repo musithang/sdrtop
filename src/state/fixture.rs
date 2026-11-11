@@ -724,6 +724,26 @@ pub(crate) fn draw(
     height: u16,
     state: &SdrMetrics,
 ) -> Vec<String> {
+    let buffer = draw_buffer(panel, width, height, state);
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+/// [`draw`]'s buffer itself, cells and their colours, for a test that has
+/// to say which ink a mark was drawn in. The sdr theme, as [`draw`] uses.
+pub(crate) fn draw_buffer(
+    panel: impl crate::ui::panel::Panel + 'static,
+    width: u16,
+    height: u16,
+    state: &SdrMetrics,
+) -> ratatui::buffer::Buffer {
     let name = panel.name();
     let mut registry = crate::ui::PanelRegistry::new();
     registry.register(panel);
@@ -737,17 +757,7 @@ pub(crate) fn draw(
             registry.render_panel(name, f, area, state, &theme, false);
         })
         .expect("test backend never fails");
-
-    let buffer = terminal.backend().buffer();
-    (0..height)
-        .map(|y| {
-            (0..width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>()
-                .trim_end()
-                .to_string()
-        })
-        .collect()
+    terminal.backend().buffer().clone()
 }
 
 #[cfg(test)]

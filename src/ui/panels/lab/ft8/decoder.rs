@@ -7,9 +7,15 @@
 //! The funnel ([`crate::signal::ft8::cycle::Funnel`]) runs from the search's
 //! candidates through those in sync and those read to a codeword whose check
 //! passed, to the new decodes; its bars are on a square-root scale, because
-//! the first stage outnumbers the last a thousand to one. Then what belief
+//! the first stage outnumbers the last a thousand to one. Each stage is a
+//! step brighter than the one before, the decodes in the theme's "good",
+//! and each count after the first carries the share of the stage before
+//! that got through. Then what belief
 //! propagation finished and what ordered statistics did, what was refused
 //! and why, and each subtraction pass's yield.
+//!
+//! The held decodes by effort are one bar split in effort's order, easiest
+//! first, OSD last in warning ink, under a legend naming every part.
 //!
 //! **The share needing OSD is shown plainly.** Ordered statistics decoding
 //! is where false decodes come from; a band on which a large share needs it
@@ -114,17 +120,23 @@ impl Panel for Ft8DecoderPanel {
         }
         let label = Style::default().fg(theme.label);
         let value = Style::default().fg(theme.value);
+        let hi = Style::default().fg(theme.value_hi);
+        let dim = Style::default().fg(theme.border_dim);
         let x = area.x + 1;
         let bar_x = x + 12;
-        let bar_w = f64::from(area.width.saturating_sub(24).max(4));
+        let bar_w = f64::from(area.width.saturating_sub(26).max(4));
         let top = (sum.candidates.max(1) as f64).sqrt();
+        // Each stage a step brighter than the one it came from, the decodes
+        // in the theme's own "good"; beside each count, the share of the
+        // stage before that got through.
         let rows = [
             ("candidates", sum.candidates, theme.border_default),
             ("in sync", sum.synced, theme.value),
-            ("a codeword", sum.coded, theme.value),
-            ("new decodes", sum.by_bp + sum.by_osd, theme.value_hi),
+            ("a codeword", sum.coded, theme.value_hi),
+            ("new decodes", sum.by_bp + sum.by_osd, theme.status_ok),
         ];
         let mut y = area.y;
+        let mut before: Option<usize> = None;
         for (name, n, colour) in rows {
             if y >= area.bottom() {
                 return;
@@ -140,55 +152,122 @@ impl Panel for Ft8DecoderPanel {
                 &"█".repeat(len),
                 Style::default().fg(colour),
             );
-            put(buf, area, end + 1, y, &format!("{n}"), value);
+            let end = put(buf, area, end + 1, y, &format!("{n}"), value);
+            if let Some(b) = before.filter(|&b| b > 0) {
+                put(
+                    buf,
+                    area,
+                    end + 2,
+                    y,
+                    &format!("{:.0} %", 100.0 * n as f64 / b as f64),
+                    dim,
+                );
+            }
+            before = Some(n);
             y += 1;
         }
-        let mut lines: Vec<(String, Style)> = vec![
-            (
-                "bars on a square-root scale".into(),
-                Style::default().fg(theme.border_dim),
-            ),
-            (
-                format!(
-                    "BP {}  OSD {}  found again {}  refused: empty word {}, OSD out of sync {}",
-                    sum.by_bp, sum.by_osd, sum.duplicates, sum.refused_zero, sum.refused_osd
-                ),
-                value,
-            ),
-            (
-                format!(
-                    "new by pass: 1st {}  2nd {}  3rd {} (under what the passes before took out)",
-                    by_pass[0], by_pass[1], by_pass[2]
-                ),
-                value,
-            ),
-        ];
         let held = state.ft8.decodes.len();
         let e = effort(state);
-        if held > 0 {
-            lines.push((String::new(), value));
-            lines.push((
-                format!(
-                    "of the {held} held: BP at once {} · 1-3 iterations {} · 4-10 {} · 11 and more {} · OSD {}",
-                    e[0], e[1], e[2], e[3], e[4]
-                ),
-                value,
-            ));
-            lines.push((
-                format!(
-                    "{:.0} % needed OSD, where false decodes come from",
-                    100.0 * e[4] as f64 / held as f64
-                ),
-                label,
-            ));
-        }
-        for (text, style) in lines {
+        let lines: Vec<Vec<(String, Style)>> = vec![
+            vec![
+                (" ".repeat(12), dim),
+                ("bars on a square-root scale".into(), dim),
+            ],
+            vec![
+                ("BP ".into(), label),
+                (sum.by_bp.to_string(), hi),
+                ("  OSD ".into(), label),
+                (sum.by_osd.to_string(), hi),
+                ("  found again ".into(), label),
+                (sum.duplicates.to_string(), hi),
+                ("  refused: empty word ".into(), label),
+                (sum.refused_zero.to_string(), hi),
+                (", OSD out of sync ".into(), label),
+                (sum.refused_osd.to_string(), hi),
+            ],
+            vec![
+                ("new by pass  1st ".into(), label),
+                (by_pass[0].to_string(), hi),
+                ("  2nd ".into(), label),
+                (by_pass[1].to_string(), hi),
+                ("  3rd ".into(), label),
+                (by_pass[2].to_string(), hi),
+                ("  (each under what the passes before took out)".into(), dim),
+            ],
+        ];
+        // The held decodes by effort, as one bar split in the effort's
+        // order, easiest first, OSD last in the colour of care.
+        let inks = [
+            theme.status_ok,
+            theme.value_hi,
+            theme.value,
+            theme.border_default,
+            theme.status_warn,
+        ];
+        let names = ["at once", "1-3", "4-10", "11+", "OSD"];
+        for line in &lines {
             if y >= area.bottom() {
                 return;
             }
-            let indent = if text.starts_with("bars") { bar_x } else { x };
-            put(buf, area, indent, y, &text, style);
+            let mut xx = x;
+            for (t, st) in line {
+                xx = put(buf, area, xx, y, t, *st);
+            }
             y += 1;
+        }
+        if held == 0 || y >= area.bottom() {
+            return;
+        }
+        put(buf, area, x, y, "effort", label);
+        let w = usize::from(area.width.saturating_sub(14).max(5));
+        let mut xx = bar_x;
+        let mut done = 0usize;
+        for (k, &n) in e.iter().enumerate() {
+            // Cumulative rounding so the segments add up to the bar.
+            let to = ((done + n) * w + held / 2) / held;
+            let from = (done * w + held / 2) / held;
+            xx = put(
+                buf,
+                area,
+                xx,
+                y,
+                &"█".repeat(to - from),
+                Style::default().fg(inks[k]),
+            );
+            done += n;
+        }
+        y += 1;
+        if y < area.bottom() {
+            let mut xx = bar_x;
+            for k in 0..5 {
+                xx = put(buf, area, xx, y, "■ ", Style::default().fg(inks[k]));
+                xx = put(buf, area, xx, y, &format!("{} ", names[k]), label);
+                xx = put(buf, area, xx, y, &format!("{}   ", e[k]), hi);
+            }
+        }
+        y += 1;
+        if y < area.bottom() {
+            let share = 100.0 * e[4] as f64 / held as f64;
+            let xx = put(
+                buf,
+                area,
+                x,
+                y,
+                &format!("{share:.0} %"),
+                Style::default().fg(if e[4] > 0 {
+                    theme.status_warn
+                } else {
+                    theme.value_hi
+                }),
+            );
+            put(
+                buf,
+                area,
+                xx,
+                y,
+                &format!(" of the {held} held needed OSD, where false decodes come from"),
+                label,
+            );
         }
     }
 }
@@ -233,5 +312,38 @@ mod tests {
     fn before_a_decoded_cycle_it_waits() {
         let all = draw(Ft8DecoderPanel, 104, 14, &SdrMetrics::fixture()).join("\n");
         assert!(all.contains("waiting for a decoded cycle"), "{all}");
+    }
+
+    /// Each stage after the first says the share of the one before that got
+    /// through; the effort is one bar split in its order, easiest first,
+    /// under a legend naming every part.
+    #[test]
+    fn the_funnel_gives_its_shares_and_the_effort_is_one_split_bar() {
+        let m = SdrMetrics::fixture().streaming().ft8_traced();
+        let theme = crate::Theme::sdr();
+        let (sum, _, _) = summed(&m);
+        let all = draw(Ft8DecoderPanel, 104, 14, &m).join("\n");
+        let share = format!("{:.0} %", 100.0 * sum.synced as f64 / sum.candidates as f64);
+        assert!(all.contains(&format!("{}  {share}", sum.synced)), "{all}");
+        for name in ["at once", "1-3", "4-10", "11+", "OSD"] {
+            assert!(all.contains(&format!("■ {name} ")), "{name}: {all}");
+        }
+        let buf = crate::state::fixture::draw_buffer(Ft8DecoderPanel, 104, 14, &m);
+        let row = |y: u16| (0..104).map(|x| buf[(x, y)].symbol()).collect::<String>();
+        let y = (0..14)
+            .find(|&y| row(y).contains("effort"))
+            .expect("an effort row");
+        let inks: Vec<_> = (0..104u16)
+            .map(|x| &buf[(x, y)])
+            .filter(|c| c.symbol() == "█")
+            .map(|c| c.fg)
+            .collect();
+        // The fixture's held decodes: five at once, one in 1-3.
+        let e = effort(&m);
+        assert_eq!((e[0], e[1], e[2] + e[3] + e[4]), (5, 1, 0));
+        assert_eq!(inks.first(), Some(&theme.status_ok));
+        assert_eq!(inks.last(), Some(&theme.value_hi));
+        let ok = inks.iter().filter(|&&c| c == theme.status_ok).count();
+        assert!(ok > 4 * (inks.len() - ok), "{ok} of {}", inks.len());
     }
 }

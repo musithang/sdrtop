@@ -320,12 +320,14 @@ Your own station, judged by the stations it hears.
   plainly, since that is where [false decodes](#how-a-cycle-is-read) come
   from; a band where a third need it is a band to read with an eyebrow
   raised.
-- **Load**: how long a cycle's decode took, median and slowest, against the
-  fifteen seconds it has, the cycles skipped while the decoder was still
-  busy, and what the sample feed lost. On this machine, now: a measurement,
+- **Load**: each cycle's decode time as a small chart against the fifteen
+  seconds it has, with the median and the slowest in words. A cycle skipped
+  because the decoder was still busy is a full column in warning colour,
+  one the stream broke in a `×`; under them, what the sample feed lost. On this machine, now: a measurement,
   not a benchmark.
-- **The radio**: the peak against the radio's ceiling in the RF bench's own
-  words, and how many of the hour's cycles reached it; on a radio whose
+- **The radio**: each part opens with a dot, filled when there is
+  something to say and hollow when there is not. The peak against the
+  radio's ceiling in the RF bench's own words and colours, and how many of the hour's cycles reached it; on a radio whose
   gain stages are digital (the HF+), a reminder that they place the level
   and do not set the SNR. Then the strongest signal anywhere in the capture
   outside the FT8 band, the thing that pushes a radio's own gain control

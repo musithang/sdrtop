@@ -1741,8 +1741,31 @@ mod tests {
         let mut m = crate::state::SdrMetrics::fixture()
             .airspyhf()
             .streaming()
+            .with_carrier(25_000.0, 40.0)
             .ft8_traced()
             .ft8_hour();
+        // The capture centred on the dial, the carrier 25 kHz off it, so the
+        // radio's slice reads as it would on the air.
+        let dial = m.radio.frequency;
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.axis_start_hz += dial as f64 - fr.center_freq_hz as f64;
+            fr.center_freq_hz = dial;
+        }
+        // A full ring for the load's cycles: decode times that wander, one
+        // cycle skipped and one cut, so every mark is on screen.
+        let base = m.ft8.cycles[0].clone();
+        m.ft8.cycles.clear();
+        for k in 0..crate::state::ft8::CYCLES_MAX {
+            let mut c = base.clone();
+            c.start_unix = base.start_unix - 15.0 * (crate::state::ft8::CYCLES_MAX - 1 - k) as f64;
+            c.seconds = 3.0 + 4.0 * ((k as f64) * 0.7).sin().abs() + (k % 5) as f64 * 0.6;
+            c.outcome = match k {
+                17 => crate::state::ft8::CycleOutcome::Skipped,
+                31 => crate::state::ft8::CycleOutcome::Cut,
+                _ => crate::state::ft8::CycleOutcome::Decoded,
+            };
+            m.ft8.cycles.push_back(c);
+        }
         m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
         render_html("lab_ft8_receiver", m, &path);
     }
