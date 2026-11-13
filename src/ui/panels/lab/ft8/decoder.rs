@@ -186,7 +186,7 @@ impl Panel for Ft8DecoderPanel {
                 (sum.duplicates.to_string(), hi),
                 ("  refused: empty word ".into(), label),
                 (sum.refused_zero.to_string(), hi),
-                (", OSD out of sync ".into(), label),
+                (", OSD doubted ".into(), label),
                 (sum.refused_osd.to_string(), hi),
             ],
             vec![

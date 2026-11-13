@@ -108,6 +108,34 @@ impl Trace {
         data_positions().map(|s| m[s]).fold(f32::MAX, f32::min)
     }
 
+    /// How much what was received speaks against the tones the codeword was
+    /// sent as: over the 58 data symbols, the energy a symbol's strongest
+    /// tone holds beyond the sent one's, summed where the two differ, over
+    /// the signal's energy on the sent tones (each less a cell's noise).
+    ///
+    /// A true decode differs from the strongest tones where the signal faded
+    /// into the noise, by noise-sized amounts. A wrong codeword the code and
+    /// the check let through on a real signal differs in several symbols
+    /// wherever they fall, the strong ones too, where the signal itself
+    /// stands on another tone.
+    pub fn contradiction(&self) -> f32 {
+        let (mut against, mut signal) = (0f32, 0f32);
+        for s in data_positions() {
+            let row = &self.energies[s][1..=8];
+            let sent = row[usize::from(self.tones[s])];
+            let best = row.iter().copied().fold(f32::MIN, f32::max);
+            signal += (sent - self.noise).max(0.0);
+            if best > sent {
+                against += best - sent;
+            }
+        }
+        if signal > 0.0 {
+            against / signal
+        } else {
+            f32::INFINITY
+        }
+    }
+
     /// A trace of nothing, for tests that build a decode by hand.
     #[cfg(test)]
     pub fn empty() -> Self {

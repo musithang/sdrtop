@@ -58,8 +58,8 @@ pub const MIN_POWER: f32 = 2.2;
 /// 21 by chance. Swept on simulated cycles of one transmission at -20 to -22
 /// dB (20 each): every gate from 0 to 13 decoded the same (18, 11 and 1),
 /// the time per cycle on the dev machine falling from 3.0 s to 1.4 s; 9
-/// sits two under the OSD guard's [`OSD_MIN_COSTAS`], because the first
-/// place is the loose one and shows fewer.
+/// keeps three times noise's count, and the first place is the loose one,
+/// so a signal shows fewer there than where it decodes.
 pub const RESYNC_MIN_COSTAS: u8 = 9;
 
 /// The decoder's tunable numbers, so the conformance rows can try others.
@@ -84,6 +84,11 @@ pub struct Settings {
     /// OSD also on belief propagation's first this many posteriors
     /// ([`OSD_FROM_BP`], [`ldpc::decode_deep`]).
     pub osd_from_bp: usize,
+    /// Whether a codeword must pass the guards to be reported: never the
+    /// all-zero one, and an OSD one only as [`Settings::osd_guard`] believes
+    /// it. Off only to measure what the guards keep out.
+    pub guard: bool,
+    pub osd_guard: OsdGuard,
 }
 
 impl Settings {
@@ -96,6 +101,8 @@ impl Settings {
         resync_min_costas: RESYNC_MIN_COSTAS,
         threads: MAX_THREADS,
         osd_from_bp: OSD_FROM_BP,
+        guard: true,
+        osd_guard: OsdGuard::DEFAULT,
     };
 }
 
@@ -114,18 +121,78 @@ const OSD_ORDER: u8 = 2;
 /// off the air.
 pub const OSD_FROM_BP: usize = 2;
 
-/// An OSD decode must show its sync: at least this many of the 21 Costas
-/// symbols strongest on their own tone, and no more than
-/// [`OSD_MAX_REPAIRED`] bits repaired. OSD's distance bound alone holds on
-/// white-noise soft bits (`ldpc::OSD_MAX_DISTANCE`) but not on a real
-/// cycle's candidates: a strong signal read at the wrong time or tone gives
-/// confident, structured, wrong soft bits, and OSD finds a codeword whose CRC
-/// passes near them. Measured over 27 cycles (`measure_what_parts_true_from_
-/// false`): 16 true OSD decodes had 12 to 20 Costas symbols right and 16 to
-/// 35 bits repaired; 19 false ones had 3 to 9 and 35 to 48. Either test alone
-/// parts them; both together leave a margin on each.
-const OSD_MIN_COSTAS: u8 = 11;
-const OSD_MAX_REPAIRED: u32 = 34;
+/// When a codeword ordered statistics found is believed.
+///
+/// OSD's distance bound (`ldpc::OSD_MAX_DISTANCE`) holds on white noise, but
+/// a real cycle hands it worse: a real signal, read faded, half drowned, or
+/// a tone or a few milliseconds off, gives confident soft bits that are
+/// partly wrong, and among the codewords near them one in a few thousand
+/// passes the CRC without being what was sent. Every false decode seen on
+/// simulated signals was that: at the transmission's own frequency and
+/// time, not out of noise. So the codeword is held against what was
+/// received, once its tones are known:
+///
+/// - **What the symbols say against it** ([`Trace::contradiction`]) at most
+///   [`Self::max_contradiction`], plus [`Self::contradiction_per_db`] for
+///   each dB the decode measured below -19 dB, where the noise in the
+///   symbols a true decode differs on is a larger share of the signal.
+/// - **Its sync**: [`Self::min_costas`] of the 21 Costas symbols on their
+///   tone, and [`Self::costas_per_db`] more for each dB above -20 dB. A
+///   strong signal read two tones off contradicts itself very little (its
+///   strongest tones moved with it) but cannot show its Costas arrays.
+/// - **Bits repaired** at most [`Self::max_repaired`], and **SNR** at least
+///   [`Self::min_snr_db`]: below it a true OSD decode was 2 in 15 000.
+///
+/// Measured with every guard off (`measure_the_guards_population`), then
+/// replayed: three populations of 9345, 9345 and 7490 decodes (weak and
+/// spaced, fading and steady; and strong and crowded, -10 to -17 dB with
+/// pairs within a tone), 9152 + 6538 true, every one of the 1145 false an
+/// OSD codeword. The guard this one replaced (11 Costas, 34 repaired)
+/// believed 8483 + 6442 true and 16 false; this one 8916 + 6401 true and 2
+/// false, both on strong crowded signals and both believed by the old one
+/// too. On 1750 simulated WAVs of one transmission each (the other
+/// decoder's simulator, -17 to -23 dB, steady and fading), 811 true and 2
+/// false became 836 and none, in the same time; 400 cycles of noise, none
+/// either way; the crowded band, 149 of 160 and none wrong either way.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OsdGuard {
+    pub min_costas: u8,
+    pub costas_per_db: f64,
+    pub max_repaired: u32,
+    pub min_snr_db: f64,
+    pub max_contradiction: f32,
+    pub contradiction_per_db: f32,
+}
+
+impl OsdGuard {
+    pub const DEFAULT: OsdGuard = OsdGuard {
+        min_costas: 8,
+        costas_per_db: 0.5,
+        max_repaired: 35,
+        min_snr_db: -23.5,
+        max_contradiction: 0.18,
+        contradiction_per_db: 0.03,
+    };
+
+    /// What can be told before the codeword is measured: its sync at the
+    /// weakest it may be, and the bits repaired. A codeword refused here is
+    /// never measured, which is most of them.
+    pub fn may_be(&self, costas: u8, repaired: u32) -> bool {
+        costas >= self.min_costas && repaired <= self.max_repaired
+    }
+
+    /// Whether the codeword is believed, measured at `snr_db` and
+    /// contradicted by `contradiction`.
+    pub fn believes(&self, costas: u8, repaired: u32, snr_db: f64, contradiction: f32) -> bool {
+        let sync = f64::from(self.min_costas) + self.costas_per_db * (snr_db + 20.0).max(0.0);
+        let against =
+            self.max_contradiction + self.contradiction_per_db * (-19.0 - snr_db as f32).max(0.0);
+        self.may_be(costas, repaired)
+            && snr_db >= self.min_snr_db
+            && f64::from(costas) >= sync
+            && contradiction <= against
+    }
+}
 
 /// The low-pass that estimates the channel's gain during subtraction: a
 /// moving average this many seconds long, on a steady path.
@@ -203,7 +270,7 @@ pub struct Funnel {
     pub duplicates: usize,
     /// The all-zero codeword, never believed.
     pub refused_zero: usize,
-    /// An OSD codeword without its sync visibly there, never believed.
+    /// An OSD codeword the guard did not believe ([`OsdGuard`]).
     pub refused_osd: usize,
 }
 
@@ -213,7 +280,7 @@ struct Tally {
     synced: bool,
     coded: bool,
     zero: bool,
-    unsynced_osd: bool,
+    refused_osd: bool,
     duplicate: bool,
 }
 
@@ -283,7 +350,7 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
                 Some(_) => funnel.by_bp += 1,
                 None if tally.duplicate => funnel.duplicates += 1,
                 None if tally.zero => funnel.refused_zero += 1,
-                None if tally.unsynced_osd => funnel.refused_osd += 1,
+                None if tally.refused_osd => funnel.refused_osd += 1,
                 None => {}
             }
             if let Some(f) = found {
@@ -452,12 +519,13 @@ fn try_candidate(
                 continue;
             };
             tally.coded = true;
-            if !believed(&decoded, costas) {
-                if decoded.payload == 0 {
-                    tally.zero = true;
-                } else {
-                    tally.unsynced_osd = true;
-                }
+            let guarded_osd = settings.guard && decoded.osd.is_some();
+            if settings.guard && decoded.payload == 0 {
+                tally.zero = true;
+                continue;
+            }
+            if guarded_osd && !settings.osd_guard.may_be(costas, decoded.repaired) {
+                tally.refused_osd = true;
                 continue;
             }
             if before.contains(&decoded.payload) {
@@ -476,6 +544,17 @@ fn try_candidate(
             };
             let codeword = ldpc::encode(word91);
             let trace = Trace::build(&y, &measured, &tones, &llr, &codeword, at_zero);
+            if guarded_osd
+                && !settings.osd_guard.believes(
+                    costas,
+                    decoded.repaired,
+                    measured.physics.snr_db,
+                    trace.contradiction(),
+                )
+            {
+                tally.refused_osd = true;
+                continue;
+            }
             let mut physics = measured.physics;
             physics.f0 += at_zero;
             return Some(Hit::Found(Box::new(Found {
@@ -494,40 +573,36 @@ fn try_candidate(
     None
 }
 
-/// Whether a codeword the code and the check accepted is believed.
-///
-/// **Never the all-zero codeword.** Its check is zero too, so it passes
-/// both, and anything that puts every data symbol on tone 0 produces it: off
-/// the air on 20 m, a steady carrier under a neighbour's sidelobe "decoded"
-/// as an empty message cycle after cycle (2 or 3 Costas symbols right, not
-/// one bit repaired). It is thirteen blanks of free text, which nobody sends.
-///
-/// **OSD only with its sync visibly there** ([`OSD_MIN_COSTAS`],
-/// [`OSD_MAX_REPAIRED`]).
-fn believed(d: &ldpc::Decoded, costas: u8) -> bool {
-    if d.payload == 0 {
-        return false;
-    }
-    !(d.osd.is_some() && (costas < OSD_MIN_COSTAS || d.repaired > OSD_MAX_REPAIRED))
-}
+// Never the all-zero codeword, in `try_candidate`. Its check is zero too, so
+// it passes both, and anything that puts every data symbol on tone 0
+// produces it: off the air on 20 m, a steady carrier under a neighbour's
+// sidelobe "decoded" as an empty message cycle after cycle (2 or 3 Costas
+// symbols right, not one bit repaired). It is thirteen blanks of free text,
+// which nobody sends.
 
 #[cfg(test)]
 #[test]
-fn the_all_zero_codeword_and_an_unsynced_osd_are_not_believed() {
-    let d = |payload, osd, repaired| ldpc::Decoded {
-        payload,
-        iterations: 0,
-        repaired,
-        osd,
-        distance: 0.0,
-    };
-    // As it came off the air: payload 0, BP at once, 2 Costas symbols.
-    assert!(!believed(&d(0, None, 0), 2));
-    assert!(!believed(&d(0, None, 0), 21));
-    assert!(believed(&d(0x1234, None, 3), 2));
-    assert!(believed(&d(0x1234, Some(2), 20), OSD_MIN_COSTAS));
-    assert!(!believed(&d(0x1234, Some(2), 20), OSD_MIN_COSTAS - 1));
-    assert!(!believed(&d(0x1234, Some(2), OSD_MAX_REPAIRED + 1), 21));
+fn the_osd_guard_holds_each_of_its_lines() {
+    let g = OsdGuard::DEFAULT;
+    // Weak: the sync floor, the repairs, the SNR floor.
+    assert!(g.believes(8, 35, -21.0, 0.1));
+    assert!(!g.believes(7, 35, -21.0, 0.1));
+    assert!(!g.believes(8, 36, -21.0, 0.1));
+    assert!(!g.believes(21, 20, -23.6, 0.1));
+    // The contradiction allowed grows below -19 dB: 0.18, 0.24 at -21.
+    assert!(g.believes(15, 20, -19.0, 0.18));
+    assert!(!g.believes(15, 20, -19.0, 0.19));
+    assert!(g.believes(15, 20, -21.0, 0.235));
+    assert!(!g.believes(15, 20, -21.0, 0.245));
+    // The sync asked for grows above -20 dB: 8, 10.5 at -15. The crowded
+    // band's false decode: -14.8 dB, Costas 8, contradiction 0.08.
+    assert!(!g.believes(8, 35, -14.8, 0.08));
+    assert!(g.believes(11, 35, -15.0, 0.08));
+    assert!(!g.believes(10, 35, -15.0, 0.08));
+    // Before measuring, only the floor and the repairs.
+    assert!(g.may_be(8, 35));
+    assert!(!g.may_be(7, 35));
+    assert!(!g.may_be(8, 36));
 }
 
 /// What one candidate came to, read as a pass reads it: whether it passed
@@ -551,7 +626,7 @@ pub(super) fn explain(bb: &Baseband, c: &search::Candidate, settings: &Settings)
         synced: tally.synced,
         coded: tally.coded,
         refused_zero: tally.zero,
-        refused_osd: tally.unsynced_osd,
+        refused_osd: tally.refused_osd,
         believed: match hit {
             Some(Hit::Found(f)) => Some((f.payload, f.costas, f.decoded.osd, f.decoded.repaired)),
             _ => None,

@@ -160,10 +160,20 @@ transmission.
 
 The ordered-statistics search is powerful enough to "decode" noise into a
 message whose check passes, which is how a decoder ends up reporting a
-station in the middle of the Pacific that nobody sent. Here it is only
-believed with the sync visibly there and a plausible number of bits
-repaired. That costs a little sensitivity; a station that was never there
-costs more.
+station in the middle of the Pacific that nobody sent. More often still it
+misreads a real signal: a faded or half drowned transmission gives soft
+bits that are partly wrong, and now and then a wrong message near them
+passes the check. So a message found this way is held against what was
+received: once its tones are known, sdrtop looks at every symbol and asks
+how much of the signal's energy sits on a tone other than the one the
+message says was sent. A true message differs only where the signal faded
+into the noise; a wrong one is contradicted where the signal is plainly
+there. It must also show its sync (more of it, the stronger the signal)
+and a plausible number of bits repaired. On simulated signals, weak and
+strong, steady and fading, this lets through about one false message in
+7 700 decodes, where testing the sync and the repairs alone let through
+one in 900, and it believes 2.6 % more true ones. A station that was never
+there costs more than a weak one missed.
 
 Measured on synthetic signals: half of them decode at about -21.2 dB SNR,
 a little better than the figure the protocol's authors give for their own

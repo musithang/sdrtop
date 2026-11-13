@@ -449,7 +449,30 @@ impl DecodeRows {
                         );
                     }
                 }
-                None => self.wrong += 1,
+                None => {
+                    self.wrong += 1;
+                    let near = sent
+                        .iter()
+                        .min_by(|a, b| {
+                            (a.f0 - d.physics.f0)
+                                .abs()
+                                .total_cmp(&(b.f0 - d.physics.f0).abs())
+                        })
+                        .map_or(f64::NAN, |s| s.f0 - d.physics.f0);
+                    println!(
+                        "wrong: {} f0 {:.1} (nearest sent {:+.1} Hz) snr {:.1} costas {} osd {:?} repaired {} distance {:.4} contradiction {:.4} pass {}",
+                        d.message.text(),
+                        d.physics.f0,
+                        near,
+                        d.physics.snr_db,
+                        d.costas,
+                        d.osd,
+                        d.repaired,
+                        d.distance,
+                        d.trace.contradiction(),
+                        d.pass
+                    );
+                }
             }
         }
     }
@@ -821,7 +844,10 @@ fn measure_the_llr_scale() {
 /// other numbers on the rows and on a recording: `FT8_CANDS` (the most
 /// candidates a pass reads), `FT8_PASSES`, `FT8_MIN_POWER`, `FT8_GATE` (the
 /// Costas count a candidate needs to be tried again), `FT8_RESYNC=0`,
-/// `FT8_OSD_BP` (the posteriors OSD is also run on).
+/// `FT8_OSD_BP` (the posteriors OSD is also run on), `FT8_GUARD=0` (every
+/// codeword reported, believed or not), and the OSD guard's numbers
+/// (`cycle::OsdGuard`): `FT8_OSD_COSTAS`, `FT8_OSD_COSTAS_SLOPE`,
+/// `FT8_OSD_REPAIRED`, `FT8_OSD_SNR`, `FT8_CONTRA`, `FT8_CONTRA_SLOPE`.
 pub(crate) fn settings_from_env() -> cycle::Settings {
     fn var<T: std::str::FromStr>(name: &str, default: T) -> T {
         std::env::var(name).map_or(default, |v| {
@@ -837,6 +863,15 @@ pub(crate) fn settings_from_env() -> cycle::Settings {
         resync_min_costas: var("FT8_GATE", d.resync_min_costas),
         osd_from_bp: var("FT8_OSD_BP", d.osd_from_bp),
         resync: std::env::var("FT8_RESYNC").map_or(d.resync, |v| v != "0"),
+        guard: std::env::var("FT8_GUARD").map_or(d.guard, |v| v != "0"),
+        osd_guard: cycle::OsdGuard {
+            min_costas: var("FT8_OSD_COSTAS", d.osd_guard.min_costas),
+            costas_per_db: var("FT8_OSD_COSTAS_SLOPE", d.osd_guard.costas_per_db),
+            max_repaired: var("FT8_OSD_REPAIRED", d.osd_guard.max_repaired),
+            min_snr_db: var("FT8_OSD_SNR", d.osd_guard.min_snr_db),
+            max_contradiction: var("FT8_CONTRA", d.osd_guard.max_contradiction),
+            contradiction_per_db: var("FT8_CONTRA_SLOPE", d.osd_guard.contradiction_per_db),
+        },
         ..d
     }
 }
@@ -858,12 +893,19 @@ fn measure_false_decodes() {
         cycles += 1;
         for d in &r.decodes {
             println!(
-                "false: {} osd {:?} block {} costas {} repaired {}",
+                "false: {} osd {:?} block {} costas {} repaired {} distance {:.4} snr {:.2} coherence {:.3} drift {:.3} f0_sigma {:.4} pass {} contradiction {:.4}",
                 d.message.text(),
                 d.osd,
                 d.block,
                 d.costas,
-                d.repaired
+                d.repaired,
+                d.distance,
+                d.physics.snr_db,
+                d.physics.coherence,
+                d.physics.drift,
+                d.physics.f0_sigma,
+                d.pass,
+                d.trace.contradiction()
             );
         }
     }
@@ -1219,4 +1261,87 @@ fn the_band_shows_energy_where_a_signal_sits() {
     // The signal's 50 Hz from 1500 Hz stands out; far from it, the floor.
     assert!(band[61] > 3.0, "{}", band[61]);
     assert!(band[20].abs() < 1.0, "{}", band[20]);
+}
+
+/// Every decode of many crowded cycles, true or not, beside what the guard
+/// and the contradiction read on it: the population a guard is set from.
+/// Cycles of 12 transmissions, fading by 0.5, 1 or 2 Hz at -18 to -21 dB
+/// and steady at -20 to -22 dB (or strong, `FT8_GUARD_STRONG`),
+/// `FT8_GUARD_CYCLES` of each kind (100); the
+/// settings as [`settings_from_env`]. One `ROW` line per decode:
+/// `kind spread snr_set truth osd costas repaired distance snr contradiction
+/// against_noise mismatched`.
+#[test]
+#[ignore]
+fn measure_the_guards_population() {
+    let n: usize = std::env::var("FT8_GUARD_CYCLES").map_or(100, |v| v.parse().unwrap());
+    let seed: u64 = std::env::var("FT8_SEED").map_or(71, |v| v.parse().unwrap());
+    let settings = settings_from_env();
+    // `FT8_GUARD_STRONG=1`: strong and crowded instead, 20 a cycle from -10
+    // to -17 dB, four pairs within a tone of each other.
+    let strong = std::env::var("FT8_GUARD_STRONG").is_ok_and(|v| v != "0");
+    let mut rng = Rng::new(seed);
+    let (mut right, mut wrong) = (0, 0);
+    for i in 0..2 * n {
+        let fading = i < n;
+        let spread = [0.5, 1.0, 2.0][i % 3];
+        let snr = if strong {
+            -10.0 - (i % 8) as f64
+        } else if fading {
+            -18.0 - (i % 4) as f64
+        } else {
+            -20.0 - (i % 3) as f64
+        };
+        let mut sent = readable(if strong { 20 } else { 12 }, snr, &mut rng);
+        if strong {
+            for s in sent.iter_mut() {
+                s.snr_db = -10.0 - rng.unit() * 7.0;
+                s.f0 = 200.0 + rng.unit() * 2700.0;
+            }
+            for k in 0..4 {
+                sent[2 * k + 1].f0 = sent[2 * k].f0 + rng.unit() * 6.25;
+            }
+        }
+        let x = if fading {
+            faded(&sent, spread, &mut rng).0
+        } else {
+            cycle(&sent, &mut rng)
+        };
+        let r = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+        for d in &r.decodes {
+            let truth = sent.iter().any(|s| s.payload == d.payload);
+            if truth {
+                right += 1;
+            } else {
+                wrong += 1;
+            }
+            let t = &d.trace;
+            let (mut against, mut mismatched) = (0f32, 0);
+            for s in modulate::data_positions() {
+                let row = &t.energies[s][1..=8];
+                let sent_e = row[usize::from(t.tones[s])];
+                let best = row.iter().copied().fold(f32::MIN, f32::max);
+                if best > sent_e {
+                    against += (best - sent_e) / t.noise;
+                    mismatched += 1;
+                }
+            }
+            println!(
+                "ROW {} {} {} {} {} {} {} {:.4} {:.2} {:.4} {:.2} {}",
+                if fading { "fade" } else { "awgn" },
+                if fading { spread } else { 0.0 },
+                snr,
+                u8::from(truth),
+                d.osd.map_or(-1, i32::from),
+                d.costas,
+                d.repaired,
+                d.distance,
+                d.physics.snr_db,
+                t.contradiction(),
+                against,
+                mismatched
+            );
+        }
+    }
+    println!("{right} right, {wrong} wrong");
 }

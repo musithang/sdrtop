@@ -269,6 +269,41 @@ fn settings() -> Settings {
     super::conformance::settings_from_env()
 }
 
+/// How much what was received speaks against the tones a decode was sent
+/// as, over the 58 data symbols: the energy on a symbol's strongest tone
+/// beyond the decoded one's, summed where they differ, over the signal's
+/// energy on the decoded tones; the largest one such excess over a cell's
+/// noise; how many of the stronger half of the symbols differ; and how many
+/// differ where the strongest tone stands 8 dB over the noise.
+fn contradiction(t: &super::trace::Trace) -> (f32, f32, usize, usize) {
+    let data: Vec<usize> = super::modulate::data_positions().collect();
+    let row = |s: usize| -> [f32; 8] { std::array::from_fn(|k| t.energies[s][k + 1]) };
+    let (mut against, mut signal, mut worst) = (0f32, 0f32, 0f32);
+    let mut by_strength: Vec<(f32, bool)> = Vec::new();
+    let mut loud = 0;
+    for &s in &data {
+        let r = row(s);
+        let sent = r[usize::from(t.tones[s])];
+        let best = r.iter().copied().fold(f32::MIN, f32::max);
+        signal += (sent - t.noise).max(0.0);
+        let differs = best > sent;
+        if differs {
+            against += best - sent;
+            worst = worst.max((best - sent) / t.noise);
+            if best > 6.3 * t.noise {
+                loud += 1;
+            }
+        }
+        by_strength.push((best, differs));
+    }
+    by_strength.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let strong = by_strength[..by_strength.len() / 2]
+        .iter()
+        .filter(|(_, d)| *d)
+        .count();
+    (against / signal.max(f32::MIN_POSITIVE), worst, strong, loud)
+}
+
 fn decode_lines(label: &str, x: &[Complex<f32>], book: &mut HashBook) -> Vec<String> {
     let t = std::time::Instant::now();
     let report = cycle::decode_with(x, book, &settings());
@@ -286,6 +321,33 @@ fn decode_lines(label: &str, x: &[Complex<f32>], book: &mut HashBook) -> Vec<Str
             "EMPTY {label} f0 {:.1} payload {:#x} costas {} block {} iter {} repaired {} osd {:?} pass {} message {:?}",
             d.physics.f0, d.payload, d.costas, d.block, d.iterations, d.repaired, d.osd, d.pass, d.message
         );
+    }
+    // `FT8_FEATURES=1`: what each decode measured and took, one line each
+    // on stderr, to tell false decodes from true ones by.
+    if std::env::var("FT8_FEATURES").is_ok() {
+        for d in &report.decodes {
+            let c = contradiction(&d.trace);
+            eprintln!(
+                "FEAT {label} {:.2} {:.1} {} {} {} {} {} {:.4} {} {:.3} {:.3} {:.4} {:.4} {:.2} {} {} {}",
+                d.physics.snr_db,
+                d.physics.f0,
+                d.costas,
+                d.block,
+                d.iterations,
+                d.repaired,
+                d.osd.map_or(-1, i32::from),
+                d.distance,
+                d.pass,
+                d.physics.coherence,
+                d.physics.drift,
+                d.physics.f0_sigma,
+                c.0,
+                c.1,
+                c.2,
+                c.3,
+                d.message.text()
+            );
+        }
     }
     report
         .decodes
@@ -510,7 +572,7 @@ fn why_the_other_decodes_are_missed() {
             }
             None if !e.synced => "below the power floor".to_string(),
             None if e.refused_zero => "refused: all-zero codeword".to_string(),
-            None if e.refused_osd => "refused: OSD without its sync".to_string(),
+            None if e.refused_osd => "refused: OSD not believed".to_string(),
             None if e.coded => "coded, not believed".to_string(),
             None => "no codeword".to_string(),
         }
