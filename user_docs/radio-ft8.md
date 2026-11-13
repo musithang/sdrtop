@@ -169,7 +169,13 @@ how much of the signal's energy sits on a tone other than the one the
 message says was sent. A true message differs only where the signal faded
 into the noise; a wrong one is contradicted where the signal is plainly
 there. It must also show its sync (more of it, the stronger the signal)
-and a plausible number of bits repaired. On simulated signals, weak and
+and a plausible number of bits repaired. One kind is taken at less: when
+the search had nothing to try, because the most reliable bits gave the
+message by themselves, more than half its sync is in place and next to
+nothing is said against it, it is believed whatever it repaired. That is
+a strong signal with a neighbour across some of its symbols, and such a
+message was wrong 13 times in 2 100 where a searched one was wrong one
+time in five. On simulated signals, weak and
 strong, steady and fading, this lets through about one false message in
 7 700 decodes, where testing the sync and the repairs alone let through
 one in 900, and it believes 2.6 % more true ones. A station that was never

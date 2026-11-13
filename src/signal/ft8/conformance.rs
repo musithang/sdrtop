@@ -847,7 +847,9 @@ fn measure_the_llr_scale() {
 /// `FT8_OSD_BP` (the posteriors OSD is also run on), `FT8_GUARD=0` (every
 /// codeword reported, believed or not), and the OSD guard's numbers
 /// (`cycle::OsdGuard`): `FT8_OSD_COSTAS`, `FT8_OSD_COSTAS_SLOPE`,
-/// `FT8_OSD_REPAIRED`, `FT8_OSD_SNR`, `FT8_CONTRA`, `FT8_CONTRA_SLOPE`, and
+/// `FT8_OSD_REPAIRED`, `FT8_OSD_SNR`, `FT8_CONTRA`, `FT8_CONTRA_SLOPE`,
+/// `FT8_CONTRA_0` (a negative one puts order 0 on the others' lines),
+/// `FT8_COSTAS_0`, and
 /// `FT8_SHADOW_DB` (how much stronger a transmission of its own pass an
 /// OSD codeword waits for; `inf`: none).
 pub(crate) fn settings_from_env() -> cycle::Settings {
@@ -874,6 +876,8 @@ pub(crate) fn settings_from_env() -> cycle::Settings {
             min_snr_db: var("FT8_OSD_SNR", d.osd_guard.min_snr_db),
             max_contradiction: var("FT8_CONTRA", d.osd_guard.max_contradiction),
             contradiction_per_db: var("FT8_CONTRA_SLOPE", d.osd_guard.contradiction_per_db),
+            order_0_contradiction: var("FT8_CONTRA_0", d.osd_guard.order_0_contradiction),
+            order_0_costas: var("FT8_COSTAS_0", d.osd_guard.order_0_costas),
         },
         ..d
     }

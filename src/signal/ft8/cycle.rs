@@ -149,6 +149,20 @@ pub const OSD_FROM_BP: usize = 2;
 ///   strongest tones moved with it) but cannot show its Costas arrays.
 /// - **Bits repaired** at most [`Self::max_repaired`], and **SNR** at least
 ///   [`Self::min_snr_db`]: below it a true OSD decode was 2 in 15 000.
+/// - **Order 0 on its own line.** At order 0 nothing is searched: the most
+///   reliable bits give one codeword, and it is rarely wrong (in five
+///   populations 2087 true and 13 false, against 5714 and 714 at order 1,
+///   2880 and 1240 at order 2). With [`Self::order_0_costas`] of its
+///   Costas symbols on their tone and contradicted by at most
+///   [`Self::order_0_contradiction`], it is believed on the SNR floor
+///   alone, whatever its repairs. The thirteen false ones were of two
+///   kinds, and each is twice as far: read off its tones, little said
+///   against it (0.056 to 0.13) and at most 6 Costas symbols; or 12 and 13
+///   Costas symbols and 0.16 against. This is the strong signal under a
+///   neighbour, many bits spoiled and the rest plain: off the air, 13
+///   Costas symbols of the 14 its strength asked, 0.002 against it; and
+///   41 bits repaired, 0.02 against. The five populations gain 12 true
+///   and no false, the 20 m recording 3 of 1372.
 ///
 /// Measured with every guard off (`measure_the_guards_population`), then
 /// replayed: three populations of 9345, 9345 and 7490 decodes (weak and
@@ -169,6 +183,8 @@ pub struct OsdGuard {
     pub min_snr_db: f64,
     pub max_contradiction: f32,
     pub contradiction_per_db: f32,
+    pub order_0_contradiction: f32,
+    pub order_0_costas: u8,
 }
 
 impl OsdGuard {
@@ -179,25 +195,39 @@ impl OsdGuard {
         min_snr_db: -23.5,
         max_contradiction: 0.18,
         contradiction_per_db: 0.03,
+        order_0_contradiction: 0.08,
+        order_0_costas: 12,
     };
 
     /// What can be told before the codeword is measured: its sync at the
     /// weakest it may be, and the bits repaired. A codeword refused here is
     /// never measured, which is most of them.
-    pub fn may_be(&self, costas: u8, repaired: u32) -> bool {
-        costas >= self.min_costas && repaired <= self.max_repaired
+    pub fn may_be(&self, order: u8, costas: u8, repaired: u32) -> bool {
+        costas >= self.min_costas && (order == 0 || repaired <= self.max_repaired)
     }
 
-    /// Whether the codeword is believed, measured at `snr_db` and
-    /// contradicted by `contradiction`.
-    pub fn believes(&self, costas: u8, repaired: u32, snr_db: f64, contradiction: f32) -> bool {
+    /// Whether the codeword OSD found at `order` is believed, measured at
+    /// `snr_db` and contradicted by `contradiction`.
+    pub fn believes(
+        &self,
+        order: u8,
+        costas: u8,
+        repaired: u32,
+        snr_db: f64,
+        contradiction: f32,
+    ) -> bool {
         let sync = f64::from(self.min_costas) + self.costas_per_db * (snr_db + 20.0).max(0.0);
         let against =
             self.max_contradiction + self.contradiction_per_db * (-19.0 - snr_db as f32).max(0.0);
-        self.may_be(costas, repaired)
+        let unsearched = order == 0
+            && costas >= self.order_0_costas
+            && contradiction <= self.order_0_contradiction;
+        costas >= self.min_costas
             && snr_db >= self.min_snr_db
-            && f64::from(costas) >= sync
-            && contradiction <= against
+            && (unsearched
+                || (repaired <= self.max_repaired
+                    && f64::from(costas) >= sync
+                    && contradiction <= against))
     }
 }
 
@@ -626,7 +656,8 @@ fn try_candidate(
                 tally.zero = true;
                 continue;
             }
-            if guarded_osd && !settings.osd_guard.may_be(costas, decoded.repaired) {
+            let order = decoded.osd.unwrap_or(0);
+            if guarded_osd && !settings.osd_guard.may_be(order, costas, decoded.repaired) {
                 tally.refused_osd = true;
                 continue;
             }
@@ -648,6 +679,7 @@ fn try_candidate(
             let trace = Trace::build(&y, &measured, &tones, &llr, &codeword, at_zero);
             if guarded_osd
                 && !settings.osd_guard.believes(
+                    order,
                     costas,
                     decoded.repaired,
                     measured.physics.snr_db,
@@ -687,24 +719,42 @@ fn try_candidate(
 fn the_osd_guard_holds_each_of_its_lines() {
     let g = OsdGuard::DEFAULT;
     // Weak: the sync floor, the repairs, the SNR floor.
-    assert!(g.believes(8, 35, -21.0, 0.1));
-    assert!(!g.believes(7, 35, -21.0, 0.1));
-    assert!(!g.believes(8, 36, -21.0, 0.1));
-    assert!(!g.believes(21, 20, -23.6, 0.1));
+    assert!(g.believes(2, 8, 35, -21.0, 0.1));
+    assert!(!g.believes(2, 7, 35, -21.0, 0.1));
+    assert!(!g.believes(2, 8, 36, -21.0, 0.1));
+    assert!(!g.believes(2, 21, 20, -23.6, 0.1));
     // The contradiction allowed grows below -19 dB: 0.18, 0.24 at -21.
-    assert!(g.believes(15, 20, -19.0, 0.18));
-    assert!(!g.believes(15, 20, -19.0, 0.19));
-    assert!(g.believes(15, 20, -21.0, 0.235));
-    assert!(!g.believes(15, 20, -21.0, 0.245));
+    assert!(g.believes(2, 15, 20, -19.0, 0.18));
+    assert!(!g.believes(2, 15, 20, -19.0, 0.19));
+    assert!(g.believes(2, 15, 20, -21.0, 0.235));
+    assert!(!g.believes(2, 15, 20, -21.0, 0.245));
     // The sync asked for grows above -20 dB: 8, 10.5 at -15. The crowded
     // band's false decode: -14.8 dB, Costas 8, contradiction 0.08.
-    assert!(!g.believes(8, 35, -14.8, 0.08));
-    assert!(g.believes(11, 35, -15.0, 0.08));
-    assert!(!g.believes(10, 35, -15.0, 0.08));
+    assert!(!g.believes(2, 8, 35, -14.8, 0.08));
+    assert!(g.believes(2, 11, 35, -15.0, 0.08));
+    assert!(!g.believes(2, 10, 35, -15.0, 0.08));
     // Before measuring, only the floor and the repairs.
-    assert!(g.may_be(8, 35));
-    assert!(!g.may_be(7, 35));
-    assert!(!g.may_be(8, 36));
+    assert!(g.may_be(2, 8, 35));
+    assert!(!g.may_be(2, 7, 35));
+    assert!(!g.may_be(2, 8, 36));
+    // Order 0, nothing searched: with half its sync and little against
+    // it, the SNR floor alone. Off the air: -7.8 dB, Costas 13 of the 14.1 asked;
+    // -8.3 dB, 41 repaired.
+    assert!(!g.believes(2, 13, 14, -7.8, 0.002));
+    assert!(g.believes(0, 13, 14, -7.8, 0.002));
+    assert!(g.believes(0, 16, 41, -8.3, 0.02));
+    assert!(g.believes(0, 12, 60, -20.0, 0.08));
+    assert!(!g.believes(0, 12, 60, -20.0, 0.09));
+    assert!(!g.believes(0, 21, 10, -23.6, 0.01));
+    // Read off its tones: little against it, and no sync to show.
+    assert!(!g.believes(0, 6, 30, -19.1, 0.1));
+    assert!(!g.believes(0, 11, 60, -20.0, 0.01));
+    // Above its own line order 0 is held to the others'.
+    assert!(g.believes(0, 15, 20, -19.0, 0.18));
+    assert!(!g.believes(0, 15, 36, -19.0, 0.18));
+    // Before measuring, order 0 is not refused for its repairs.
+    assert!(g.may_be(0, 8, 60));
+    assert!(!g.may_be(0, 7, 10));
 }
 
 /// What one candidate came to, read as a pass reads it: whether it passed
