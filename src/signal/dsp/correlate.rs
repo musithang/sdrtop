@@ -486,14 +486,14 @@ impl ShapeMatcher {
             }
             plan.inverse
                 .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
-            for m in (n - 1)..size {
-                let i = start + m - (n - 1);
+            for (k, z) in plan.buffer[n - 1..size].iter().enumerate() {
+                let i = start + k;
                 if i < x.len() {
-                    values[i] = plan.buffer[m].re;
+                    values[i] = z.re;
                 }
-                let i = second + m - (n - 1);
+                let i = second + k;
                 if second < x.len() && i < x.len() {
-                    values[i] = plan.buffer[m].im;
+                    values[i] = z.im;
                 }
             }
             start += 2 * step;

@@ -452,8 +452,8 @@ mod tests {
     #[test]
     fn the_least_margin_leaves_the_costas_symbols_out() {
         let mut t = Trace::empty();
-        for s in 0..SYMBOLS {
-            t.energies[s][1..=8].copy_from_slice(&[100.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        for row in &mut t.energies {
+            row[1..=8].copy_from_slice(&[100.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
         }
         // Symbol 2 is a Costas symbol, 50 a data symbol.
         t.energies[2][1..=8].copy_from_slice(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);

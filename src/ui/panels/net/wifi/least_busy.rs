@@ -468,8 +468,8 @@ mod tests {
     #[test]
     fn what_cannot_be_named_yet_is_said_in_words() {
         let mut bursty = WifiSurvey::default();
-        for i in 0..13 {
-            bursty.visits[i] = [0.0, 0.6, 0.0, 0.0, 0.0, 0.0]
+        for (i, visits) in bursty.visits.iter_mut().enumerate().take(13) {
+            *visits = [0.0, 0.6, 0.0, 0.0, 0.0, 0.0]
                 .iter()
                 .map(|b| Visit {
                     seconds: 0.5,
