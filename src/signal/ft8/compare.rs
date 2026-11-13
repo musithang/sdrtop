@@ -61,7 +61,14 @@ fn rfc3339_to_unix(s: &str) -> f64 {
 /// of hours at the radio's rate never has to fit in memory (two hours of the
 /// HF+ at 192 kS/s are 11.5 GB of pairs; at 12 kS/s they are 0.7 GB).
 fn channel_of_recording(meta: &Path) -> (f64, Vec<Complex<f32>>) {
-    use std::io::Read;
+    channel_of_recording_from(meta, 0)
+}
+
+/// The same from capture `first` on: the channel started where the stream
+/// resumed after a break, as the live worker starts it again at every break,
+/// and everything before left out.
+fn channel_of_recording_from(meta: &Path, first: usize) -> (f64, Vec<Complex<f32>>) {
+    use std::io::{Read, Seek};
     let m: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(meta).unwrap()).unwrap();
     let g = &m["global"];
@@ -95,7 +102,7 @@ fn channel_of_recording(meta: &Path) -> (f64, Vec<Complex<f32>>) {
     // global index runs ahead of its place in the file by exactly them. They
     // are filled with zeros, so the recording is one timeline and every
     // cycle in it can be cut; both decoders are handed the same gaps.
-    let caps = m["captures"].as_array().unwrap();
+    let caps = &m["captures"].as_array().unwrap()[first..];
     let at = |c: &serde_json::Value, k: &str| c[k].as_u64().unwrap() as usize;
     let mut ch = Channel::new(rate).expect("a route to 12 000 S/s");
     let mut x = Vec::new();
@@ -116,8 +123,13 @@ fn channel_of_recording(meta: &Path) -> (f64, Vec<Complex<f32>>) {
         }
         staged.drain(..whole);
     };
-    let mut place = 0usize;
+    let g0 = at(&caps[0], "core:global_index");
+    let mut place = g0;
     let mut lost = 0usize;
+    file.seek(std::io::SeekFrom::Start(
+        (at(&caps[0], "core:sample_start") * width) as u64,
+    ))
+    .unwrap();
     for (k, c) in caps.iter().enumerate() {
         let index = at(c, "core:global_index");
         if place < index {
@@ -154,13 +166,13 @@ fn channel_of_recording(meta: &Path) -> (f64, Vec<Complex<f32>>) {
         .iter()
         .map(|c| {
             rfc3339_to_unix(c["core:datetime"].as_str().unwrap())
-                - at(c, "core:global_index") as f64 / rate
+                - (at(c, "core:global_index") - g0) as f64 / rate
         })
         .fold(f64::INFINITY, f64::min);
     println!(
         "{:.1} s at {rate} S/s, {lost} pairs lost and filled ({:.3} %)",
-        place as f64 / rate,
-        lost as f64 * 100.0 / place.max(1) as f64
+        (place - g0) as f64 / rate,
+        lost as f64 * 100.0 / (place - g0).max(1) as f64
     );
     // Channel sample k was taken at t0 + k / 12000 - the channel's delay.
     (t0 - ch.delay(), x)
@@ -402,6 +414,51 @@ fn cycles_from_a_recording() {
     std::fs::write(dir.join("ours.txt"), ours.join("\n") + "\n").unwrap();
 }
 
+/// One cycle of a recording cut the way the live worker may have cut it:
+/// the channel started at capture `FT8_CAPTURE` (where the stream resumed
+/// after a break, as the worker starts it again), the cycle `FT8_CYCLE`
+/// (`hhmmss`) cut at each shift of its start in `FT8_SHIFTS` (`from:to:step`,
+/// milliseconds), since the live clock places the boundary by its own fit.
+/// Every decode is printed (with `FT8_FEATURES=1`, what it measured).
+///
+/// `FT8_SIGMF=<rec>.sigmf-meta FT8_CAPTURE=13 FT8_CYCLE=125400
+/// FT8_SHIFTS=-100:100:10 cargo test --release a_cycle_as_the_live_worker_cut_it
+/// -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn a_cycle_as_the_live_worker_cut_it() {
+    let Ok(meta) = std::env::var("FT8_SIGMF") else {
+        return;
+    };
+    let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k}"));
+    let capture: usize = var("FT8_CAPTURE").parse().unwrap();
+    let cycle = var("FT8_CYCLE");
+    let shifts: Vec<i64> = var("FT8_SHIFTS")
+        .split(':')
+        .map(|v| v.parse().unwrap())
+        .collect();
+    let (first, x) = channel_of_recording_from(Path::new(&meta), capture);
+    // The cycle's start: the first quarter minute after the channel's start
+    // whose time of day is `hhmmss`.
+    let of_day = |h: &str| {
+        let n: f64 = h.parse().unwrap();
+        (n / 10_000.0).floor() * 3600.0 + (n / 100.0 % 100.0).floor() * 60.0 + n % 100.0
+    };
+    let day = (first / 86_400.0).floor() * 86_400.0;
+    let start = day + of_day(&cycle);
+    let mut book = HashBook::new();
+    let mut ms = shifts[0];
+    while ms <= shifts[1] {
+        let at = start + ms as f64 / 1000.0;
+        let i = ((at - first) * RATE_HZ as f64).round() as usize;
+        assert!(i + CYCLE <= x.len(), "the cycle runs past the recording");
+        for line in decode_lines(&format!("{ms:+05}"), &x[i..i + CYCLE], &mut book) {
+            println!("{line}");
+        }
+        ms += shifts[2];
+    }
+}
+
 /// `FT8_WAVS=<dir> FT8_OUT=<dir> cargo test --release decode_wavs --
 /// --ignored --nocapture`
 #[test]
@@ -496,6 +553,9 @@ fn why_the_other_decodes_are_missed() {
         let call = |w: &str| -> Option<Call> {
             if w.contains('<') {
                 return None;
+            }
+            if w == "CQ" {
+                return Some(Call::Cq(None));
             }
             let (c, suffix) = match w.split_once('/') {
                 Some((c, "P")) => (c, Some(Suffix::P)),

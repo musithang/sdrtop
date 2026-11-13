@@ -847,7 +847,9 @@ fn measure_the_llr_scale() {
 /// `FT8_OSD_BP` (the posteriors OSD is also run on), `FT8_GUARD=0` (every
 /// codeword reported, believed or not), and the OSD guard's numbers
 /// (`cycle::OsdGuard`): `FT8_OSD_COSTAS`, `FT8_OSD_COSTAS_SLOPE`,
-/// `FT8_OSD_REPAIRED`, `FT8_OSD_SNR`, `FT8_CONTRA`, `FT8_CONTRA_SLOPE`.
+/// `FT8_OSD_REPAIRED`, `FT8_OSD_SNR`, `FT8_CONTRA`, `FT8_CONTRA_SLOPE`, and
+/// `FT8_SHADOW_DB` (how much stronger a transmission of its own pass an
+/// OSD codeword waits for; `inf`: none).
 pub(crate) fn settings_from_env() -> cycle::Settings {
     fn var<T: std::str::FromStr>(name: &str, default: T) -> T {
         std::env::var(name).map_or(default, |v| {
@@ -864,6 +866,7 @@ pub(crate) fn settings_from_env() -> cycle::Settings {
         osd_from_bp: var("FT8_OSD_BP", d.osd_from_bp),
         resync: std::env::var("FT8_RESYNC").map_or(d.resync, |v| v != "0"),
         guard: std::env::var("FT8_GUARD").map_or(d.guard, |v| v != "0"),
+        shadow_db: var("FT8_SHADOW_DB", d.shadow_db),
         osd_guard: cycle::OsdGuard {
             min_costas: var("FT8_OSD_COSTAS", d.osd_guard.min_costas),
             costas_per_db: var("FT8_OSD_COSTAS_SLOPE", d.osd_guard.costas_per_db),

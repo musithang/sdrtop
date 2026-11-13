@@ -18,7 +18,9 @@
 //! again; a pass that decodes nothing new ends it, and so does
 //! [`MAX_PASSES`]. A message decoded twice in one cycle (two candidates on one
 //! transmission, or the same message found again after subtraction) is
-//! reported once.
+//! reported once. A codeword ordered statistics found in the tones of a
+//! much stronger transmission decoded in the same pass is left for the next
+//! pass, which reads the place again without it ([`in_the_shadow`]).
 //!
 //! **A pass's candidates are read side by side.** No candidate's reading
 //! looks at another's, so they run on up to [`MAX_THREADS`] threads; only
@@ -89,6 +91,10 @@ pub struct Settings {
     /// it. Off only to measure what the guards keep out.
     pub guard: bool,
     pub osd_guard: OsdGuard,
+    /// An OSD codeword waits for a transmission of its own pass this many
+    /// dB stronger to be taken out ([`SHADOW_DB`], [`in_the_shadow`]).
+    /// Infinite: it never waits.
+    pub shadow_db: f64,
 }
 
 impl Settings {
@@ -103,6 +109,7 @@ impl Settings {
         osd_from_bp: OSD_FROM_BP,
         guard: true,
         osd_guard: OsdGuard::DEFAULT,
+        shadow_db: SHADOW_DB,
     };
 }
 
@@ -270,7 +277,8 @@ pub struct Funnel {
     pub duplicates: usize,
     /// The all-zero codeword, never believed.
     pub refused_zero: usize,
-    /// An OSD codeword the guard did not believe ([`OsdGuard`]).
+    /// An OSD codeword the guard did not believe ([`OsdGuard`]), or one
+    /// left for the next pass to read without a stronger neighbour.
     pub refused_osd: usize,
 }
 
@@ -357,6 +365,22 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
                 new.push(f);
             }
         }
+        if settings.guard {
+            let waits: Vec<bool> = new
+                .iter()
+                .map(|f| in_the_shadow(f, &new, settings.shadow_db))
+                .collect();
+            let mut waits = waits.into_iter();
+            new.retain(|f| {
+                let waits = waits.next().unwrap_or(false);
+                if waits {
+                    seen.remove(&f.payload);
+                    funnel.by_osd -= 1;
+                    funnel.refused_osd += 1;
+                }
+                !waits
+            });
+        }
         report.funnel.push(funnel);
         if new.is_empty() {
             break;
@@ -397,6 +421,84 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
         .decodes
         .sort_by(|a, b| a.physics.f0.total_cmp(&b.physics.f0));
     report
+}
+
+/// Two transmissions whose tone 0 are closer than this share a tone: eight
+/// tones, each [`modulate::TONE_SPACING`] wide.
+const SHARED_TONES_HZ: f64 = 8.0 * modulate::TONE_SPACING;
+
+/// How much stronger a transmission must be to cast a shadow
+/// ([`in_the_shadow`]), dB.
+pub const SHADOW_DB: f64 = 6.0;
+
+/// Whether `f` is an OSD codeword read while a transmission `shadow_db`
+/// stronger, decoded in the same pass, still stood in its tones. Such a codeword is
+/// not believed yet: the stronger one is taken out and the next pass reads
+/// the place again, where a true one is found without it and a false one is
+/// not.
+///
+/// The fine search follows the energy on the Costas tones, and a neighbour
+/// 8 dB stronger with a tone 1.5 Hz from one of them pulls it: off the air a
+/// -7 dB transmission was read 1.8 Hz and 62 ms from its place, its bits half
+/// wrong there, and OSD found a codeword that passed every line of
+/// [`OsdGuard`] (15 Costas symbols, 34 bits repaired, and little said
+/// against it: half a symbol off, each symbol holds two of the true tones).
+/// With the neighbour out the same transmission decoded cleanly.
+fn in_the_shadow(f: &Found, pass: &[Found], shadow_db: f64) -> bool {
+    f.decoded.osd.is_some()
+        && pass
+            .iter()
+            .any(|g| shadows(&g.physics, &f.physics, shadow_db))
+}
+
+/// Whether `strong` stands in `weak`'s tones, `shadow_db` stronger.
+fn shadows(strong: &Physics, weak: &Physics, shadow_db: f64) -> bool {
+    strong.snr_db >= weak.snr_db + shadow_db && (strong.f0 - weak.f0).abs() < SHARED_TONES_HZ
+}
+
+#[cfg(test)]
+#[test]
+fn a_shadow_is_cast_by_the_stronger_on_shared_tones() {
+    let at = |snr_db: f64, f0: f64| Physics {
+        snr_db,
+        start: 0.5,
+        f0,
+        f0_sigma: 0.0,
+        drift: 0.0,
+        amplitude: 1.0,
+        phase: 0.0,
+        coherence: 1.0,
+    };
+    let weak = at(-9.4, 2705.7);
+    // Off the air: 8 dB stronger in the same pass, its lowest tone on the
+    // weak one's seventh.
+    assert!(shadows(&at(1.0, 2743.0), &weak, SHADOW_DB));
+    // Not stronger by enough, however near.
+    assert!(!shadows(
+        &at(-9.4 + SHADOW_DB - 0.1, 2707.0),
+        &weak,
+        SHADOW_DB
+    ));
+    assert!(shadows(&at(-9.4 + SHADOW_DB, 2707.0), &weak, SHADOW_DB));
+    // No tone shared, however strong: eight tones away, either side.
+    assert!(!shadows(
+        &at(10.0, 2705.7 + SHARED_TONES_HZ),
+        &weak,
+        SHADOW_DB
+    ));
+    assert!(!shadows(
+        &at(10.0, 2705.7 - SHARED_TONES_HZ),
+        &weak,
+        SHADOW_DB
+    ));
+    assert!(shadows(
+        &at(10.0, 2705.7 - SHARED_TONES_HZ + 0.1),
+        &weak,
+        SHADOW_DB
+    ));
+    // Nothing shadows itself, and nothing does with the rule off.
+    assert!(!shadows(&weak, &weak, SHADOW_DB));
+    assert!(!shadows(&at(30.0, 2705.7), &weak, f64::INFINITY));
 }
 
 /// Threads that read one pass's candidates: the machine's own, at most

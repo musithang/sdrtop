@@ -175,6 +175,18 @@ strong, steady and fading, this lets through about one false message in
 one in 900, and it believes 2.6 % more true ones. A station that was never
 there costs more than a weak one missed.
 
+One misreading says nothing against itself: a transmission read a little
+off its own place, half a symbol early and a fraction of a tone high, where
+every symbol holds two of its true tones and a wrong message can agree with
+one of them each time. A much stronger neighbour that shares a tone with it
+pulls the search there. Off the air on 20 m this put a station in
+Antarctica on the map, 2 Hz from a Dutch one calling CQ, with a neighbour
+8 dB stronger 39 Hz above. So a message the ordered-statistics search
+finds in the tones of a transmission at least 6 dB stronger, decoded in
+the same pass, is not believed yet: the stronger one is taken out first
+and the place is read again. A true message is still there, usually
+clearer; the misreading is not.
+
 Measured on synthetic signals: half of them decode at about -21.2 dB SNR,
 a little better than the figure the protocol's authors give for their own
 decoder. On the same simulated cycles WSJT-X 3.0.2's command-line decoder
