@@ -23,7 +23,7 @@
 
 <p align="center">
   <sub>This project is supported by</sub><br>
-  <a href="https://airspy.com/"><b>Airspy</b></a> &nbsp;·&nbsp; <a href="https://www.sdrplay.com/"><b>SDRplay</b></a>
+  <a href="https://airspy.com/"><b>Airspy</b></a> &nbsp;·&nbsp; <a href="https://www.sdrplay.com/"><b>SDRplay</b></a> &nbsp;·&nbsp; <a href="https://opensourcesdrlab.com/"><b>OpenSourceSDRLab</b></a>
 </p>
 
 <p align="center">
@@ -131,8 +131,9 @@ No SDR library is needed to build; each radio's library is loaded at runtime, an
 | [SDRplay RSP1B](user_docs/sdrplay.md) | ✅ Tested |
 | [tinySA / Ultra / Ultra+](user_docs/tinysa.md) | ✅ Spectrum (ZS405 tested) |
 | [Anything with a SoapySDR driver](user_docs/soapysdr.md) | 🧪 Beta, written from the API |
+| PlutoSky R2 (AD9361) | 🔲 On my desk, native backend in the queue |
 
-Native support lands only after testing on a real radio. The RSP1B came from [SDRplay](https://www.sdrplay.com/), the R2 and the HF+ Discovery from [Airspy](https://airspy.com/). Thank you both. How the radios differ: **[Supported hardware](user_docs/hardware.md)**.
+Native support lands only after testing on a real radio. The RSP1B came from [SDRplay](https://www.sdrplay.com/), the R2 and the HF+ Discovery from [Airspy](https://airspy.com/), and the PlutoSky R2 from [OpenSourceSDRLab](https://opensourcesdrlab.com/). Thank you all. How the radios differ: **[Supported hardware](user_docs/hardware.md)**.
 
 ---
 

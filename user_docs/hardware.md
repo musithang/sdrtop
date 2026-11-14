@@ -29,6 +29,7 @@ screen leaves out because it would mean nothing) is on its page.
 
 | Device | Status |
 |---|---|
+| PlutoSky R2 (AD9361) | On my desk, sent by [OpenSourceSDRLab](https://opensourcesdrlab.com/). Native backend in the queue |
 | Airspy Mini | Planned, needs hardware to test |
 | HackRF Pro | Planned, needs hardware to test |
 | LimeSDR, bladeRF, PlutoSDR, other SDRplay RSPs | Should already work [through SoapySDR](soapysdr.md). Nobody has told me yet |
