@@ -12,6 +12,60 @@ field falls back to a default rather than refusing to start.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-14
+
+**FT8 reads more than WSJT-X's deepest setting, and has a Lab of its own.**
+
+On 22 minutes of a busy 20 m afternoon, the same samples given to both,
+sdrtop read 1385 messages and WSJT-X 3.0.2 at its deepest setting 1365,
+leaving out the ones WSJT-X guesses at, which sdrtop never does. It took
+1.9 s a cycle where WSJT-X took 5, and under 10 MB where WSJT-X's decoder
+takes 100. One recording and one band, so a measurement, not a verdict;
+the decodes sdrtop alone made all name stations WSJT-X heard elsewhere in
+the recording.
+
+### Added
+
+- **The FT8 Lab.** Three views in the Lab tile, `L` from World and back:
+  **Signal** (one decode's tones symbol by symbol, its track in frequency
+  and its power), **Band** (how far the band reaches and in which
+  direction, SNR against distance, the hour) and **Receiver** (the clock
+  as heard, the hour's sensitivity, what became of every candidate, the
+  decoder's load, and what the radio was doing).
+- **A transmission spliced from two messages decodes.** An operator who
+  clicks a caller a second or two into a CQ sends the CQ's first symbols
+  and the answer's rest; another station starting over a weak one does
+  much the same. A candidate whose sync is plainly there is read again
+  with its first, then its last, twelve symbols taken as unknown. The
+  card says `start unread` or `end unread`.
+- The FT8 CSV gains `margin_min_db`, `held`, `floor_db_hz` and `unread`,
+  after the columns it had.
+
+### Changed
+
+- **The FT8 decoder is 2.4 times faster**, with exactly the decodes it
+  gave before: 98 s down to 41 s for four minutes of 20 m on a 2015
+  laptop.
+- **It decodes more**, and the error correction's deepest search is held
+  to what the received symbols say: on simulated signals one false
+  message in 7 700 decodes instead of one in 900, and 2.6 % more true
+  ones.
+
+### Fixed
+
+- **A station in Antarctica that was never there.** Live on 20 m the map
+  drew `2U6YCW/R KX6AMS/R JB16` at 13 373 km: a Dutch station's CQ, read
+  a fraction of a tone off its place where a neighbour 8 dB stronger
+  pulled the search. A message found beside a much stronger one in the
+  same pass now waits until the stronger one is taken out.
+- **Recording while FT8 ran cut cycles**, 455 in 22 minutes on an HF+:
+  the machine stalls for some tens of milliseconds as the disk catches
+  up, and FT8's feed held only a few blocks. It holds 64 now; no break
+  while recording.
+- The FT8 hour's figures skip cycles that were not decoded, its marks
+  stay in time order when a late cycle lands, and a cycle never read is
+  marked `×` in the Band view's reach.
+
 ## [0.7.3] - 2026-11-08
 
 **The RSP1B, driven natively.**
@@ -1482,7 +1536,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/musithang/sdrtop/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/musithang/sdrtop/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/musithang/sdrtop/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/musithang/sdrtop/compare/v0.7.0...v0.7.1
