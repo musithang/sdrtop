@@ -176,8 +176,11 @@ impl App {
         // The pager queue is the NET queue's depth for the NET queue's
         // reason: every block is wanted, and a deeper queue would hide losses.
         let (pager_tx, pager_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
-        // The FT8 queue, the pager's depth for the pager's reason.
-        let (ft8_tx, ft8_rx) = crossbeam_channel::bounded::<crate::hardware::TimedBlock>(4);
+        // The FT8 queue is deep, for its own reason: nothing there needs a
+        // block soon, and a stall of the machine must not cost a cycle.
+        let (ft8_tx, ft8_rx) = crossbeam_channel::bounded::<crate::hardware::TimedBlock>(
+            crate::signal::ft8::worker::FEED_BLOCKS,
+        );
         // Read out before `cfg` is moved into `Self::assemble` below - a
         // plain `usize`, not worth threading the whole config through the
         // worker for.

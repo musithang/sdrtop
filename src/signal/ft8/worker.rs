@@ -50,6 +50,20 @@ const CYCLE_SAMPLES: usize = 15 * RATE_HZ as usize;
 /// than the stream clock's estimate moves when it settles (milliseconds).
 const KEEP_BEFORE: usize = RATE_HZ as usize / 2;
 
+/// Blocks the feed holds for the worker.
+///
+/// Deep enough to ride out a stall of the whole machine, in blocks because
+/// that is what a queue counts: the HF+ hands 4096 pairs at a time, 5 ms at
+/// 768 kS/s, and at the four blocks the other feeds keep, 21 ms of slack was
+/// all there was. Recording to an encrypted disk stalled the worker for
+/// about 30 ms a few times a minute (the writeback's bursts), and each
+/// stall refused a few blocks and cut a cycle: 455 in 22 minutes off the
+/// air, none in 15 minutes without the recording. Sixty-four blocks are a
+/// third of a second there. Nothing here needs a block soon: a cycle's time
+/// comes from when its blocks arrived, stamped before the queue, and a
+/// block the queue does refuse is counted as before.
+pub const FEED_BLOCKS: usize = 64;
+
 /// The clock verdict looks at this many of the latest decoded cycles.
 const VERDICT_CYCLES: usize = 4;
 
@@ -551,6 +565,146 @@ mod tests {
         w.run();
         let m = state.lock().unwrap();
         m.ft8.clone()
+    }
+
+    /// A recording handed to the worker at the radio's own pace through a
+    /// bounded queue, as the intake hands it live: how many blocks the queue
+    /// refused and what became of the cycles. The decoder's threads and the
+    /// channel compete for the machine here as they do in the app.
+    ///
+    /// `FT8_STALL_MS` holds the worker up for that long every five seconds,
+    /// as a busy machine does (the state's lock held, which the worker
+    /// takes once a block).
+    ///
+    /// `FT8_SIGMF=<rec>.sigmf-meta FT8_QUEUE=4 FT8_SECONDS=120 FT8_BLOCK=4096
+    /// FT8_STALL_MS=35 cargo test --release the_feed_in_real_time --
+    /// --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn the_feed_in_real_time() {
+        use std::io::Read;
+        let Ok(meta) = std::env::var("FT8_SIGMF") else {
+            return;
+        };
+        let var = |k: &str, d: usize| std::env::var(k).map_or(d, |v| v.parse().unwrap());
+        let (depth, seconds, pairs) = (
+            var("FT8_QUEUE", FEED_BLOCKS),
+            var("FT8_SECONDS", 120),
+            var("FT8_BLOCK", 4096),
+        );
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&meta).unwrap()).unwrap();
+        let g = &m["global"];
+        assert_eq!(g["core:datatype"], "ci32_le", "an HF+ recording");
+        let rate = g["core:sample_rate"].as_f64().unwrap();
+        let geometry = SampleGeometry {
+            format: SampleFormat::Int32,
+            full_scale: g["sdrtop:full_scale"].as_f64().unwrap() as f32,
+            converter_bits: None,
+        };
+        let mut file = std::fs::File::open(meta.replace(".sigmf-meta", ".sigmf-data")).unwrap();
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let (tx, rx) = crossbeam_channel::bounded(depth);
+        let worker = Ft8Worker::new(rx, Arc::clone(&state), geometry);
+        let run = std::thread::spawn(move || worker.run());
+        let stall = var("FT8_STALL_MS", 0) as u64;
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let staller = (stall > 0).then(|| {
+            let (state, done) = (Arc::clone(&state), Arc::clone(&done));
+            std::thread::spawn(move || {
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    let held = state.lock().unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(stall));
+                    drop(held);
+                }
+            })
+        });
+        // `FT8_UI=1`: a thread that takes the state as the screen does, a
+        // whole clone under the lock every 33 ms, and times the lock held.
+        let ui = std::env::var("FT8_UI").is_ok().then(|| {
+            let (state, done) = (Arc::clone(&state), Arc::clone(&done));
+            std::thread::spawn(move || {
+                let (mut worst, mut total, mut n) = (0f64, 0f64, 0u32);
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    let t = Instant::now();
+                    let copy = state.lock().unwrap().clone();
+                    let held = t.elapsed().as_secs_f64();
+                    drop(copy);
+                    worst = worst.max(held);
+                    total += held;
+                    n += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(33));
+                }
+                (worst, total / f64::from(n.max(1)))
+            })
+        });
+        // The stream starts as far into a cycle as the recording did, so its
+        // transmissions sit in their cycles.
+        let into_cycle = m["captures"][0]["core:datetime"]
+            .as_str()
+            .and_then(|t| {
+                t.trim_end_matches('Z')
+                    .rsplit(':')
+                    .next()?
+                    .parse::<f64>()
+                    .ok()
+            })
+            .unwrap()
+            % 15.0;
+        let began = Instant::now();
+        let (mut refused, mut episodes, mut last_refused) = (0u64, 0u64, false);
+        let mut buf = vec![0u8; pairs * 8];
+        for k in 0..(seconds as f64 * rate / pairs as f64) as u64 {
+            if file.read_exact(&mut buf).is_err() {
+                break;
+            }
+            let due = (k + 1) as f64 * pairs as f64 / rate;
+            if let Some(wait) = std::time::Duration::from_secs_f64(due).checked_sub(began.elapsed())
+            {
+                std::thread::sleep(wait);
+            }
+            let taken = tx
+                .try_send(TimedBlock {
+                    block: StreamBlock {
+                        seq: k,
+                        gap_before: false,
+                        bytes: buf.clone(),
+                        first_pair: k * pairs as u64,
+                        centre_hz: 14_074_000,
+                        rate_hz: rate,
+                    },
+                    arrived_unix: EPOCH + into_cycle + began.elapsed().as_secs_f64(),
+                })
+                .is_ok();
+            refused += u64::from(!taken);
+            episodes += u64::from(!taken && !last_refused);
+            last_refused = !taken;
+        }
+        drop(tx);
+        run.join().unwrap();
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(s) = staller {
+            s.join().unwrap();
+        }
+        if let Some((worst, mean)) = ui.map(|u| u.join().unwrap()) {
+            println!(
+                "the screen's clone: worst {:.1} ms, mean {:.2} ms",
+                worst * 1e3,
+                mean * 1e3
+            );
+        }
+        let f = state.lock().unwrap().ft8.clone();
+        let count = |o: CycleOutcome| f.cycles.iter().filter(|c| c.outcome == o).count();
+        println!(
+            "queue {depth}, {seconds} s, {pairs} pairs a block: refused {refused} in {episodes} episodes; cycles decoded {} cut {} skipped {}; {} decodes in {:.1} s; load {:.2}",
+            count(CycleOutcome::Decoded),
+            count(CycleOutcome::Cut),
+            count(CycleOutcome::Skipped),
+            f.cycles.iter().map(|c| c.decodes).sum::<usize>(),
+            f.cycles.iter().map(|c| c.seconds).sum::<f64>(),
+            f.feed.load.unwrap_or(0.0),
+        );
     }
 
     fn cq() -> Message {
