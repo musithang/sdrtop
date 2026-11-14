@@ -193,6 +193,19 @@ the same pass, is not believed yet: the stronger one is taken out first
 and the place is read again. A true message is still there, usually
 clearer; the misreading is not.
 
+Some transmissions are whole in their sync and not in their message. An
+operator who changes the message a second or two into a transmission sends
+the start of one message and the rest of another; a station that starts
+late or stops early stands over part of a neighbour. Those symbols are
+plain and wrong, and they mislead the error correction more than noise
+does. So a candidate whose sync is plainly there (14 of its 21 sync
+symbols) and which still does not decode is read twice more, with its
+first twelve data symbols taken as unknown and then its last twelve, and
+the code fills them in from the rest. The card says `start unread` or
+`end unread` on such a decode. The first one found off the air was a
+station that had called CQ in the cycle before: its first ten symbols were
+still that CQ, the rest answered a caller.
+
 Measured on synthetic signals: half of them decode at about -21.2 dB SNR,
 a little better than the figure the protocol's authors give for their own
 decoder. On the same simulated cycles WSJT-X 3.0.2's command-line decoder
@@ -391,6 +404,7 @@ One row per decode, oldest first, whatever the list's filter:
 | `clock_median_dt_s`, `clock_spread_s`, `clock_decodes` | The clock verdict the cycle was read with |
 | `margin_min_db` | The closest call among the data symbols: the winning tone over the runner-up, dB, as the FT8 Lab's ladder shows it under "least" |
 | `held`, `floor_db_hz` | Whether the radio held its own level inside the cycle (the peak reached its ceiling), and the noise under the band in dBFS of the radio's word per Hz. Blank floor when held, when a setting changed mid-cycle or when the cycle was not decoded: those levels compare with nothing |
+| `unread` | `start` or `end` where the message was read with that stretch of the transmission taken as unknown (see [how a cycle is read](#how-a-cycle-is-read)); blank otherwise |
 
 Anything not heard is left blank: a sender that never said where it is has
 no place, without your position nobody has a distance, a cycle older than

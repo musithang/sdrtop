@@ -26,7 +26,7 @@ use crate::state::SdrMetrics;
 pub const HEADER: &str = "utc,cycle,band,dial_hz,tone_hz,tone_sigma_hz,\
 snr_db,dt_s,drift_hz,coherence,sync_of_21,ldpc_iterations,bits_repaired,osd_order,\
 block,pass,message,from,to,for_me,locator,station_locator,lat,lon,km,\
-bearing_deg,clock_median_dt_s,clock_spread_s,clock_decodes,margin_min_db,held,floor_db_hz";
+bearing_deg,clock_median_dt_s,clock_spread_s,clock_decodes,margin_min_db,held,floor_db_hz,unread";
 
 /// `YYYY-MM-DDTHH:MM:SSZ` of a Unix time.
 fn iso(unix: f64) -> String {
@@ -119,6 +119,10 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 format!("{:.1}", d.trace.least_margin_db()),
                 opt(mark.map(|c| c.held.to_string())),
                 opt(mark.and_then(|c| c.floor_db_hz).map(|v| format!("{v:.1}"))),
+                opt(d.unread.map(|u| match u {
+                    crate::signal::ft8::demod::Unread::Start => "start".to_string(),
+                    crate::signal::ft8::demod::Unread::End => "end".to_string(),
+                })),
             ]
             .join(",")
         })

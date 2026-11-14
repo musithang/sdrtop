@@ -275,6 +275,39 @@ pub fn soft_bits(z: &Correlations, block: usize, scale: f32) -> [f32; ldpc::N] {
     llr.map(|l| l * scale)
 }
 
+/// A stretch of a transmission a reading takes as unknown: its first or its
+/// last [`UNREAD_SYMBOLS`] data symbols.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unread {
+    Start,
+    End,
+}
+
+/// How many data symbols a reading leaves unread, of the 58.
+pub const UNREAD_SYMBOLS: usize = 12;
+
+impl Unread {
+    /// As the card says it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Unread::Start => "start unread",
+            Unread::End => "end unread",
+        }
+    }
+}
+
+/// [`soft_bits`] one symbol at a time, with the `unread` stretch's bits at
+/// zero: nothing known, for the code to fill in from the rest.
+pub fn soft_bits_without(z: &Correlations, unread: Unread, scale: f32) -> [f32; ldpc::N] {
+    let mut llr = soft_bits(z, 1, scale);
+    let bits = 3 * UNREAD_SYMBOLS;
+    match unread {
+        Unread::Start => llr[..bits].fill(0.0),
+        Unread::End => llr[ldpc::N - bits..].fill(0.0),
+    }
+    llr
+}
+
 /// A data symbol's index among the 58, from its position among the 79.
 fn data_index(pos: usize) -> usize {
     if pos < 36 {
@@ -640,5 +673,25 @@ mod tests {
     fn data_index_counts_the_58() {
         let idx: Vec<usize> = data_positions().map(data_index).collect();
         assert_eq!(idx, (0..58).collect::<Vec<_>>());
+    }
+
+    /// A stretch unread is its twelve symbols' 36 bits at zero and every
+    /// other bit as one symbol at a time reads it.
+    #[test]
+    fn a_stretch_unread_is_its_own_bits_at_zero() {
+        let mut rng = crate::signal::dsp::testkit::Rng::new(3);
+        let mut z: Correlations = [[Complex::new(0.0, 0.0); 8]; SYMBOLS];
+        for row in &mut z {
+            row.copy_from_slice(&rng.noise(8, 1.0));
+        }
+        let whole = soft_bits(&z, 1, LLR_SCALE);
+        assert!(whole.iter().all(|l| *l != 0.0));
+        let bits = 3 * UNREAD_SYMBOLS;
+        let start = soft_bits_without(&z, Unread::Start, LLR_SCALE);
+        assert!(start[..bits].iter().all(|l| *l == 0.0));
+        assert_eq!(start[bits..], whole[bits..]);
+        let end = soft_bits_without(&z, Unread::End, LLR_SCALE);
+        assert!(end[ldpc::N - bits..].iter().all(|l| *l == 0.0));
+        assert_eq!(end[..ldpc::N - bits], whole[..ldpc::N - bits]);
     }
 }

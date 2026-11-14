@@ -172,8 +172,12 @@ fn wide(m: &SdrMetrics, d: &DecodeEntry, t: &crate::Theme) -> Vec<Line> {
         kv(
             "sync",
             format!(
-                "{} of 21 Costas   pass {}   block {}",
-                dd.costas, dd.pass, dd.block
+                "{} of 21 Costas   pass {}   block {}{}",
+                dd.costas,
+                dd.pass,
+                dd.block,
+                dd.unread
+                    .map_or(String::new(), |u| format!("   {}", u.label()))
             ),
         ),
         kv("code", code(d, false)),
@@ -250,7 +254,14 @@ fn short(m: &SdrMetrics, d: &DecodeEntry, t: &crate::Theme) -> Vec<Line> {
         kv("path", pw, pc),
         kv(
             "sync",
-            format!("{}/21 · pass {} · block {}", dd.costas, dd.pass, dd.block),
+            format!(
+                "{}/21 · pass {} · block {}{}",
+                dd.costas,
+                dd.pass,
+                dd.block,
+                dd.unread
+                    .map_or(String::new(), |u| format!(" · {}", u.label()))
+            ),
             t.value,
         ),
         kv("code", code(d, true), t.value),

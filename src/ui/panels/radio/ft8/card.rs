@@ -206,7 +206,14 @@ impl Panel for Ft8CardPanel {
                     }),
                 ),
                 (
-                    format!("   block {}   pass {}", d.decode.block, d.decode.pass),
+                    format!(
+                        "   block {}   pass {}{}",
+                        d.decode.block,
+                        d.decode.pass,
+                        d.decode
+                            .unread
+                            .map_or(String::new(), |u| format!("   {}", u.label()))
+                    ),
                     label,
                 ),
             ],

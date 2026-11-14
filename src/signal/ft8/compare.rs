@@ -617,6 +617,39 @@ fn why_the_other_decodes_are_missed() {
             };
             out += &format!("  b{b} {wrong:3} wrong {got}");
         }
+        // `FT8_SYMBOLS=1`: symbol by symbol, the tone sent, then the
+        // strongest tone where it is another (a dot where it is the one
+        // sent), then how many dB the strongest stands over the one sent.
+        if std::env::var("FT8_SYMBOLS").is_ok() {
+            let tones = demod::tones_of(crc::with_crc(payload));
+            let best = |s: usize| {
+                (0..8)
+                    .max_by(|&a, &b| z[s][a].norm_sqr().total_cmp(&z[s][b].norm_sqr()))
+                    .unwrap_or(0)
+            };
+            let row = |f: &dyn Fn(usize) -> char| (0..tones.len()).map(f).collect::<String>();
+            out += &format!(
+                "\n            sent      {}\n            strongest {}\n            dB over   {}",
+                row(&|s| char::from(b'0' + tones[s])),
+                row(&|s| {
+                    if best(s) == usize::from(tones[s]) {
+                        '.'
+                    } else {
+                        char::from(b'0' + best(s) as u8)
+                    }
+                }),
+                row(&|s| {
+                    let over = 10.0
+                        * (z[s][best(s)].norm_sqr() / z[s][usize::from(tones[s])].norm_sqr())
+                            .log10();
+                    match over {
+                        o if o < 0.5 => '.',
+                        o if o < 9.5 => char::from(b'0' + o.round() as u8),
+                        _ => '+',
+                    }
+                }),
+            );
+        }
         out
     };
     let (Ok(wavs), Ok(misses)) = (std::env::var("FT8_WAVS"), std::env::var("FT8_MISSES")) else {

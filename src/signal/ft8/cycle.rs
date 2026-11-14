@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 use num_complex::Complex;
 
-use super::demod::{self, Physics};
+use super::demod::{self, Physics, Unread};
 use super::hash::HashBook;
 use super::ldpc;
 use super::message::{self, Message};
@@ -91,6 +91,10 @@ pub struct Settings {
     /// it. Off only to measure what the guards keep out.
     pub guard: bool,
     pub osd_guard: OsdGuard,
+    /// A candidate with at least this many Costas symbols on their tone
+    /// and no codeword is read again with its start, then its end, unread
+    /// ([`UNREAD_MIN_COSTAS`], [`SoftBits`]). Above 21: never.
+    pub unread_min_costas: u8,
     /// An OSD codeword waits for a transmission of its own pass this many
     /// dB stronger to be taken out ([`SHADOW_DB`], [`in_the_shadow`]).
     /// Infinite: it never waits.
@@ -109,6 +113,7 @@ impl Settings {
         osd_from_bp: OSD_FROM_BP,
         guard: true,
         osd_guard: OsdGuard::DEFAULT,
+        unread_min_costas: UNREAD_MIN_COSTAS,
         shadow_db: SHADOW_DB,
     };
 }
@@ -255,6 +260,8 @@ pub struct Decode {
     pub costas: u8,
     /// Symbols per block in the soft decisions that decoded (1, 2 or 3).
     pub block: u8,
+    /// The stretch of the transmission the reading that decoded left unread.
+    pub unread: Option<Unread>,
     pub iterations: u32,
     /// Received bits the codeword disagreed with, of 174.
     pub repaired: u32,
@@ -333,6 +340,7 @@ struct Found {
     tones: [u8; SYMBOLS],
     costas: u8,
     block: u8,
+    unread: Option<Unread>,
     decoded: ldpc::Decoded,
     pass: u8,
     trace: Arc<Trace>,
@@ -437,6 +445,7 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
                 physics: f.physics,
                 costas: f.costas,
                 block: f.block,
+                unread: f.unread,
                 iterations: f.decoded.iterations,
                 repaired: f.decoded.repaired,
                 osd: f.decoded.osd,
@@ -599,6 +608,65 @@ fn read_all(
     all.into_iter().map(|(_, r)| r).collect()
 }
 
+/// A candidate's Costas symbols on their tone, of 21, from which it is read
+/// again with a stretch unread: two in three, a sync plainly there.
+pub const UNREAD_MIN_COSTAS: u8 = 14;
+
+/// How a candidate's symbols become soft bits, in the order tried.
+///
+/// The last two are for a transmission that is whole in its sync and not
+/// in its message: the operator changed the message a second or two in
+/// (the program then sends the new one from where it stands), or another
+/// transmission stood over its start or its end. Such symbols are plain
+/// and wrong, which misleads the code more than noise does; taken as
+/// unknown, the code fills them in from the rest. Off the air: a -9 dB
+/// transmission, all 21 Costas symbols right and 59 of its 69 others,
+/// whose first ten data symbols were the CQ of the cycle before, 10 dB
+/// over the tones of the message the rest of it carried.
+///
+/// On 86 cycles of 20 m the two readings gave 10 more decodes in 1375
+/// (every call in them heard elsewhere in the recording), in the same
+/// time; on two simulated populations 15 more true in 4485 and no more
+/// false. Leaving 24 symbols unread instead gave one more and cost time.
+#[derive(Clone, Copy)]
+enum SoftBits {
+    /// Blocks of this many symbols (`demod::soft_bits`).
+    Blocks(u8),
+    /// One symbol at a time, a stretch unread (`demod::soft_bits_without`).
+    Without(Unread),
+}
+
+impl SoftBits {
+    const ALL: [SoftBits; 5] = [
+        SoftBits::Blocks(1),
+        SoftBits::Blocks(2),
+        SoftBits::Blocks(3),
+        SoftBits::Without(Unread::Start),
+        SoftBits::Without(Unread::End),
+    ];
+
+    fn block(self) -> u8 {
+        match self {
+            SoftBits::Blocks(b) => b,
+            SoftBits::Without(_) => 1,
+        }
+    }
+
+    fn unread(self) -> Option<Unread> {
+        match self {
+            SoftBits::Blocks(_) => None,
+            SoftBits::Without(u) => Some(u),
+        }
+    }
+
+    fn soft_bits(self, z: &demod::Correlations, scale: f32) -> [f32; ldpc::N] {
+        match self {
+            SoftBits::Blocks(b) => demod::soft_bits(z, usize::from(b), scale),
+            SoftBits::Without(u) => demod::soft_bits_without(z, u, scale),
+        }
+    }
+}
+
 /// Synchronise, read and decode one candidate, up to its first believed
 /// codeword. Whether that codeword is new this cycle is the caller's
 /// question, asked in the search's order; `before` only spares measuring one
@@ -643,8 +711,11 @@ fn try_candidate(
         }
         let (n0, hz) = (at.0.round() as i64, at.1);
         let costas = demod::costas_matched(&z);
-        for block in 1..=3u8 {
-            let llr = demod::soft_bits(&z, usize::from(block), settings.llr_scale);
+        for reading in SoftBits::ALL {
+            if reading.unread().is_some() && costas < settings.unread_min_costas {
+                break;
+            }
+            let llr = reading.soft_bits(&z, settings.llr_scale);
             let Some(decoded) =
                 ldpc::decode_deep(&llr, BP_ITERATIONS, OSD_ORDER, settings.osd_from_bp)
             else {
@@ -697,7 +768,8 @@ fn try_candidate(
                 physics,
                 tones,
                 costas,
-                block,
+                block: reading.block(),
+                unread: reading.unread(),
                 decoded,
                 pass,
                 trace: Arc::new(trace),

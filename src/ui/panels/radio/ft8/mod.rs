@@ -202,6 +202,7 @@ pub(crate) mod sample {
             },
             costas: if osd.is_some() { 15 } else { 21 },
             block: if osd.is_some() { 3 } else { 1 },
+            unread: None,
             iterations: if osd.is_some() { 30 } else { 4 },
             repaired: if osd.is_some() { 16 } else { 2 },
             osd,

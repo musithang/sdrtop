@@ -923,6 +923,7 @@ mod tests {
             },
             costas: 21,
             block: 1,
+            unread: None,
             iterations: 0,
             repaired: 0,
             osd: None,

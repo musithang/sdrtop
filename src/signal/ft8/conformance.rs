@@ -851,7 +851,8 @@ fn measure_the_llr_scale() {
 /// `FT8_CONTRA_0` (a negative one puts order 0 on the others' lines),
 /// `FT8_COSTAS_0`, and
 /// `FT8_SHADOW_DB` (how much stronger a transmission of its own pass an
-/// OSD codeword waits for; `inf`: none).
+/// OSD codeword waits for; `inf`: none), and `FT8_UNREAD` (the Costas count
+/// from which a candidate is read again with a stretch unread; 22: never).
 pub(crate) fn settings_from_env() -> cycle::Settings {
     fn var<T: std::str::FromStr>(name: &str, default: T) -> T {
         std::env::var(name).map_or(default, |v| {
@@ -869,6 +870,7 @@ pub(crate) fn settings_from_env() -> cycle::Settings {
         resync: std::env::var("FT8_RESYNC").map_or(d.resync, |v| v != "0"),
         guard: std::env::var("FT8_GUARD").map_or(d.guard, |v| v != "0"),
         shadow_db: var("FT8_SHADOW_DB", d.shadow_db),
+        unread_min_costas: var("FT8_UNREAD", d.unread_min_costas),
         osd_guard: cycle::OsdGuard {
             min_costas: var("FT8_OSD_COSTAS", d.osd_guard.min_costas),
             costas_per_db: var("FT8_OSD_COSTAS_SLOPE", d.osd_guard.costas_per_db),
@@ -1110,6 +1112,78 @@ fn a_weak_signal_under_a_strong_one_comes_out_after_subtraction() {
     assert_eq!(pass_of(sent[0].payload), Some(1));
     assert_eq!(pass_of(sent[1].payload), Some(2), "{:?}", r.decodes);
     assert_eq!(r.decodes.len(), 2);
+}
+
+/// A cycle with one transmission whose symbols `from..to` (of the 79) are
+/// another message's: `other`'s there, `sent`'s everywhere else.
+#[cfg(test)]
+fn spliced(sent: &Sent, other: u128, from: usize, to: usize, rng: &mut Rng) -> Vec<Complex<f32>> {
+    let mut tones = sent.tones();
+    let others = modulate::channel_symbols(&ldpc::encode(crc::with_crc(other)));
+    tones[from..to].copy_from_slice(&others[from..to]);
+    let mut x = rng.noise(CYCLE_SAMPLES, 1.0);
+    let w = Waveform {
+        f0: sent.f0,
+        start: sent.start(),
+        amplitude: (2500.0 / RATE * 10f64.powf(sent.snr_db / 10.0)).sqrt(),
+        drift: 0.0,
+        phase: 0.7,
+    };
+    modulate::add(&tones, &w, RATE, &mut x);
+    x
+}
+
+/// **A message changed after its start.** An operator answering a caller a
+/// second or two into a CQ sends the CQ's first symbols and the answer's
+/// rest: off the air, a -9 dB transmission with every Costas symbol right
+/// whose first ten data symbols were the CQ of the cycle before, 10 dB over
+/// its own tones. Plain and wrong, they keep the code from the message;
+/// taken as unknown, it reads. The same for a transmission whose end another
+/// one stood over.
+#[test]
+fn a_transmission_spliced_from_two_messages_is_read_with_the_splice_unread() {
+    use super::demod::Unread;
+    let call = |c: &str| Call::Std {
+        call: c.into(),
+        suffix: None,
+    };
+    let message = |to: Call| {
+        message::pack::pack(&Message::Standard {
+            to,
+            from: call("HA5ZZT"),
+            ack: false,
+            word: G15::Grid("JN97".into()),
+        })
+    };
+    let (answer, cq) = (message(call("K1ABC")), message(Call::Cq(None)));
+    let sent = Sent {
+        payload: answer,
+        f0: 1200.0,
+        dt: 0.2,
+        snr_db: -9.0,
+        drift: 0.0,
+    };
+    let never = cycle::Settings {
+        unread_min_costas: 22,
+        ..QUICK
+    };
+    // The CQ's first ten data symbols (7 to 16 of the 79), then the CQ's
+    // last twelve (60 to 71), which are its own parity.
+    for (from, to, unread) in [(7, 17, Unread::Start), (60, 72, Unread::End)] {
+        let x = spliced(&sent, cq, from, to, &mut Rng::new(97));
+        let r = cycle::decode_with(&x, &mut HashBook::new(), &QUICK);
+        assert_eq!(r.decodes.len(), 1, "{unread:?}: {:?}", r.decodes);
+        assert_eq!(r.decodes[0].message.text(), "K1ABC HA5ZZT JN97");
+        assert_eq!(r.decodes[0].unread, Some(unread));
+        assert_eq!(r.decodes[0].costas, 21);
+        let r = cycle::decode_with(&x, &mut HashBook::new(), &never);
+        assert!(r.decodes.is_empty(), "{unread:?}: {:?}", r.decodes);
+    }
+    // A whole transmission is read as it always was.
+    let x = cycle(&[sent], &mut Rng::new(97));
+    let r = cycle::decode_with(&x, &mut HashBook::new(), &QUICK);
+    assert_eq!(r.decodes.len(), 1);
+    assert_eq!(r.decodes[0].unread, None);
 }
 
 #[test]
