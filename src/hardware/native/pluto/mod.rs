@@ -3,9 +3,9 @@
 
 //! The PlutoSky R2, driven through its own `iiod` server.
 //!
-//! Found and identified here; not opened yet. Asked for by name only
-//! (`--device plutosky`), which names the SoapySDR road that opens it today
-//! ([`not_yet`]).
+//! Found and identified here, opened and described in [`device`] with its
+//! transmitter dealt with in [`tx`]; not streamed yet. Asked for by name only
+//! (`--device plutosky`) until it streams.
 //!
 //! **No library between sdrtop and the radio.** The radio runs `iiod`, and
 //! [`iiod`] speaks its text protocol over TCP. Over USB the radio is a small
@@ -29,7 +29,9 @@
 //! version nobody here has spoken to is refused by name ([`CHECKED_SERVERS`]).
 
 pub mod context;
+pub mod device;
 pub mod iiod;
+pub mod tx;
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -252,16 +254,6 @@ fn label(found: &Found) -> String {
     }
 }
 
-/// The refusal while the backend cannot open the radio, naming the road that
-/// opens it now.
-pub fn not_yet(listing: &DeviceListing) -> anyhow::Error {
-    anyhow::anyhow!(
-        "{}: sdrtop's own PlutoSky backend finds this radio but cannot open it yet. \
-         Open it through SoapySDR meanwhile: sdrtop --device soapy=driver=plutosdr",
-        listing.label
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::iiod::fake;
@@ -281,11 +273,11 @@ mod tests {
         }
     }
 
-    fn r2_script() -> fake::Script {
-        fake::Script {
+    fn r2_script() -> fake::Radio {
+        fake::Radio {
             version: "0.25.v0.25  \n".into(),
             xml: R2_XML.into(),
-            silent: false,
+            ..Default::default()
         }
     }
 
@@ -363,7 +355,7 @@ mod tests {
     /// the R2 out.
     #[test]
     fn the_r2_is_found_at_its_address() {
-        let addr = fake::serve(r2_script());
+        let (addr, _) = fake::serve(r2_script());
         let f = find_at(&addr, Some(R2_SERIAL), quick()).unwrap();
         assert_eq!(f.model, Model::R2);
         assert_eq!(f.address, addr);
@@ -376,28 +368,12 @@ mod tests {
 
     #[test]
     fn a_silent_radio_is_a_problem_said_not_a_hang() {
-        let addr = fake::serve(fake::Script {
+        let (addr, _) = fake::serve(fake::Radio {
             silent: true,
             ..r2_script()
         });
         let p = find_at(&addr, Some(R2_SERIAL), quick()).unwrap_err();
         assert!(matches!(p, Problem::NoAnswer { .. }), "{p:?}");
         assert!(p.text().contains("nothing answered"), "{}", p.text());
-    }
-
-    #[test]
-    fn the_refusal_names_the_road_that_works() {
-        let listing = DeviceListing {
-            kind: DeviceKind::PlutoSky,
-            index: 0,
-            label: "PlutoSky R2 \u{00b7} x".into(),
-            serial: Some("x".into()),
-            args: None,
-            path: None,
-            tiny_sa_input: None,
-        };
-        let why = not_yet(&listing).to_string();
-        assert!(why.starts_with("PlutoSky R2 \u{00b7} x: "), "{why}");
-        assert!(why.contains("--device soapy=driver=plutosdr"), "{why}");
     }
 }

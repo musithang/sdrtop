@@ -63,6 +63,8 @@ impl fmt::Display for Error {
     }
 }
 
+impl std::error::Error for Error {}
+
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         Error::Io(e)
@@ -99,6 +101,26 @@ impl Version {
         let minor = parts.next()?.parse().ok()?;
         let tag = parts.next().unwrap_or("").trim().to_string();
         Some(Version { major, minor, tag })
+    }
+}
+
+/// What an attribute belongs to, as the protocol names it.
+#[derive(Clone, Copy, Debug)]
+pub enum Target<'a> {
+    Device(&'a str),
+    Input(&'a str, &'a str),
+    Output(&'a str, &'a str),
+    Debug(&'a str),
+}
+
+impl fmt::Display for Target<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Target::Device(d) => write!(f, "{d}"),
+            Target::Input(d, c) => write!(f, "{d} INPUT {c}"),
+            Target::Output(d, c) => write!(f, "{d} OUTPUT {c}"),
+            Target::Debug(d) => write!(f, "{d} DEBUG"),
+        }
     }
 }
 
@@ -187,6 +209,48 @@ impl Client {
             .map_err(|_| Error::Protocol("a description that is not UTF-8".into()))
     }
 
+    /// `READ`: one attribute's value, the trailing NUL the server counts in
+    /// its length removed.
+    pub fn read(&mut self, target: Target<'_>, attr: &str) -> Result<String, Error> {
+        self.send(&format!("READ {target} {attr}"))?;
+        let len = self.read_integer()? as usize;
+        if len > MAX_XML_BYTES {
+            return Err(Error::Protocol(format!("a value {len} bytes long")));
+        }
+        let mut buf = vec![0u8; len];
+        self.reader.read_exact(&mut buf)?;
+        let mut end = [0u8; 1];
+        self.reader.read_exact(&mut end)?;
+        if buf.last() == Some(&0) {
+            buf.pop();
+        }
+        String::from_utf8(buf).map_err(|_| Error::Protocol("a value that is not UTF-8".into()))
+    }
+
+    /// `WRITE`: the line, then exactly the value's bytes; the server answers
+    /// how many it wrote.
+    pub fn write(&mut self, target: Target<'_>, attr: &str, value: &str) -> Result<(), Error> {
+        self.send(&format!("WRITE {target} {attr} {}", value.len()))?;
+        self.writer.write_all(value.as_bytes())?;
+        self.read_integer()?;
+        Ok(())
+    }
+
+    /// One register of a device's core, read through its `direct_reg_access`
+    /// debug attribute: writing one number selects a register (writing two
+    /// would write it), reading returns the selected register's value.
+    pub fn register(&mut self, device: &str, address: u32) -> Result<u32, Error> {
+        self.write(
+            Target::Debug(device),
+            "direct_reg_access",
+            &format!("0x{address:x}"),
+        )?;
+        let v = self.read(Target::Debug(device), "direct_reg_access")?;
+        let hex = v.trim().trim_start_matches("0x").trim_start_matches("0X");
+        u32::from_str_radix(hex, 16)
+            .map_err(|_| Error::Protocol(format!("a register value of {v:?}")))
+    }
+
     /// `EXIT`: the server ends the session without a reply. Best effort, since
     /// the socket closes on drop either way.
     pub fn exit(mut self) {
@@ -211,63 +275,126 @@ fn resolve(host: &str) -> Result<SocketAddr, Error> {
 }
 
 /// A stand-in `iiod` for the tests: a thread on `127.0.0.1` answering the
-/// commands the way the R2's server did, from what was recorded on the bench.
+/// commands the way the R2's server did, from what was recorded on the bench,
+/// and keeping what was written so a test can read the radio's state after.
 #[cfg(test)]
 pub(crate) mod fake {
-    use std::io::{BufRead, BufReader, Write};
+    use std::collections::{HashMap, HashSet};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
-    /// How the stand-in behaves.
-    #[derive(Clone)]
-    pub struct Script {
+    /// The radio as the stand-in holds it.
+    #[derive(Clone, Default)]
+    pub struct Radio {
         /// `VERSION`'s line, as the server writes it.
         pub version: String,
         /// `PRINT`'s document.
         pub xml: String,
         /// Accept the connection and never answer: a radio gone silent.
         pub silent: bool,
+        /// Attribute values by `"<target> <attr>"`, as the commands spell them.
+        pub attrs: HashMap<String, String>,
+        /// Core registers by `(device, address)`.
+        pub regs: HashMap<(String, u32), u32>,
+        /// Writes the radio accepts but does not keep: the value read back
+        /// stays as it was. A radio that will not do what it is told.
+        pub ignores: HashSet<String>,
+        /// Every write, in order, as `"<target> <attr>=<value>"`.
+        pub written: Vec<String>,
+        /// The register selected through each device's `direct_reg_access`.
+        pub selected: HashMap<String, u32>,
     }
 
-    /// Starts the stand-in; it serves one connection and returns its address.
-    pub fn serve(script: Script) -> String {
+    /// Starts the stand-in; it serves one connection. Returns its address and
+    /// the radio, to look at once the session is over.
+    pub fn serve(radio: Radio) -> (String, Arc<Mutex<Radio>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a free port on 127.0.0.1");
         let addr = listener.local_addr().unwrap().to_string();
+        let shared = Arc::new(Mutex::new(radio));
+        let state = Arc::clone(&shared);
         thread::spawn(move || {
             let Ok((stream, _)) = listener.accept() else {
                 return;
             };
-            if script.silent {
-                // Hold the connection open and say nothing until the client
-                // gives up.
-                let mut r = BufReader::new(stream);
+            let mut w = stream.try_clone().unwrap();
+            let mut r = BufReader::new(stream);
+            if state.lock().unwrap().silent {
                 let mut sink = String::new();
                 while matches!(r.read_line(&mut sink), Ok(n) if n > 0) {}
                 return;
             }
-            let mut w = stream.try_clone().unwrap();
-            let mut r = BufReader::new(stream);
             let mut line = String::new();
             while matches!(r.read_line(&mut line), Ok(n) if n > 0) {
-                let reply = match line.trim() {
-                    "VERSION" => script.version.clone().into_bytes(),
-                    "PRINT" => {
-                        let mut out = format!("{}\n", script.xml.len()).into_bytes();
-                        out.extend_from_slice(script.xml.as_bytes());
-                        out.push(b'\n');
-                        out
-                    }
-                    "EXIT" => return,
-                    // What the server answers a line it cannot parse.
-                    _ => b"-22\n".to_vec(),
-                };
+                let reply = answer(&state, line.trim(), &mut r);
+                let Some(reply) = reply else { return };
                 if w.write_all(&reply).is_err() {
                     return;
                 }
                 line.clear();
             }
         });
-        addr
+        (addr, shared)
+    }
+
+    fn value(v: &str) -> Vec<u8> {
+        // The server counts the value's trailing NUL in its length.
+        let mut out = format!("{}\n", v.len() + 1).into_bytes();
+        out.extend_from_slice(v.as_bytes());
+        out.extend_from_slice(b"\0\n");
+        out
+    }
+
+    fn answer(
+        state: &Arc<Mutex<Radio>>,
+        line: &str,
+        r: &mut BufReader<std::net::TcpStream>,
+    ) -> Option<Vec<u8>> {
+        let mut radio = state.lock().unwrap();
+        let words: Vec<&str> = line.split(' ').collect();
+        Some(match words.as_slice() {
+            ["VERSION"] => radio.version.clone().into_bytes(),
+            ["PRINT"] => {
+                let mut out = format!("{}\n", radio.xml.len()).into_bytes();
+                out.extend_from_slice(radio.xml.as_bytes());
+                out.push(b'\n');
+                out
+            }
+            ["EXIT"] => return None,
+            ["READ", rest @ ..] => {
+                let key = rest.join(" ");
+                if let [dev, "DEBUG", "direct_reg_access"] = rest {
+                    let at = radio.selected.get(*dev).copied().unwrap_or(0);
+                    let v = radio.regs.get(&(dev.to_string(), at)).copied().unwrap_or(0);
+                    return Some(value(&format!("0x{v:X}")));
+                }
+                match radio.attrs.get(&key) {
+                    Some(v) => value(v),
+                    None => b"-2\n".to_vec(),
+                }
+            }
+            ["WRITE", rest @ .., len] => {
+                let n: usize = len.parse().ok()?;
+                let mut buf = vec![0u8; n];
+                r.read_exact(&mut buf).ok()?;
+                let v = String::from_utf8(buf).ok()?;
+                let key = rest.join(" ");
+                radio.written.push(format!("{key}={v}"));
+                if let [dev, "DEBUG", "direct_reg_access"] = rest {
+                    let hex = v.trim().trim_start_matches("0x");
+                    let at = u32::from_str_radix(hex, 16).ok()?;
+                    radio.selected.insert(dev.to_string(), at);
+                } else if !radio.attrs.contains_key(&key) {
+                    return Some(b"-2\n".to_vec());
+                } else if !radio.ignores.contains(&key) {
+                    radio.attrs.insert(key, v);
+                }
+                format!("{n}\n").into_bytes()
+            }
+            // What the server answers a line it cannot parse.
+            _ => b"-22\n".to_vec(),
+        })
     }
 }
 
@@ -282,12 +409,12 @@ mod tests {
         }
     }
 
-    fn r2_script() -> fake::Script {
-        fake::Script {
-            // Exactly what the R2's server wrote (`replies/read/01-version`).
+    fn r2_script() -> fake::Radio {
+        fake::Radio {
+            // Exactly what the R2's server wrote on the bench.
             version: "0.25.v0.25  \n".into(),
             xml: include_str!("../fixtures/pluto-r2-context.xml").into(),
-            silent: false,
+            ..Default::default()
         }
     }
 
@@ -303,7 +430,7 @@ mod tests {
 
     #[test]
     fn a_session_reads_the_version_and_the_description() {
-        let addr = fake::serve(r2_script());
+        let (addr, _) = fake::serve(r2_script());
         let mut c = Client::connect(&addr, quick()).unwrap();
         assert_eq!(c.version().unwrap().short(), "0.25");
         let xml = c.print().unwrap();
@@ -316,7 +443,7 @@ mod tests {
     /// so as the server's answer rather than as a broken stream.
     #[test]
     fn a_negative_reply_is_the_servers_answer() {
-        let addr = fake::serve(r2_script());
+        let (addr, _) = fake::serve(r2_script());
         let mut c = Client::connect(&addr, quick()).unwrap();
         c.send("FROBNICATE").unwrap();
         match c.read_integer() {
@@ -329,7 +456,7 @@ mod tests {
     /// server stuck) is an answer within the timeout, not a hang.
     #[test]
     fn silence_is_a_refusal_within_the_timeout() {
-        let addr = fake::serve(fake::Script {
+        let (addr, _) = fake::serve(fake::Radio {
             silent: true,
             ..r2_script()
         });

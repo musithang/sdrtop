@@ -29,7 +29,7 @@ pub enum DeviceKind {
     AirspyHf,
     HackRf,
     /// The PlutoSky R2, natively, through its own `iiod` server; asked for by
-    /// name only while its backend cannot open the radio.
+    /// name only while its backend cannot stream.
     PlutoSky,
     RtlSdr,
     /// The SDRplay RSP1B, natively, asked for by name only while its backend
@@ -210,7 +210,7 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         "airspy" => DeviceKind::Airspy,
         "airspyhf" => DeviceKind::AirspyHf,
         "hackrf" => DeviceKind::HackRf,
-        // Not in the list below until it opens the radio: asked for by name only.
+        // Not in the list below until it streams: asked for by name only.
         "plutosky" => DeviceKind::PlutoSky,
         "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
         "sdrplay" => DeviceKind::Sdrplay,
@@ -341,7 +341,7 @@ pub fn list_all_devices(
             out.push(held_sdrplay(&info));
         }
     }
-    // A PlutoSky only when asked for by name, until its backend opens it.
+    // A PlutoSky only when asked for by name, until its backend streams.
     out.extend(pluto::list(want == Some(DeviceKind::PlutoSky)));
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
@@ -461,7 +461,7 @@ pub fn open_device(
             &cfg.airspyhf,
         )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
-        DeviceKind::PlutoSky => Err(pluto::not_yet(listing)),
+        DeviceKind::PlutoSky => Ok(Arc::new(pluto::device::PlutoDevice::open(listing)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Sdrplay => Ok(Arc::new(sdrplay::device::SdrplayDevice::open(
             listing,
@@ -902,7 +902,7 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("plutosky"),
-            "not offered in the list until it opens the radio"
+            "not offered in the list until it streams"
         );
         assert!(
             DeviceKind::PlutoSky.observer_profile().is_none(),
