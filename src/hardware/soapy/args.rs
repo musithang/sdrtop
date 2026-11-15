@@ -73,12 +73,17 @@ pub fn label(args: &[(String, String)], index: usize) -> String {
 /// (no free prose) and is what the driver itself would echo back, so it round
 /// trips safely. `remote:driver` rides along for the same reason: it names the
 /// driver on the far end and is part of the same identity.
+///
+/// `uri` is the same kind of address. SoapyPlutoSDR lists one radio once per
+/// way of reaching it (`usb:1.28.5`, `ip:pluto.local`) and reports no serial, so
+/// the `uri` is what tells the listings apart and what the driver opens by.
+/// libiio writes it, never a person, so it carries no separator either.
 pub fn open_markup(args: &[(String, String)], index: usize) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(driver) = get(args, "driver") {
         parts.push(format!("driver={driver}"));
     }
-    for key in ["remote", "remote:driver"] {
+    for key in ["remote", "remote:driver", "uri"] {
         if let Some(value) = get(args, key) {
             parts.push(format!("{key}={value}"));
         }
@@ -284,6 +289,34 @@ mod tests {
         );
         // And the filter still matches the shape a user would type.
         assert!(matches_filter(&m, "driver=remote"));
+    }
+
+    /// SoapyPlutoSDR lists one radio twice, over USB and over the network, with
+    /// no serial: the `uri` is the only thing that tells the two apart, and the
+    /// only thing it opens by. Without it in the markup, picking the network
+    /// listing opens whichever the driver finds first, and a filter on `uri`
+    /// matches nothing. Copied from `SoapySDRUtil --find` with a PlutoSDR on
+    /// USB.
+    #[test]
+    fn the_open_markup_keeps_the_pluto_address() {
+        let usb = kv(&[
+            ("device", "PlutoSDR"),
+            ("driver", "plutosdr"),
+            ("label", "PlutoSDR #0 usb:1.28.5"),
+            ("uri", "usb:1.28.5"),
+        ]);
+        let ip = kv(&[
+            ("device", "PlutoSDR"),
+            ("driver", "plutosdr"),
+            ("label", "PlutoSDR #0 ip:pluto.local"),
+            ("uri", "ip:pluto.local"),
+        ]);
+        let (mu, mi) = (open_markup(&usb, 0), open_markup(&ip, 1));
+        assert_eq!(value_of(&mu, "uri"), Some("usb:1.28.5"));
+        assert_eq!(value_of(&mi, "uri"), Some("ip:pluto.local"));
+        assert!(matches_filter(&mu, "driver=plutosdr,uri=usb:1.28.5"));
+        assert!(!matches_filter(&mi, "driver=plutosdr,uri=usb:1.28.5"));
+        assert!(matches_filter(&mi, "uri=ip:pluto.local"));
     }
 
     /// Reading one value back out of the markup, which is how the driver key and
