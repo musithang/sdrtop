@@ -4,8 +4,8 @@
 //! The PlutoSky R2, driven through its own `iiod` server.
 //!
 //! Found and identified here, opened and described in [`device`] with its
-//! transmitter dealt with in [`tx`]; not streamed yet. Asked for by name only
-//! (`--device plutosky`) until it streams.
+//! transmitter dealt with in [`tx`], streamed in [`stream`]. Asked for by name
+//! only (`--device plutosky`) until its rehearsal on the hardware.
 //!
 //! **No library between sdrtop and the radio.** The radio runs `iiod`, and
 //! [`iiod`] speaks its text protocol over TCP. Over USB the radio is a small
@@ -31,6 +31,7 @@
 pub mod context;
 pub mod device;
 pub mod iiod;
+pub mod stream;
 pub mod tx;
 
 use std::sync::Mutex;

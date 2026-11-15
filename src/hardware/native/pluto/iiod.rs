@@ -251,6 +251,53 @@ impl Client {
             .map_err(|_| Error::Protocol(format!("a register value of {v:?}")))
     }
 
+    /// `OPEN <device> <samples> <mask>`: a buffer of `samples` per kernel
+    /// block, the channels in `mask` (hex, eight digits per 32 channels, most
+    /// significant word first).
+    pub fn open(&mut self, device: &str, samples: usize, mask: &str) -> Result<(), Error> {
+        self.send(&format!("OPEN {device} {samples} {mask}"))?;
+        self.read_integer()?;
+        Ok(())
+    }
+
+    /// Sends `READBUF <device> <bytes>` without waiting, so another can be
+    /// in flight behind it.
+    pub fn request(&mut self, device: &str, bytes: usize) -> Result<(), Error> {
+        self.send(&format!("READBUF {device} {bytes}"))
+    }
+
+    /// One `READBUF`'s reply into `out` (cleared first): chunks of
+    /// `<len>\n`, the channel mask before the first, then the bytes; a reply
+    /// that ends short closes with `0\n`. Returns the mask the server sent,
+    /// `None` when it sent no data at all.
+    pub fn reply(&mut self, want: usize, out: &mut Vec<u8>) -> Result<Option<String>, Error> {
+        out.clear();
+        let mut mask = None;
+        while out.len() < want {
+            let len = self.read_integer()? as usize;
+            if len == 0 {
+                break;
+            }
+            if mask.is_none() {
+                mask = Some(self.read_line()?.trim().to_string());
+            }
+            if len > MAX_XML_BYTES {
+                return Err(Error::Protocol(format!("a chunk of {len} bytes")));
+            }
+            let at = out.len();
+            out.resize(at + len, 0);
+            self.reader.read_exact(&mut out[at..])?;
+        }
+        Ok(mask)
+    }
+
+    /// `CLOSE <device>`.
+    pub fn close(&mut self, device: &str) -> Result<(), Error> {
+        self.send(&format!("CLOSE {device}"))?;
+        self.read_integer()?;
+        Ok(())
+    }
+
     /// `EXIT`: the server ends the session without a reply. Best effort, since
     /// the socket closes on drop either way.
     pub fn exit(mut self) {
@@ -305,37 +352,61 @@ pub(crate) mod fake {
         pub written: Vec<String>,
         /// The register selected through each device's `direct_reg_access`.
         pub selected: HashMap<String, u32>,
+        /// `OPEN`'s block, once a buffer is open.
+        pub open_samples: Option<usize>,
+        /// The mask the server reports in `READBUF` replies (`OPEN`'s own
+        /// when `None`): another client widening it.
+        pub mask_reply: Option<String>,
+        /// Interleaved I/Q pairs streamed so far; sample `n` of the counting
+        /// pattern is `I = n, Q = -n` (wrapping in 12 bits).
+        pub streamed: u64,
+        /// Channels in the counting pattern: 2 for RX1, 4 when another client
+        /// asked for both receivers.
+        pub channels: usize,
+        /// Blocks to answer as `0` (an empty `READBUF`) before resuming.
+        pub empty_replies: u32,
+        /// Stop answering `READBUF` after this many blocks: a radio gone.
+        pub vanish_after: Option<u64>,
+        /// When the buffer opened: block `k` is ready `k + 1` block times
+        /// after, as a radio's clock would have it.
+        pub epoch: Option<std::time::Instant>,
     }
 
-    /// Starts the stand-in; it serves one connection. Returns its address and
-    /// the radio, to look at once the session is over.
+    /// Starts the stand-in; it serves every connection made to it, all on the
+    /// one radio. Returns its address and the radio, to look at afterwards.
     pub fn serve(radio: Radio) -> (String, Arc<Mutex<Radio>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a free port on 127.0.0.1");
         let addr = listener.local_addr().unwrap().to_string();
         let shared = Arc::new(Mutex::new(radio));
         let state = Arc::clone(&shared);
         thread::spawn(move || {
-            let Ok((stream, _)) = listener.accept() else {
-                return;
-            };
-            let mut w = stream.try_clone().unwrap();
-            let mut r = BufReader::new(stream);
-            if state.lock().unwrap().silent {
-                let mut sink = String::new();
-                while matches!(r.read_line(&mut sink), Ok(n) if n > 0) {}
-                return;
-            }
-            let mut line = String::new();
-            while matches!(r.read_line(&mut line), Ok(n) if n > 0) {
-                let reply = answer(&state, line.trim(), &mut r);
-                let Some(reply) = reply else { return };
-                if w.write_all(&reply).is_err() {
-                    return;
-                }
-                line.clear();
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { return };
+                let state = Arc::clone(&state);
+                thread::spawn(move || session(stream, &state));
             }
         });
         (addr, shared)
+    }
+
+    fn session(stream: std::net::TcpStream, state: &Arc<Mutex<Radio>>) {
+        let mut w = stream.try_clone().unwrap();
+        let mut r = BufReader::new(stream);
+        if state.lock().unwrap().silent {
+            let mut sink = String::new();
+            while matches!(r.read_line(&mut sink), Ok(n) if n > 0) {}
+            return;
+        }
+        let mut line = String::new();
+        while matches!(r.read_line(&mut line), Ok(n) if n > 0) {
+            let Some(reply) = answer(state, line.trim(), &mut r) else {
+                return;
+            };
+            if w.write_all(&reply).is_err() {
+                return;
+            }
+            line.clear();
+        }
     }
 
     fn value(v: &str) -> Vec<u8> {
@@ -362,6 +433,73 @@ pub(crate) mod fake {
                 out
             }
             ["EXIT"] => return None,
+            ["OPEN", _, samples, mask] => {
+                radio.open_samples = samples.parse().ok();
+                radio.epoch = Some(std::time::Instant::now());
+                if radio.mask_reply.is_none() {
+                    radio.mask_reply = Some(mask.to_string());
+                }
+                if radio.channels == 0 {
+                    radio.channels = 2;
+                }
+                b"0\n".to_vec()
+            }
+            ["CLOSE", _] => {
+                if radio.open_samples.take().is_some() {
+                    b"0\n".to_vec()
+                } else {
+                    b"-6\n".to_vec()
+                }
+            }
+            ["READBUF", _, bytes] => {
+                let Some(samples) = radio.open_samples else {
+                    return Some(b"-9\n".to_vec());
+                };
+                if let Some(n) = radio.vanish_after {
+                    if radio.streamed / samples as u64 >= n {
+                        drop(radio);
+                        // Silence: the client's read must time out.
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        return None;
+                    }
+                }
+                if radio.empty_replies > 0 {
+                    radio.empty_replies -= 1;
+                    return Some(b"0\n".to_vec());
+                }
+                let want: usize = bytes.parse().ok()?;
+                // Paced as a radio is: a block takes its samples' time.
+                let rate: f64 = radio
+                    .attrs
+                    .get("ad9361-phy INPUT voltage0 sampling_frequency")
+                    .and_then(|v| v.split_whitespace().next()?.parse().ok())
+                    .unwrap_or(3e6);
+                let k = radio.streamed / samples as u64 + 1;
+                let ready = radio.epoch.unwrap_or_else(std::time::Instant::now)
+                    + std::time::Duration::from_secs_f64(k as f64 * samples as f64 / rate);
+                drop(radio);
+                std::thread::sleep(ready.saturating_duration_since(std::time::Instant::now()));
+                let mut radio = state.lock().unwrap();
+                let ch = radio.channels.max(2);
+                let block = want.min(samples * 4) / 4 * 4;
+                let pairs = block / (2 * ch);
+                let mut data = Vec::with_capacity(pairs * 2 * ch);
+                for k in 0..pairs as u64 {
+                    let n = radio.streamed + k;
+                    let i = ((n % 2048) as i16).to_le_bytes();
+                    let q = (-((n % 2048) as i16)).to_le_bytes();
+                    data.extend_from_slice(&i);
+                    data.extend_from_slice(&q);
+                    for extra in 2..ch {
+                        data.extend_from_slice(&(1000 + extra as i16).to_le_bytes());
+                    }
+                }
+                radio.streamed += pairs as u64;
+                let mask = radio.mask_reply.clone().unwrap_or_default();
+                let mut out = format!("{}\n{}\n", data.len(), mask).into_bytes();
+                out.extend_from_slice(&data);
+                out
+            }
             ["READ", rest @ ..] => {
                 let key = rest.join(" ");
                 if let [dev, "DEBUG", "direct_reg_access"] = rest {

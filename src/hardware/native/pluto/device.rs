@@ -17,8 +17,8 @@
 //! rate on what the clock divides to, a gain on what the band allows. A gain
 //! the radio moved is told once through [`SdrDevice::take_moved_stage`].
 //!
-//! **Not streaming yet.** It opens and describes itself; samples still come
-//! through SoapySDR.
+//! **Streaming has a connection of its own** ([`super::stream`]); settings
+//! go on this one, so a retune never waits behind a block.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -30,6 +30,7 @@ use crate::hardware::{
 };
 
 use super::iiod::{Client, Target, Timeouts};
+use super::stream::{self, Streaming};
 use super::tx::{self, Finding};
 use super::{context, identify, Model, DEFAULT_ADDRESS};
 
@@ -39,10 +40,11 @@ const PHY: &str = "ad9361-phy";
 pub const FREQ_MIN_HZ: u64 = 70_000_000;
 pub const FREQ_MAX_HZ: u64 = 6_000_000_000;
 
-/// The rates offered: those measured to stream without loss over the radio's
-/// USB network on the bench machine (libiio's own reader, 4 s each), from the
-/// floor the radio accepts. More waits for Ethernet.
-pub const RATES_HZ: [f64; 4] = [2_083_333.0, 3_000_000.0, 4_000_000.0, 5_000_000.0];
+/// The rates offered: those sdrtop's own stream carried without a lost
+/// sample over the radio's USB network on the bench machine (a minute each,
+/// two requests in flight). 5 MS/s lost a block in a minute there, at the
+/// edge of what the link carries (about 5.7); more waits for Ethernet.
+pub const RATES_HZ: [f64; 3] = [2_083_333.0, 3_000_000.0, 4_000_000.0];
 
 /// The radio's published floor, `2083333`, is refused when written; the next
 /// integer is taken and reads back as the floor (25 MHz / 12 rounds down).
@@ -73,18 +75,29 @@ pub struct PlutoDevice {
     info: DeviceInfo,
     notes: Vec<String>,
     moved: Mutex<Option<(usize, f64)>>,
+    address: String,
+    stream_timeouts: Timeouts,
+    streaming: Streaming,
 }
+
+/// The stream's waits: longer than a block at the lowest rate (31 ms) by far,
+/// short enough that a radio gone quiet is said within a couple of seconds.
+const STREAM: Timeouts = Timeouts {
+    connect: std::time::Duration::from_millis(1000),
+    io: std::time::Duration::from_millis(2000),
+};
 
 impl PlutoDevice {
     /// The R2 a listing names, at the default address.
     pub fn open(listing: &DeviceListing) -> anyhow::Result<Self> {
-        Self::open_at(DEFAULT_ADDRESS, listing, SESSION)
+        Self::open_at(DEFAULT_ADDRESS, listing, SESSION, STREAM)
     }
 
     pub(super) fn open_at(
         address: &str,
         listing: &DeviceListing,
         t: Timeouts,
+        stream_timeouts: Timeouts,
     ) -> anyhow::Result<Self> {
         let refuse = |why: String| anyhow::anyhow!("{}: {why}", listing.label);
         let mut c = Client::connect(address, t).map_err(|e| refuse(e.to_string()))?;
@@ -180,12 +193,24 @@ impl PlutoDevice {
                 value: Arc::from(found.firmware.as_deref().unwrap_or("\u{2014}")),
             }),
         };
+        // The rate the radio runs at now, for the stream's reckoning until
+        // one is set.
+        let streaming = Streaming::default();
+        let rate = c
+            .read(rx, "sampling_frequency")
+            .ok()
+            .and_then(|v| tx::parse_db(&v))
+            .unwrap_or(0.0);
+        streaming.set_rate(rate);
         Ok(Self {
             client: Mutex::new(c),
             caps: caps(),
             info,
             notes,
             moved: Mutex::new(None),
+            address: address.to_string(),
+            stream_timeouts,
+            streaming,
         })
     }
 
@@ -233,7 +258,7 @@ pub fn caps() -> DeviceCapabilities {
             "Gain",
             "GAIN",
         ),
-        samples_per_transfer: 0,
+        samples_per_transfer: stream::BLOCK_PAIRS as u64,
         // `rf_bandwidth` sets the chip's analog filters.
         has_bb_filter: true,
         // No stage's own noise figure is published.
@@ -253,19 +278,26 @@ impl SdrDevice for PlutoDevice {
         self.info.clone()
     }
 
-    fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
-        anyhow::bail!(
-            "sdrtop's own PlutoSky backend opens and describes the R2 but cannot stream from it \
-             yet. For samples, open it with --device soapy=driver=plutosdr"
-        )
+    fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        self.streaming
+            .start(&self.address, self.stream_timeouts, ctx)
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
+        self.streaming.stop();
         Ok(())
     }
 
     fn is_streaming(&self) -> bool {
-        false
+        self.streaming.is_active()
+    }
+
+    fn stream_end_reason(&self) -> Option<String> {
+        self.streaming.ended().map(|e| stream::text(&e))
+    }
+
+    fn read_loop_us(&self) -> Option<(u64, u64)> {
+        Some(self.streaming.clock())
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
@@ -290,6 +322,7 @@ impl SdrDevice for PlutoDevice {
         let bw = rate.clamp(BW_MIN_HZ, BW_MAX_HZ).round() as u64;
         c.write(rx, "rf_bandwidth", &bw.to_string())?;
         let bw = Self::number(&mut c, rx, "rf_bandwidth")?;
+        self.streaming.set_rate(rate);
         Ok(RateSet::new(hz, Some(rate), bw as u32))
     }
 
@@ -369,7 +402,9 @@ mod tests {
         put("ad9361-phy INPUT voltage0 gain_control_mode", "slow_attack");
         put("ad9361-phy INPUT voltage0 hardwaregain", "71.000000 dB");
         put("ad9361-phy INPUT voltage0 rf_port_select", "A_BALANCED");
-        put("ad9361-phy INPUT voltage0 sampling_frequency", "30720000");
+        // 3 MS/s rather than the power-up 30.72, so the stand-in's paced
+        // blocks (21.8 ms each) are easy for a test to keep up with.
+        put("ad9361-phy INPUT voltage0 sampling_frequency", "3000000");
         put("ad9361-phy INPUT voltage0 rf_bandwidth", "18000000");
         put("ad9361-phy OUTPUT altvoltage0 frequency", "2400000000");
         put("ad9361-phy calib_mode", "auto");
@@ -397,7 +432,7 @@ mod tests {
     #[test]
     fn opening_silences_the_idle_transmitter_first() {
         let (addr, radio) = fake::serve(r2_after_power_up());
-        let dev = PlutoDevice::open_at(&addr, &listing(), quick()).unwrap();
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
         assert_eq!(
             written(&radio),
             [
@@ -426,7 +461,7 @@ mod tests {
         r.ignores
             .insert("ad9361-phy OUTPUT voltage1 hardwaregain".into());
         let (addr, radio) = fake::serve(r);
-        let err = PlutoDevice::open_at(&addr, &listing(), quick())
+        let err = PlutoDevice::open_at(&addr, &listing(), quick(), quick())
             .err()
             .expect("the open is refused")
             .to_string();
@@ -448,7 +483,7 @@ mod tests {
             "0.099976".into(),
         );
         let (addr, radio) = fake::serve(r);
-        let dev = PlutoDevice::open_at(&addr, &listing(), quick()).unwrap();
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
         assert!(
             !written(&radio).iter().any(|w| w.contains("OUTPUT")),
             "{:?}",
@@ -468,7 +503,7 @@ mod tests {
         r.regs
             .insert(("cf-ad9361-dds-core-lpc".into(), 0x8000_0418), 0x2);
         let (addr, radio) = fake::serve(r);
-        let dev = PlutoDevice::open_at(&addr, &listing(), quick()).unwrap();
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
         assert!(!written(&radio).iter().any(|w| w.contains("OUTPUT")));
         assert!(dev.open_notes()[0].contains("buffer of samples"));
     }
@@ -485,7 +520,7 @@ mod tests {
             );
         }
         let (addr, radio) = fake::serve(r);
-        let dev = PlutoDevice::open_at(&addr, &listing(), quick()).unwrap();
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
         assert!(!written(&radio).iter().any(|w| w.contains("OUTPUT")));
         assert!(dev.open_notes()[0].contains("already silent"));
     }
@@ -496,7 +531,7 @@ mod tests {
         r.ignores
             .insert("ad9361-phy INPUT voltage0 gain_control_mode".into());
         let (addr, _) = fake::serve(r);
-        let err = PlutoDevice::open_at(&addr, &listing(), quick())
+        let err = PlutoDevice::open_at(&addr, &listing(), quick(), quick())
             .err()
             .unwrap()
             .to_string();
@@ -509,7 +544,7 @@ mod tests {
         let (addr, radio) = fake::serve(r2_after_power_up());
         let mut l = listing();
         l.serial = Some("deadbeef".into());
-        assert!(PlutoDevice::open_at(&addr, &l, quick()).is_err());
+        assert!(PlutoDevice::open_at(&addr, &l, quick(), quick()).is_err());
         assert!(written(&radio).is_empty(), "nothing written to a stranger");
     }
 
@@ -518,7 +553,7 @@ mod tests {
     #[test]
     fn settings_are_what_the_radio_reads_back() {
         let (addr, radio) = fake::serve(r2_after_power_up());
-        let dev = PlutoDevice::open_at(&addr, &listing(), quick()).unwrap();
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
         let set = dev.set_sample_rate(2_083_333.0).unwrap();
         assert_eq!(
             set.rate_hz, 2_083_334.0,
@@ -537,6 +572,130 @@ mod tests {
         dev.set_stage_gain(0, "hardwaregain", 20.0).unwrap();
         assert_eq!(dev.take_moved_stage(), Some((0, 71.0)), "the radio's value");
         assert_eq!(dev.take_moved_stage(), None, "told once");
+    }
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    fn streaming_ctx() -> (
+        Arc<RxContext>,
+        crossbeam_channel::Receiver<crate::hardware::StreamBlock>,
+    ) {
+        let (ctx, _fft, _demod, net) =
+            crate::hardware::process::tests::rx_ctx_of(caps().sample_geometry);
+        (ctx, net)
+    }
+
+    fn pairs_of(block: &crate::hardware::StreamBlock) -> Vec<(i16, i16)> {
+        block
+            .bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| {
+                (
+                    i16::from_le_bytes([b[0], b[1]]),
+                    i16::from_le_bytes([b[2], b[3]]),
+                )
+            })
+            .collect()
+    }
+
+    /// Blocks arrive whole and in order on a connection of their own, and
+    /// stopping closes the buffer and lets the context go.
+    #[test]
+    fn blocks_arrive_whole_and_in_order() {
+        let (addr, radio) = fake::serve(r2_after_power_up());
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        let (ctx, net) = streaming_ctx();
+        dev.start_rx(Arc::clone(&ctx)).unwrap();
+        assert!(dev.is_streaming());
+        let blocks: Vec<_> = (0..3).map(|_| net.recv_timeout(WAIT).unwrap()).collect();
+        // Gaps are not asserted here: the stand-in, unlike a radio, can fall
+        // behind its own clock on a loaded machine, and the reckoning would
+        // rightly count that. The reckoning has its own tests.
+        assert_eq!(blocks[0].first_pair, 0);
+        for b in &blocks {
+            assert_eq!(b.first_pair % 65_536, 0, "whole blocks");
+            assert_eq!(b.bytes.len(), 65_536 * 4);
+            // The counting pattern runs on unbroken inside every block.
+            let p = pairs_of(b);
+            assert!(p
+                .windows(2)
+                .all(|w| (w[1].0 - w[0].0).rem_euclid(2048) == 1));
+            assert!(p.iter().all(|&(i, q)| q == -i));
+        }
+        assert_eq!(pairs_of(&blocks[0])[..3], [(0, 0), (1, -1), (2, -2)]);
+        dev.stop_rx().unwrap();
+        assert!(!dev.is_streaming());
+        assert!(
+            radio.lock().unwrap().open_samples.is_none(),
+            "the buffer closed"
+        );
+        assert_eq!(Arc::strong_count(&ctx), 1, "nothing can deliver now");
+        assert_eq!(dev.stream_end_reason(), None, "stopped, not ended");
+    }
+
+    /// Another client widened the stream to both receivers: RX1 is picked out
+    /// by the mask the server sends.
+    #[test]
+    fn rx1_is_picked_out_when_another_client_widened_the_stream() {
+        let mut r = r2_after_power_up();
+        r.channels = 4;
+        r.mask_reply = Some("0000000f".into());
+        let (addr, _) = fake::serve(r);
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        let (ctx, net) = streaming_ctx();
+        dev.start_rx(Arc::clone(&ctx)).unwrap();
+        let block = net.recv_timeout(WAIT).unwrap();
+        assert_eq!(pairs_of(&block)[..3], [(0, 0), (1, -1), (2, -2)]);
+        assert_eq!(
+            block.bytes.len(),
+            65_536 * 4 / 2,
+            "half the pairs per request"
+        );
+        dev.stop_rx().unwrap();
+    }
+
+    /// A radio that stops answering mid-stream ends the stream within the
+    /// timeout, and says why.
+    #[test]
+    fn a_radio_gone_quiet_is_a_stated_stop() {
+        let mut r = r2_after_power_up();
+        r.vanish_after = Some(2);
+        let (addr, _) = fake::serve(r);
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        let (ctx, _net) = streaming_ctx();
+        dev.start_rx(Arc::clone(&ctx)).unwrap();
+        let started = std::time::Instant::now();
+        while dev.is_streaming() && started.elapsed() < WAIT {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!dev.is_streaming(), "the stream ended by itself");
+        let why = dev.stream_end_reason().unwrap();
+        assert!(why.contains("stopped answering"), "{why}");
+        dev.stop_rx().unwrap();
+        assert_eq!(Arc::strong_count(&ctx), 1);
+    }
+
+    /// An empty reply (another client changing the channels) is said once and
+    /// the stream carries on.
+    #[test]
+    fn an_empty_reply_is_said_and_the_stream_carries_on() {
+        let mut r = r2_after_power_up();
+        r.empty_replies = 1;
+        let (addr, _) = fake::serve(r);
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        let (ctx, net) = streaming_ctx();
+        dev.start_rx(Arc::clone(&ctx)).unwrap();
+        net.recv_timeout(WAIT).unwrap();
+        dev.stop_rx().unwrap();
+        let m = ctx.metrics.lock().unwrap();
+        let said: Vec<&str> = m.ui.log.iter().map(|e| e.text.as_ref()).collect();
+        assert!(
+            said.iter()
+                .any(|l| l.contains("answered a block with nothing")),
+            "{said:?}"
+        );
     }
 
     #[test]
