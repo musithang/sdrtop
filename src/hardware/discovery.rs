@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::native::{airspy, airspyhf, hackrf, rtlsdr, sdrplay};
+use super::native::{airspy, airspyhf, hackrf, pluto, rtlsdr, sdrplay};
 use super::{soapy, tinysa, usb, DeviceCapabilities, SdrDevice};
 
 /// Which backend a [`DeviceListing`] / open request targets.
@@ -28,6 +28,9 @@ pub enum DeviceKind {
     /// backend cannot stream.
     AirspyHf,
     HackRf,
+    /// The PlutoSky R2, natively, through its own `iiod` server; asked for by
+    /// name only while its backend cannot open the radio.
+    PlutoSky,
     RtlSdr,
     /// The SDRplay RSP1B, natively, asked for by name only while its backend
     /// cannot stream.
@@ -141,7 +144,8 @@ impl DeviceKind {
                     library: "libsdrplay_api",
                 }),
             }),
-            DeviceKind::Soapy | DeviceKind::TinySa => None,
+            // Not until its backend can describe the radio.
+            DeviceKind::PlutoSky | DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
     }
 }
@@ -206,6 +210,8 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         "airspy" => DeviceKind::Airspy,
         "airspyhf" => DeviceKind::AirspyHf,
         "hackrf" => DeviceKind::HackRf,
+        // Not in the list below until it opens the radio: asked for by name only.
+        "plutosky" => DeviceKind::PlutoSky,
         "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
         "sdrplay" => DeviceKind::Sdrplay,
         "soapy" | "soapysdr" => DeviceKind::Soapy,
@@ -261,6 +267,16 @@ pub fn no_device_hint(want: Option<DeviceKind>) -> String {
                 }
             }
         }
+    }
+    // The PlutoSky only when its backend was asked for: unasked it offers
+    // nothing yet. A PlutoSDR on the bus that did not answer, or answered as
+    // another radio, is said.
+    if want == Some(DeviceKind::PlutoSky) {
+        hint.push('\n');
+        hint.push_str(&pluto::last_problem().unwrap_or_else(|| {
+            "PlutoSky: no PlutoSDR on USB (an R2 reached only over Ethernet is not searched for yet)."
+                .to_string()
+        }));
     }
     if (want.is_none() || want == Some(DeviceKind::Soapy)) && soapy::api::api().is_some() {
         hint.push_str("\nSoapySDR is installed: `SoapySDRUtil --find` lists what it can see.");
@@ -325,6 +341,8 @@ pub fn list_all_devices(
             out.push(held_sdrplay(&info));
         }
     }
+    // A PlutoSky only when asked for by name, until its backend opens it.
+    out.extend(pluto::list(want == Some(DeviceKind::PlutoSky)));
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
     } else {
@@ -443,6 +461,7 @@ pub fn open_device(
             &cfg.airspyhf,
         )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
+        DeviceKind::PlutoSky => Err(pluto::not_yet(listing)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Sdrplay => Ok(Arc::new(sdrplay::device::SdrplayDevice::open(
             listing,
@@ -511,6 +530,19 @@ mod tests {
     fn native_availability_check_accepts_non_native_backends() {
         assert!(DeviceKind::Soapy.check_available().is_ok());
         assert!(DeviceKind::TinySa.check_available().is_ok());
+    }
+
+    /// Unasked, the PlutoSky backend offers nothing yet, so it is no reason a
+    /// search came back empty; asked for, the hint says what it found.
+    #[test]
+    fn only_a_search_for_the_plutosky_speaks_of_it() {
+        assert!(!NATIVE.contains(&DeviceKind::PlutoSky));
+        assert!(!no_device_hint(None).contains("PlutoSky"));
+        assert!(!no_device_hint(Some(DeviceKind::HackRf)).contains("PlutoSky"));
+        assert!(
+            DeviceKind::PlutoSky.check_available().is_ok(),
+            "no library to miss"
+        );
     }
 
     #[test]
@@ -859,6 +891,22 @@ mod tests {
                 .to_string()
                 .contains("'sdrplay'"),
             "the backends it lists include it"
+        );
+        assert_eq!(
+            parse_device_arg("plutosky").unwrap(),
+            (DeviceKind::PlutoSky, None)
+        );
+        assert!(parse_device_arg("pluto").is_err(), "not a backend name");
+        assert!(
+            !parse_device_arg("pluto")
+                .unwrap_err()
+                .to_string()
+                .contains("plutosky"),
+            "not offered in the list until it opens the radio"
+        );
+        assert!(
+            DeviceKind::PlutoSky.observer_profile().is_none(),
+            "not until its backend can describe the radio"
         );
         assert!(parse_device_arg("").is_err(), "nor is nothing");
         let why = parse_device_arg("airspyhfplus").unwrap_err().to_string();

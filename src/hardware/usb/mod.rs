@@ -127,6 +127,17 @@ pub const SDRPLAY_RSP1B: Wanted = Wanted {
     named: None,
 };
 
+/// ADI's ADALM-PLUTO id, shared by the whole PlutoSDR family (the PlutoSky
+/// R2 among them), so finding it says nothing about which board it is: the
+/// board's own description decides that.
+pub const PLUTOSDR: Wanted = Wanted {
+    vid: 0x0456,
+    pids: &[0xb673],
+    product: "PlutoSDR (ADALM-PLUTO)",
+    manufacturer: "Analog Devices Inc.",
+    named: None,
+};
+
 /// An RTL-SDR dongle (Realtek, 0bda:2832 or 0bda:2838).
 pub const RTLSDR: Wanted = Wanted {
     vid: 0x0bda,

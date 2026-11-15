@@ -2,7 +2,8 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! The backends sdrtop drives itself: HackRF One, RTL-SDR, the Airspy R2 and
-//! the Airspy HF+ Discovery, with the SDRplay RSP1B on its way in ([`sdrplay`]).
+//! the Airspy HF+ Discovery, with the SDRplay RSP1B ([`sdrplay`]) and the
+//! PlutoSky R2 ([`pluto`]) on their way in.
 //!
 //! Each is a thin FFI wrapper ([`hackrf::ffi`], [`rtlsdr::ffi`]) plus a device
 //! struct, loaded at runtime and described from its own datasheet. What they
@@ -18,6 +19,7 @@ pub mod airspy;
 pub mod airspyhf;
 pub mod hackrf;
 mod loader;
+pub mod pluto;
 pub mod rtlsdr;
 pub mod sdrplay;
 
