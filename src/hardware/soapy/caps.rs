@@ -185,6 +185,21 @@ fn is_two_value_switch(e: &StageSpec, probed: Option<bool>) -> bool {
     probed == Some(true)
 }
 
+/// Whether an element asked for the middle of `[min_db, max_db]` read back
+/// `after` on one of its ends: the probe's answer to "is this a switch?".
+///
+/// A switch cannot hold anything between its two positions, so it lands on an
+/// end. A control with a grid it did not report lands on the grid point nearest
+/// the middle: not the middle exactly, but nowhere near an end. Asking "did it
+/// hold the middle?" instead calls every such control a switch; the AD9361
+/// behind SoapyPlutoSDR keeps whole decibels and was taken for one. The
+/// tolerance is a thousandth of a decibel, for a driver that rounds the end it
+/// reports.
+pub fn landed_on_an_end(min_db: f64, max_db: f64, after: f64) -> bool {
+    const HAIR_DB: f64 = 1e-3;
+    (after - min_db).abs() < HAIR_DB || (after - max_db).abs() < HAIR_DB
+}
+
 /// Split the driver's elements into stages to distribute across and a boost to
 /// toggle, dropping anything it described unusably.
 ///
@@ -541,6 +556,30 @@ mod tests {
         }
         assert_eq!(c.gain.boost_label(), "AMP");
         assert_eq!(c.gain.primary_max_db(), 102, "LNA 40 + VGA 62, no AMP");
+    }
+
+    /// What the probe's read-back means. Asked for the middle of its range, a
+    /// switch lands on one end; a control with a grid it did not report lands
+    /// on the grid point nearest the middle, which is not the middle exactly but
+    /// is nowhere near an end.
+    ///
+    /// SoapyPlutoSDR reports `PGA [0, 73]` with no step, and the AD9361 keeps
+    /// whole decibels: asked for 36.5 it reads back 36 or 37. Read as "did not
+    /// hold the middle", that made the PGA a two-position boost, and the boost
+    /// off at open then drove it to 0 dB under a header that said 16.
+    #[test]
+    fn a_read_back_on_an_end_is_a_switch_and_near_the_middle_is_not() {
+        // The HackRF's AMP through SoapyRemote: asked for 7, it is at 0 or 14.
+        assert!(landed_on_an_end(0.0, 14.0, 0.0));
+        assert!(landed_on_an_end(0.0, 14.0, 14.0));
+        // The PlutoSDR's PGA: whole decibels either side of 36.5.
+        assert!(!landed_on_an_end(0.0, 73.0, 36.0));
+        assert!(!landed_on_an_end(0.0, 73.0, 37.0));
+        // A continuous control that held the middle exactly.
+        assert!(!landed_on_an_end(0.0, 40.0, 20.0));
+        // A negative range is the same question.
+        assert!(landed_on_an_end(-10.0, 0.0, -10.0));
+        assert!(!landed_on_an_end(-10.0, 62.0, 26.0));
     }
 
     /// The narrowness of that rule, stated as a test: a real two-step control is

@@ -383,11 +383,7 @@ unsafe fn probe_two_value_switch(
     // failing the open over, but it is worth not pretending happened.
     let _ = unsafe { api.set_gain_element(dev, name, before) };
     let after = after?;
-    // A switch cannot hold the middle value: it lands on an end. A continuous
-    // control keeps it. The tolerance is a hair, because a driver is free to
-    // round the value it was handed.
-    let held_the_middle = (after - middle).abs() < 1e-6;
-    Some(!held_the_middle)
+    Some(caps::landed_on_an_end(min_db, max_db, after))
 }
 
 /// Identity for the header and the RF panels.
