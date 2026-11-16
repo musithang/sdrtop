@@ -122,6 +122,9 @@ numbers behind what the screen shows.
 
 | Radio | What was measured |
 |---|---|
+| [Airspy R2, measured](airspy-r2-measured.md) | Every register position of three stages, the LNA by frequency, the knob checked, the tuner's ceiling, timing, against SoapySDR |
+| [Airspy HF+ Discovery, measured](airspy-hf-measured.md) | The digital AGC's hold, where it sits, clean not clipped, at every rate, the AGC switch, ATT and LNA, timing |
+| [SDRplay RSP1B, measured](sdrplay-measured.md) | LNA states against SDRplay's table, the gain on screen, the mixer trap, image, notches, overload, sample depth, the service's delivery, against SoapySDR |
 | [PlutoSky R2, measured](plutosky-r2-measured.md) | The idle transmitter, every gain step in three bands, the filter and image, the link, ten-minute timing, against SoapySDR |
 
 ## Making it yours

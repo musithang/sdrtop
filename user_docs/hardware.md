@@ -12,9 +12,9 @@ the SoapySDR row was written from the API, and [says so out loud](soapysdr.md).
 | [HackRF One](hackrf.md) | 1 MHz to 6 GHz | 2 to 20 Msps | ✅ Every diagnostic, the reference radio |
 | [PortaPack H4M](hackrf.md#portapack-h4m) | As the HackRF | As the HackRF | ✅ In HackRF mode |
 | [RTL-SDR](rtl-sdr.md) | 24 MHz to 1.766 GHz (R820T / R828D), 52 MHz to 2.2 GHz (E4000) | 0.9 to 3.2 Msps | ✅ One tuner gain plus AGC |
-| [Airspy R2](airspy-r2.md) | 24 MHz to 1.8 GHz | 2.5 or 10 Msps | ✅ Measured gain tables, Airspy's curves |
-| [Airspy HF+ Discovery](airspy-hf.md) | 9 kHz to 31 MHz, 60 to 260 MHz | 192 to 912 kS/s | ✅ Its digital gain drawn as digital |
-| [SDRplay RSP1B](sdrplay.md) | 1 kHz to 2 GHz | 62.5 kS/s to 10 Msps | ✅ Measured gain per band, SDRplay-style curves |
+| [Airspy R2](airspy-r2.md) | 24 MHz to 1.8 GHz | 2.5 or 10 Msps | ✅ Measured gain tables, Airspy's curves ([measured](airspy-r2-measured.md)) |
+| [Airspy HF+ Discovery](airspy-hf.md) | 9 kHz to 31 MHz, 60 to 260 MHz | 192 to 912 kS/s | ✅ Its digital gain drawn as digital ([measured](airspy-hf-measured.md)) |
+| [SDRplay RSP1B](sdrplay.md) | 1 kHz to 2 GHz | 62.5 kS/s to 10 Msps | ✅ Measured gain per band, SDRplay-style curves ([measured](sdrplay-measured.md)) |
 | [PlutoSky R2](plutosky-r2.md) | 70 MHz to 6 GHz | 2.083 to 4 Msps over USB | ✅ Measured gain per band, no library ([measured](plutosky-r2-measured.md)) |
 | [tinySA / Ultra / Ultra+](tinysa.md) | By model | Power traces, not IQ | ✅ Spectrum, waterfall and sweeps in dBm (ZS405) |
 | [Anything SoapySDR drives](soapysdr.md) | The driver's | The driver's | 🧪 Beta: written from the API, not from owning one |

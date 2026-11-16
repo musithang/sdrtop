@@ -12,7 +12,8 @@ to fit. On HF, where a big broadcaster a few hundred kHz away is normal, that is
 the difference between a receiver you babysit and one you just use.
 
 It also changes what half the numbers on a bench mean, which is why it gets a
-page of its own.
+page of its own. What the bench measured on it, with the charts, is on
+**[Airspy HF+ Discovery, measured](airspy-hf-measured.md)**.
 
 ## At a glance
 
@@ -44,9 +45,8 @@ The controls keep the names every HF+ program uses, **ATT** and **LNA**, but
 neither is what its name suggests. Both are digital gain, applied after the
 converter: ATT sets the digital stage's gain down in 6 dB steps, and the LNA adds
 one more 6 dB step. They decide where the signal sits in the 16-bit word. They do
-not decide the signal-to-noise ratio, which was settled before them. Measured
-against steady carriers, every ATT step is 6.0 dB and the LNA 6.0 dB, within
-0.1 dB on VHF and 0.2 dB on HF.
+not decide the signal-to-noise ratio, which was settled before them. Both are
+exact ([measured](airspy-hf-measured.md#att-and-lna)).
 
 ATT also works ahead of the hold described below. While the digital AGC is
 holding a strong signal, more ATT brings it back under the hold, onto its line
@@ -85,20 +85,13 @@ same, so sdrtop leaves it at low.
 
 Push a strong signal in and its peak stops rising at about −12 dBFS, cleanly: no
 clipping, no new products. That is the digital AGC turning the radio's own gain
-down, early enough to leave the word room for transients. Measured on a cable, as
-the sample peak on the USB word:
-
-| | Arriving well past the hold | After any gain command |
-|---|---|---|
-| HF (below 31 MHz) | −13.5 dBFS | −11.6 dBFS |
-| VHF (60 MHz and up) | −14.8 dBFS | −13.3 dBFS |
-
-The upper figures are the same at all seven rates, each within 0.2 dB; the lower
-ones repeat to 0.1 dB. Which one you get depends on what came before: a carrier
-that arrives well past the hold is held lower, and the next gain command sent while
-it is there lifts it to the upper figure, even a command that changes nothing.
-That is the AGC's hysteresis, and a command starts it afresh. sdrtop only sends a
-command when you press a key, so the lower figure is the usual one.
+down, early enough to leave the word room for transients. Where exactly it stops
+depends on what came before: a carrier that arrives well past the hold is held
+about 2 dB lower (−13.5 on HF, −14.8 on VHF), and the next gain command sent
+while it is there lifts it to −11.6 and −13.3, even a command that changes
+nothing. That is the AGC's hysteresis, and a command starts it afresh. sdrtop
+only sends a command when you press a key, so the lower figure is the usual one.
+The figures for every band and rate are [measured](airspy-hf-measured.md#the-hold).
 
 So sdrtop shows the hold as a span, `HOLD -14 to -12 dBFS (digital AGC)` on HF, and
 judges from its low edge: past it, the level in the samples may no longer be the
@@ -111,21 +104,15 @@ overload by construction.
 
 ## How hard it can be pushed
 
-On a cable, a carrier was driven up to **29 dB past** the point where the output
-stops rising, about 17 dB more than the USB word could carry, and held there for
-six seconds. The output stayed at the hold, clean. The source's own spurs rose
-with the carrier at the same dBc, and nothing new appeared. Afterwards AGC off,
-on-low and on-high read the same within a tenth of a dB, where one attenuator step
-left behind would have shown as six. Whatever the analog loops took, the digital
-gain gave back. That is what "the radio protects itself" looks like from outside:
-nothing to see. Which is the point.
+Far harder than the USB word can carry: on a cable, 29 dB past the hold for six
+seconds, and the output stayed at the hold, clean, with no attenuation left
+behind afterwards ([the charts](airspy-hf-measured.md#the-agc-switch)). What
+the radio protects itself with is invisible from outside, which is the point.
 
-The other end is just as quiet. At full attenuation the radio's own noise is less
-than one step of the 16-bit word, and the library's corrections leave fractions of
-a step. Rounding those back to 16 bits lifted the floor by up to half a decibel,
-which is why sdrtop carries the samples in 32 bits with 8 below the word. The
-difference then measures under 0.001 dB. Recordings of the HF+ are `ci32_le` for
-the same reason ([the SigMF extension](sdrtop.sigmf-ext.md)).
+The other end is just as quiet. At full attenuation the radio's own noise is
+less than one step of the 16-bit word, so sdrtop carries the samples in 32 bits
+with 8 below the word, where rounding cannot lift the floor. Recordings of the
+HF+ are `ci32_le` for the same reason ([the SigMF extension](sdrtop.sigmf-ext.md)).
 
 ## Two bands and a gap
 
@@ -185,11 +172,9 @@ cannot be tuned with the switch off, so there it is refused. Saved as
 ## Timing
 
 libairspyhf delivers on its own thread, eight blocks deep, 4096 sample pairs a
-block with 1.8.1 (2048 with 1.6.8); sdrtop reads the size at open. On the
-deliberately old i3, five minutes at 912 kS/s took 13 to 14 % CPU with no drops,
-and the clock settled within ±15 ppm. Jitter is about ±1.5 ms at the zero-IF
-rates, where the library balances I and Q on its delivery thread, and about
-±0.2 ms at the others. `link util` reads against this radio's own top rate, so
+block with 1.8.1 (2048 with 1.6.8); sdrtop reads the size at open. Jitter is
+larger at the zero-IF rates, where the library balances I and Q on its delivery
+thread ([measured](airspy-hf-measured.md#timing)). `link util` reads against this radio's own top rate, so
 768 kS/s shows about 84 %: correct, not a warning.
 
 ## Observer mode, and the other HF+ boards

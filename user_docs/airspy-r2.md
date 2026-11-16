@@ -15,8 +15,8 @@ differently, and if yours does, I would like to hear how.
 
 On the timing bench, at the same settings, the native path ran with a jitter
 under a millisecond where the SoapySDR path showed eleven, and lost nothing
-where SoapySDR lost samples in its first twenty seconds, at about a third of
-the CPU.
+where SoapySDR lost samples, at about a third of the CPU. The numbers and the
+charts are on their own page: **[Airspy R2, measured](airspy-r2-measured.md)**.
 
 ## At a glance
 
@@ -34,15 +34,16 @@ the CPU.
 ## The gain is measured, not read off a box
 
 libairspy takes register positions (0 to 14 for the LNA, 0 to 15 for the mixer
-and the VGA) and says nothing about decibels. So each position was measured on
-the bench against steady carriers, and the tables are what the screen uses. The
-mixer and VGA tables hold across the range. The LNA's do not: it gives about
-36 dB in total at 93 MHz and about 31 at 930 MHz, so its table is trusted from
-88 to 170 MHz only. Outside that band the LNA reads as its step (`6/14`), and
+and the VGA) and says nothing about decibels. So each position was measured
+against steady carriers, and the tables are what the screen uses. The mixer and
+VGA tables hold across the range. The LNA's do not: it gives less, and in a
+different shape, as the frequency rises
+([measured](airspy-r2-measured.md#the-lna-and-frequency)), so its table is
+trusted from 88 to 170 MHz only. Outside that band the LNA reads as its step (`6/14`), and
 anything that would add it to the others (the chain total, auto-gain) says it
 can't, rather than adding a position to a number of decibels. In the rehearsal
-every step, of every stage and both curves, came out within 0.8 dB of the
-tables. (The mixer's top three steps add nothing measurable. They are shown
+every step came out within about 0.8 dB of the tables
+([checked](airspy-r2-measured.md#the-knob-checked)). (The mixer's top three steps add nothing measurable. They are shown
 anyway, because they are settings the radio has, and pretending otherwise
 would be tidier and less true.)
 
@@ -64,8 +65,8 @@ the RF bench) walks the same curve rather than inventing its own split.
 This one took an afternoon. Push the gain up on a strong signal and the level
 stops rising at about −3 dBFS while the noise floor jumps, and the ADC bench says
 `clip none`. The converter's raw samples settle it: they never reach their rails,
-because the tuner's IF output has already squared the signal off, at about
-70 % of the converter's range. The clip counter is right about the converter and
+because the tuner's IF output has already squared the signal off
+([measured](airspy-r2-measured.md#the-ceiling)). The clip counter is right about the converter and
 wrong about your signal. So on an R2, sdrtop measures headroom from **−3 dBFS**,
 draws the rail there (`CLIP -3 dBFS (tuner)`), calls a peak at it clipping, and
 says under `clip none` that the tuner clips there, uncounted. Auto-gain lands
@@ -100,7 +101,7 @@ Both live in the menu's **Options** pane.
 
 libairspy delivers on its own thread, and sdrtop hands each block on and returns.
 At 10 Msps on the deliberately old i3 this runs at about 40 % CPU with jitter
-under a millisecond. Once in a long while the whole machine pauses for a few
+under a millisecond ([measured](airspy-r2-measured.md#timing)). Once in a long while the whole machine pauses for a few
 hundred milliseconds, and a burst of samples is lost; sdrtop counts it, marks the
 gap, and the timing bench says whose it was: `Lost: driver N · sdrtop M`, the
 driver's own queue or sdrtop's.

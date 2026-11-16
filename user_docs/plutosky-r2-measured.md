@@ -4,10 +4,27 @@
 
 ---
 
-What sdrtop's bench found on one PlutoSky R2 (firmware v0.38), in November
-2026. The signal source was a HackRF One on an SMA cable into RX1, at most
-about -42 dBm, far under the AD9361's +2.5 dBm limit. Other R2s, and other
-firmware, may differ.
+What sdrtop's bench found on one PlutoSky R2, in November 2026. The PlutoSDR
+family has many boards, and they differ, so here is exactly which one:
+
+| | |
+|---|---|
+| Product | **PlutoSky R2**, made by [OpenSourceSDRLab](https://opensourcesdrlab.com/) |
+| It reports itself as | `Analog Devices PlutoSDR Rev.C (Z7020-AD9361)`, model variant 1 |
+| Firmware | `v0.38-5-g76414-dirty` (OpenSourceSDRLab's build of v0.38), Linux 5.15.0, iiod 0.25 |
+| Chips | Xilinx Zynq 7020 and an RF transceiver that reports itself as AD9361 |
+| AD9361, not AD9363? | It behaves as an AD9361 where the two differ: full gain and image rejection at 71 MHz and 5.8 GHz (outside the AD9363's 325 to 3800 MHz), a 50 MHz passband (the AD9363's is 20). Consistent, not proof: the two are one die, sorted |
+| USB | `0456:b673`, the id every PlutoSDR shares, over its USB network |
+| Port measured | RX1 |
+
+Not measured here, and not covered by this page: the ADALM-PLUTO, the Pluto+,
+other OpenSourceSDRLab boards, or this board on other firmware.
+
+The signal source was a **HackRF One r10** (inside a PortaPack H4M, in HackRF
+mode) on an SMA cable into RX1, at most about -42 dBm, far under the AD9361's
++2.5 dBm limit.
+
+![PlutoSky R2, measured: the overview](pics/plutosky/overview.png)
 
 **Contents:** [The idle transmitter](#the-idle-transmitter) ·
 [Gain](#gain) · [Filter and image](#filter-and-image) ·
@@ -45,8 +62,9 @@ settings in each band, where the table switches an amplifier.
 
 ![Does the gain do what the setting says?](pics/plutosky/p0d-gain-error.png)
 
-Added up, the real gain ends within -4.7 to +2.3 dB of the setting, and drifts
-smoothly with frequency inside a band. A second run agreed within 0.04 dB per
+Added up, the real gain ends within -5.6 to +2.3 dB of the setting (the -5.6
+at 71 MHz, the bottom of the range), and drifts smoothly with frequency inside
+a band. A second run agreed within 0.04 dB per
 step. This is what sdrtop shows as the gain.
 
 **Checked from the screen:** the gain stepped with sdrtop's own key, a carrier

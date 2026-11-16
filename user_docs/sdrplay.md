@@ -11,7 +11,8 @@ library, which talks to sdrtop. Every number on this page went through that
 chain, and a few of them are about the chain itself.
 
 Everything here was measured on the RSP1B on the desk, mostly on a cable from a
-HackRF, with no attenuator and a great deal of care.
+HackRF, with no attenuator and a great deal of care. The numbers and the charts
+are on their own page: **[SDRplay RSP1B, measured](sdrplay-measured.md)**.
 
 ## At a glance
 
@@ -35,24 +36,20 @@ first thing to check when it doesn't (`sudo systemctl start sdrplay`).
 ## The gain is measured, not copied
 
 SDRplay publishes a table of how much each LNA state takes away. The radio on
-the desk agrees with it under 50 MHz to about 1 dB. From 50 to 420 MHz it takes
-2.5 to 6 dB more than the table from state 4 on, from 420 MHz to 1 GHz 1 to 4 dB
-more, and in L-band the shape of the table itself changes with frequency (state
-3 is 20.8 dB down at 1200 MHz and 15 at 1900). So sdrtop carries its own
+the desk agrees with it under 50 MHz; above, the higher states take several dB
+more, and in L-band the table's shape changes with frequency
+([measured](sdrplay-measured.md#the-lna-states)). So sdrtop carries its own
 tables, one per band, measured at 14 frequencies, and shows the LNA in dB for
-the band you are tuned to. The IF is one staircase of 39 dB, about 1 dB a step
-and every sixth step 1.25, the same everywhere.
-
-Checked afterwards against a carrier, a step at a time across every state: the
-gain on screen follows the carrier to within 0.2 to 0.5 dB at 12 of the 14
-frequencies. **300 MHz is the exception at about ±0.8 dB**, repeatably, for a
-reason not yet pinned down.
+the band you are tuned to. The IF is one staircase of 39 dB, the same
+everywhere. The gain on screen follows a carrier to about half a dB, with one
+exception at 300 MHz ([measured](sdrplay-measured.md#the-gain-on-screen)).
 
 ### The mixer trap
 
 Some LNA states bring a mixer's gain reduction in with them, and SDRplay's table
 says so in a footnote. What the footnote does not say: in those states, with the
-IF turned up past about 36 dB, more IF gives you 9 to 15 dB *less* gain. sdrtop
+IF turned up past about 36 dB, more IF gives you *less* gain
+([measured](sdrplay-measured.md#the-mixer-trap)). sdrtop
 keeps out of it with one rule for every band: LNA states 4, 6, 7, 8 and 9 never
 get the IF's last 3 dB. One rule, because a setting legal in one band would
 otherwise land in another band's trap the moment you retune. Set by hand, it is
@@ -80,8 +77,7 @@ you the clipping.
 Two stages, two ways to spread a total over them:
 
 - **Sensitivity** gives the LNA as much as it can and lets the IF do the rest.
-  The lowest noise figure: at the same total gain it showed 15 dB less of its
-  own noise than Linearity.
+  The lowest noise figure ([measured](sdrplay-measured.md#noise-at-the-top)).
 - **Linearity** turns the IF up first and the LNA later. The most room for a
   strong neighbour.
 
@@ -106,14 +102,14 @@ the radio back your IF: left alone, the radio stays wherever the AGC last was.
 ## Corrections, image and notches
 
 SDRplay's API removes DC and balances I and Q before sdrtop sees a sample. It is
-on by default, because the radio's own balance is not great above VHF: the image
-sits 45 dB down at 150 MHz, 34.5 at 450 and 28 at 950 without it, and 58 to 66
-dB down with it. While it is on, the I/Q bench says `after SDRplay's correction`,
+on by default, because the radio's own balance is not great above VHF: with it
+the image sits 19 to 32 dB further down
+([measured](sdrplay-measured.md#image-and-the-correction)). While it is on, the I/Q bench says `after SDRplay's correction`,
 since what it measures is what the correction left. Switch it off in the Options
 pane to see the radio's own balance. The choice is kept in `[sdrplay]`.
 
-The notches, also in the Options pane and also kept: the AM/FM notch takes about
-51 dB at 100 MHz, the DAB notch about 29 at 200 MHz. Tuned where one acts, the
+The notches, also in the Options pane and also kept
+([how deep](sdrplay-measured.md#notches)). Tuned where one acts, the
 header says `AM/FM NOTCH IN` and the RF bench's chain shows it, since every level
 on the deck is then read through it.
 
@@ -136,7 +132,8 @@ time. That is its rhythm, not the USB link's, so the timing bench does not grade
 it against a deadline: it shows how long the service held the stream (`HELD ≤ 65
 ms`), and reads the sample clock from the deliveries that came earliest, good to
 about 70 ppm through the service. Transfers are bulk, not SDRplay's isochronous
-default, which lost the odd quarter-block over minutes.
+default, which lost the odd quarter-block over minutes
+([measured](sdrplay-measured.md#delivery-through-the-service)).
 
 On the deliberately old 2-core i3, up to 6 Msps runs with room to spare. 10 Msps
 sits at the edge: sdrtop takes about one core and the service half of another,
