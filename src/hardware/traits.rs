@@ -1957,6 +1957,23 @@ impl RateSet {
     }
 }
 
+/// A change another program made to a shared radio, as the backend read it
+/// back ([`SdrDevice::take_outside_changes`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum OutsideChange {
+    /// Tuned elsewhere, to this frequency.
+    Frequency(u64),
+    /// Another rate, and the filter with it.
+    Rate { rate_hz: f64, bb_filter_hz: u32 },
+    /// The radio's own AGC switched on or off.
+    Agc(bool),
+    /// A gain stage at another setting.
+    Stage(usize, f64),
+    /// Another program transmitting on this radio (what, in a few words), or
+    /// no longer.
+    Transmitting(Option<String>),
+}
+
 /// A tuned SDR receiver. Object-safe so it can be stored as `Arc<dyn SdrDevice>`
 /// and shared across the input handler, the RX task, and the sweep task.
 pub trait SdrDevice: Send + Sync {
@@ -2089,6 +2106,18 @@ pub trait SdrDevice: Send + Sync {
     /// `None` for a backend whose stages hold what they were set to.
     fn take_moved_stage(&self) -> Option<(usize, f64)> {
         None
+    }
+
+    /// What changed on the radio since last asked, made by someone other than
+    /// sdrtop, in the order found; empty for a radio only sdrtop can change.
+    ///
+    /// A radio served over a network can have other clients, and every one of
+    /// them may retune it, change its rate or gain, or start transmitting.
+    /// The backend notices on its own readback and says so here; the app
+    /// takes the radio's value as the truth (it never writes its own back
+    /// over another program's) and says who changed what.
+    fn take_outside_changes(&self) -> Vec<OutsideChange> {
+        Vec::new()
     }
 
     /// The dB stage `index` is at under the device's own automatic gain, as

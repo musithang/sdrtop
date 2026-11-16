@@ -74,6 +74,10 @@ pub struct RadioState {
     /// The front-end filter switched in that acts where the radio is tuned
     /// (`hardware::SdrDevice::filter_in`).
     pub filter_in: Option<&'static str>,
+    /// Another program transmitting on this radio, in a few words, as the
+    /// device found it (`hardware::OutsideChange::Transmitting`): the header
+    /// says so, since its signal leaks into what is received.
+    pub other_tx: Option<String>,
 }
 
 /// The radio's overload flag in the state: its last report, and when it was

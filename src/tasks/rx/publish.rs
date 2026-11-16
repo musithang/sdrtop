@@ -238,6 +238,11 @@ pub(super) fn write_back(
             }
         }
     }
+    // What another program changed on a shared radio: the radio's value is
+    // the truth, and the log says who changed it.
+    for change in device.take_outside_changes() {
+        apply_outside_change(&mut m, &change);
+    }
     m.radio.upstream_correction = device.upstream_correction();
     m.radio.filter_in = device.filter_in(m.radio.frequency);
     m.radio.auto_db = (0..device.capabilities().gain.stages().len())
@@ -248,6 +253,52 @@ pub(super) fn write_back(
         .map(|report| crate::state::RadioOverload::after(m.radio.overload, report, Instant::now()));
 
     m.radio.rx_enabled
+}
+
+/// One change another program made, into the state, and the log line that
+/// says so.
+pub(super) fn apply_outside_change(m: &mut SdrMetrics, change: &crate::hardware::OutsideChange) {
+    use crate::hardware::OutsideChange;
+    let say = match change {
+        OutsideChange::Frequency(hz) => {
+            m.radio.frequency = *hz;
+            format!("tuned to {:.6} MHz", *hz as f64 / 1e6)
+        }
+        OutsideChange::Rate {
+            rate_hz,
+            bb_filter_hz,
+        } => {
+            m.radio.config_sample_rate = *rate_hz;
+            m.radio.bb_filter_hz = *bb_filter_hz;
+            format!("sample rate set to {:.3} MHz", rate_hz / 1e6)
+        }
+        OutsideChange::Agc(on) => {
+            m.radio.amp_enabled = *on;
+            format!("AGC switched {}", if *on { "on" } else { "off" })
+        }
+        OutsideChange::Stage(i, v) => {
+            if let Some(g) = m.radio.gains.get_mut(*i) {
+                *g = *v;
+            }
+            // In the dB the screen shows: a banded stage's setting is a
+            // position, its dB the band's.
+            match m.caps.gain.stages().get(*i) {
+                Some(spec) => match spec.gain_db_at(*v, m.radio.frequency) {
+                    Some(db) => format!("{} set to {db:.0} dB", spec.name),
+                    None => format!("{} set to step {v:.0}", spec.name),
+                },
+                None => format!("stage {i} set to {v:.0}"),
+            }
+        }
+        OutsideChange::Transmitting(what) => {
+            m.radio.other_tx = what.clone();
+            match what {
+                Some(w) => format!("transmitting ({w}); its signal leaks into the receiver"),
+                None => "no longer transmitting".to_string(),
+            }
+        }
+    };
+    m.push_log(format!("Another program on this radio: {say}."));
 }
 
 /// The log line for a stage the radio holds at another value than was set.
@@ -334,6 +385,41 @@ fn push_trends(m: &mut SdrMetrics) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What another program changed lands in the state the keys would have
+    /// written, and the log names it as another program's.
+    #[test]
+    fn another_programs_changes_are_taken_and_said() {
+        use crate::hardware::OutsideChange;
+        let mut m = SdrMetrics::fixture();
+        m.radio.gains = vec![10.0, 10.0];
+        for c in [
+            OutsideChange::Frequency(145_500_000),
+            OutsideChange::Rate {
+                rate_hz: 3e6,
+                bb_filter_hz: 3_000_000,
+            },
+            OutsideChange::Agc(true),
+            OutsideChange::Stage(0, 40.0),
+            OutsideChange::Transmitting(Some("1 DDS tone set".into())),
+        ] {
+            apply_outside_change(&mut m, &c);
+        }
+        assert_eq!(m.radio.frequency, 145_500_000);
+        assert_eq!(m.radio.config_sample_rate, 3e6);
+        assert_eq!(m.radio.bb_filter_hz, 3_000_000);
+        assert!(m.radio.amp_enabled);
+        assert_eq!(m.radio.gains[0], 40.0);
+        assert_eq!(m.radio.other_tx.as_deref(), Some("1 DDS tone set"));
+        let said: Vec<&str> = m.ui.log.iter().map(|e| e.text.as_ref()).collect();
+        assert_eq!(said.len(), 5);
+        assert!(said
+            .iter()
+            .all(|l| l.starts_with("Another program on this radio:")));
+        assert!(said[0].contains("145.500000 MHz"), "{said:?}");
+        apply_outside_change(&mut m, &OutsideChange::Transmitting(None));
+        assert_eq!(m.radio.other_tx, None);
+    }
 
     /// **A trend takes an FFT frame once**: while the FFT is not running
     /// (nothing on screen reads it) the SNR, power and noise floor trends

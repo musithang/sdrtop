@@ -386,6 +386,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             auto_db: Vec::new(),
             upstream_correction: None,
             filter_in: None,
+            other_tx: None,
         },
         signal: SignalState {
             drops_per_sec: 0,

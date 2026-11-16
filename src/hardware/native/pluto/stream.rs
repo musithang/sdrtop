@@ -163,6 +163,12 @@ impl Streaming {
         )
     }
 
+    /// The rate as the reckoning holds it, for one that learns of a change
+    /// elsewhere.
+    pub fn rate_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.rate)
+    }
+
     /// The rate the radio runs at, for the reckoning.
     pub fn set_rate(&self, hz: f64) {
         self.rate.store(hz.to_bits(), Ordering::Relaxed);

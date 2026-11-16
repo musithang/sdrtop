@@ -64,6 +64,7 @@ impl SdrMetrics {
                 auto_db: Vec::new(),
                 upstream_correction: None,
                 filter_in: None,
+                other_tx: None,
             },
             signal: SignalState::default(),
             iq: IqState {

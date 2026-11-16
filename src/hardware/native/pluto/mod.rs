@@ -34,6 +34,7 @@ pub mod gain;
 pub mod iiod;
 pub mod stream;
 pub mod tx;
+pub mod watch;
 
 use std::sync::Mutex;
 use std::time::Duration;

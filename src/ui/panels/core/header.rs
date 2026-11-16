@@ -311,6 +311,19 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
             ),
         ]);
     }
+    // Another program transmitting on this radio: what is received carries
+    // its leak.
+    if state.radio.other_tx.is_some() {
+        recording.extend([
+            Span::raw("  "),
+            Span::styled(
+                "TRANSMITTING TOO",
+                Style::default()
+                    .fg(theme.status_warn)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+    }
     let recording_len: usize = recording.iter().map(|s| s.content.chars().count()).sum();
     let gap = top_band_gap(
         board_len,
@@ -1715,6 +1728,17 @@ mod tests {
             out.contains("AGC \u{25b8} LNA 3 \u{00b7} IF AGC 28 dB   77 dB"),
             "{out}"
         );
+    }
+
+    /// Another program transmitting on the radio is said on the top line.
+    #[test]
+    fn another_programs_transmission_is_said_on_the_top_line() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        let quiet = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(!quiet.contains("TRANSMITTING"), "{quiet}");
+        m.radio.other_tx = Some("1 DDS tone set".into());
+        let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(out.contains("TRANSMITTING TOO"), "{out}");
     }
 
     /// A single knob under the radio's AGC shows what the radio reports the

@@ -25,14 +25,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
     AcquisitionKind, Boost, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceListing,
-    DeviceOption, GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice,
-    SoftwareStack, StageSpec, IQ_TRACE_STALE_MS,
+    DeviceOption, GainModel, LevelUnit, OutsideChange, RxContext, SampleFormat, SampleGeometry,
+    SdrDevice, SoftwareStack, StageSpec, IQ_TRACE_STALE_MS,
 };
 
 use super::gain;
 use super::iiod::{Client, Target, Timeouts};
 use super::stream::{self, Streaming};
 use super::tx::{self, Finding};
+use super::watch::{Expected, Watch};
 use super::{context, identify, Model, DEFAULT_ADDRESS};
 
 const PHY: &str = "ad9361-phy";
@@ -97,15 +98,6 @@ impl AgcMode {
     }
 }
 
-/// Where the gain stands: the setting as a position from the band's bottom,
-/// the bottom the radio reports for the band it is tuned to, and the LO.
-#[derive(Clone, Copy, Debug)]
-struct Gain {
-    position: f64,
-    bottom_db: i32,
-    lo_hz: u64,
-}
-
 /// A PlutoSky R2, opened.
 pub struct PlutoDevice {
     client: Mutex<Client>,
@@ -113,13 +105,19 @@ pub struct PlutoDevice {
     info: DeviceInfo,
     notes: Vec<String>,
     moved: Mutex<Option<(usize, f64)>>,
-    gain: Mutex<Gain>,
+    /// What sdrtop set (or found another program had set); shared with the
+    /// watcher, held by every setter for its write and readback.
+    radio: Arc<Mutex<Expected>>,
     agc: Mutex<AgcMode>,
-    agc_on: std::sync::atomic::AtomicBool,
     address: String,
     stream_timeouts: Timeouts,
     streaming: Streaming,
+    watch: Watch,
+    watch_period: std::time::Duration,
 }
+
+/// How often the watcher reads the radio back while streaming.
+const WATCH_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The stream's waits: longer than a block at the lowest rate (31 ms) by far,
 /// short enough that a radio gone quiet is said within a couple of seconds.
@@ -271,10 +269,21 @@ impl PlutoDevice {
             .map_err(|e| refuse(e.to_string()))? as u64;
         let bottom_db = Self::bottom(&mut c).map_err(|e| refuse(e.to_string()))?;
         let hw = Self::number(&mut c, rx, "hardwaregain").map_err(|e| refuse(e.to_string()))?;
-        let gain = Gain {
+        let bw_hz =
+            Self::number(&mut c, rx, "rf_bandwidth").map_err(|e| refuse(e.to_string()))? as u32;
+        let expected = Expected {
             position: (hw - f64::from(bottom_db)).max(0.0),
             bottom_db,
             lo_hz,
+            rate_hz: rate,
+            bw_hz,
+            agc_on: false,
+            // An idle transmitter was silenced above; only another program's
+            // signal on the air is left to say.
+            other_tx: match tx::assess(&state) {
+                f @ Finding::Other { .. } => super::watch::transmitting(&f, state.lo_powered_down),
+                _ => None,
+            },
         };
         Ok(Self {
             client: Mutex::new(c),
@@ -282,17 +291,23 @@ impl PlutoDevice {
             info,
             notes,
             moved: Mutex::new(None),
-            gain: Mutex::new(gain),
+            radio: Arc::new(Mutex::new(expected)),
             agc: Mutex::new(AgcMode::Slow),
-            agc_on: std::sync::atomic::AtomicBool::new(false),
             address: address.to_string(),
             stream_timeouts,
             streaming,
+            watch: Watch::default(),
+            watch_period: WATCH_PERIOD,
         })
     }
 
     fn client(&self) -> MutexGuard<'_, Client> {
         self.client.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Taken after [`Self::client`], never before, by every setter.
+    fn expected(&self) -> MutexGuard<'_, Expected> {
+        self.radio.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn number(c: &mut Client, target: Target<'_>, attr: &str) -> anyhow::Result<f64> {
@@ -319,15 +334,15 @@ impl PlutoDevice {
         let mode = *self.agc.lock().unwrap_or_else(|e| e.into_inner());
         let want = if on { mode.driver() } else { "manual" };
         let mut c = self.client();
+        let mut g = self.expected();
         let rx = Target::Input(PHY, "voltage0");
         c.write(rx, "gain_control_mode", want)?;
         let got = c.read(rx, "gain_control_mode")?;
         if got != want {
             anyhow::bail!("the gain mode reads {got} after {want} was set");
         }
-        self.agc_on.store(on, std::sync::atomic::Ordering::Relaxed);
+        g.agc_on = on;
         if !on {
-            let mut g = self.gain.lock().unwrap_or_else(|e| e.into_inner());
             let position = g.position;
             self.apply(&mut c, &mut g, position)?;
         }
@@ -345,7 +360,7 @@ impl PlutoDevice {
 
     /// Writes the setting `position` as `hardwaregain` and reads it back;
     /// a position the radio or the measurements put elsewhere is told once.
-    fn apply(&self, c: &mut Client, g: &mut Gain, position: f64) -> anyhow::Result<()> {
+    fn apply(&self, c: &mut Client, g: &mut Expected, position: f64) -> anyhow::Result<()> {
         let want = position.round().clamp(0.0, self.last_measured(g.lo_hz));
         let rx = Target::Input(PHY, "voltage0");
         c.write(
@@ -419,14 +434,28 @@ impl SdrDevice for PlutoDevice {
         self.info.clone()
     }
 
+    /// The stream, and the watcher beside it while it runs.
     fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
         self.streaming
-            .start(&self.address, self.stream_timeouts, ctx)
+            .start(&self.address, self.stream_timeouts, ctx)?;
+        self.watch.start(
+            &self.address,
+            self.stream_timeouts,
+            self.watch_period,
+            Arc::clone(&self.radio),
+            self.streaming.rate_handle(),
+        );
+        Ok(())
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
+        self.watch.stop();
         self.streaming.stop();
         Ok(())
+    }
+
+    fn take_outside_changes(&self) -> Vec<OutsideChange> {
+        self.watch.take()
     }
 
     fn is_streaming(&self) -> bool {
@@ -446,12 +475,12 @@ impl SdrDevice for PlutoDevice {
     /// measured table may end lower, so `hardwaregain` is written again.
     fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         let mut c = self.client();
+        let mut g = self.expected();
         let lo = Target::Output(PHY, "altvoltage0");
         c.write(lo, "frequency", &hz.to_string())?;
         let tuned = Self::number(&mut c, lo, "frequency")? as u64;
-        let mut g = self.gain.lock().unwrap_or_else(|e| e.into_inner());
         let bottom = Self::bottom(&mut c)?;
-        let before = *g;
+        let before = g.clone();
         g.lo_hz = tuned;
         g.bottom_db = bottom;
         if bottom != before.bottom_db || before.position > self.last_measured(tuned) {
@@ -462,6 +491,7 @@ impl SdrDevice for PlutoDevice {
 
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
         let mut c = self.client();
+        let mut g = self.expected();
         let rx = Target::Input(PHY, "voltage0");
         let want = (hz.round() as u64).max(RATE_FLOOR_WRITE - 1);
         let write = if want == RATE_FLOOR_WRITE - 1 {
@@ -476,6 +506,8 @@ impl SdrDevice for PlutoDevice {
         c.write(rx, "rf_bandwidth", &bw.to_string())?;
         let bw = Self::number(&mut c, rx, "rf_bandwidth")?;
         self.streaming.set_rate(rate);
+        g.rate_hz = rate;
+        g.bw_hz = bw as u32;
         Ok(RateSet::new(hz, Some(rate), bw as u32))
     }
 
@@ -489,7 +521,7 @@ impl SdrDevice for PlutoDevice {
             return Ok(());
         }
         let mut c = self.client();
-        let mut g = self.gain.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = self.expected();
         self.apply(&mut c, &mut g, value)
     }
 
@@ -503,11 +535,11 @@ impl SdrDevice for PlutoDevice {
 
     /// Under the AGC, the gain it chose, in the measured dB of that setting.
     fn auto_stage_db(&self, index: usize) -> Option<f64> {
-        if index != 0 || !self.agc_on.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut c = self.client();
+        let g = self.expected().clone();
+        if index != 0 || !g.agc_on {
             return None;
         }
-        let mut c = self.client();
-        let g = *self.gain.lock().unwrap_or_else(|e| e.into_inner());
         let hw = Self::number(&mut c, Target::Input(PHY, "voltage0"), "hardwaregain").ok()?;
         self.caps.gain.stages()[0].gain_db_at(hw - f64::from(g.bottom_db), g.lo_hz)
     }
@@ -533,7 +565,7 @@ impl SdrDevice for PlutoDevice {
             .find(|m| m.label() == choice)
             .ok_or_else(|| anyhow::anyhow!("{choice} is not a choice for {id}"))?;
         *self.agc.lock().unwrap_or_else(|e| e.into_inner()) = mode;
-        if self.agc_on.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.expected().agc_on {
             self.set_agc(true)?;
         }
         Ok(())
@@ -1009,6 +1041,54 @@ mod tests {
         dev.update_config(&mut cfg).unwrap();
         assert_eq!(cfg.plutosky.agc, "fast_attack");
         assert!(dev.set_option("agc", "Hybrid").is_err(), "not offered");
+    }
+
+    /// While streaming, another program's retune and transmission are found
+    /// and handed over, once; sdrtop's own retune is not mistaken for one.
+    #[test]
+    fn another_programs_changes_are_found_while_streaming() {
+        let (addr, radio) = fake::serve(r2_after_power_up());
+        let mut dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        dev.watch_period = Duration::from_millis(30);
+        let (ctx, _net) = streaming_ctx();
+        dev.start_rx(Arc::clone(&ctx)).unwrap();
+        dev.set_frequency(2_410_000_000).unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(dev.take_outside_changes(), [], "sdrtop's own retune");
+        {
+            let mut r = radio.lock().unwrap();
+            r.attrs.insert(
+                "ad9361-phy OUTPUT altvoltage0 frequency".into(),
+                "145500000".into(),
+            );
+            r.attrs.insert(
+                "cf-ad9361-dds-core-lpc OUTPUT altvoltage0 scale".into(),
+                "0.099976".into(),
+            );
+            // Its LO running: the tone is on the air.
+            r.attrs
+                .insert("ad9361-phy OUTPUT altvoltage1 powerdown".into(), "0".into());
+        }
+        let started = std::time::Instant::now();
+        let mut found = Vec::new();
+        while found.len() < 2 && started.elapsed() < WAIT {
+            std::thread::sleep(Duration::from_millis(30));
+            found.extend(dev.take_outside_changes());
+        }
+        // One reading may straddle the two changes, so either order.
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            found.contains(&OutsideChange::Frequency(145_500_000)),
+            "{found:?}"
+        );
+        assert!(
+            found.contains(&OutsideChange::Transmitting(Some("1 DDS tone set".into()))),
+            "{found:?}"
+        );
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(dev.take_outside_changes(), [], "said once");
+        dev.stop_rx().unwrap();
+        assert_eq!(Arc::strong_count(&ctx), 1);
     }
 
     #[test]
