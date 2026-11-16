@@ -526,7 +526,31 @@ pub(crate) mod fake {
                 } else if !radio.attrs.contains_key(&key) {
                     return Some(b"-2\n".to_vec());
                 } else if !radio.ignores.contains(&key) {
-                    radio.attrs.insert(key, v);
+                    radio.attrs.insert(key.clone(), v.clone());
+                    // The driver's gain table follows the LO: the range moves
+                    // with the band, and the gain is held inside it.
+                    if key == "ad9361-phy OUTPUT altvoltage0 frequency" {
+                        let hz: f64 = v.trim().parse().unwrap_or(0.0);
+                        let (lo, hi) = if hz <= 1.3e9 {
+                            (-1.0, 73.0)
+                        } else if hz <= 4e9 {
+                            (-3.0, 71.0)
+                        } else {
+                            (-10.0, 62.0)
+                        };
+                        let gain = "ad9361-phy INPUT voltage0 hardwaregain".to_string();
+                        radio.attrs.insert(
+                            "ad9361-phy INPUT voltage0 hardwaregain_available".into(),
+                            format!("[{lo} 1 {hi}]"),
+                        );
+                        if let Some(g) = radio
+                            .attrs
+                            .get(&gain)
+                            .and_then(|g| g.split_whitespace().next()?.parse::<f64>().ok())
+                        {
+                            radio.attrs.insert(gain, format!("{} dB", g.clamp(lo, hi)));
+                        }
+                    }
                 }
                 format!("{n}\n").into_bytes()
             }

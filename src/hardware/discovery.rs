@@ -461,7 +461,10 @@ pub fn open_device(
             &cfg.airspyhf,
         )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
-        DeviceKind::PlutoSky => Ok(Arc::new(pluto::device::PlutoDevice::open(listing)?)),
+        DeviceKind::PlutoSky => Ok(Arc::new(pluto::device::PlutoDevice::open(
+            listing,
+            &cfg.plutosky,
+        )?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Sdrplay => Ok(Arc::new(sdrplay::device::SdrplayDevice::open(
             listing,

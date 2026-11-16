@@ -30,6 +30,7 @@
 
 pub mod context;
 pub mod device;
+pub mod gain;
 pub mod iiod;
 pub mod stream;
 pub mod tx;

@@ -404,6 +404,7 @@ impl App {
             airspy_config: cfg.airspy.clone(),
             airspyhf_config: cfg.airspyhf.clone(),
             sdrplay_config: cfg.sdrplay.clone(),
+            plutosky_config: cfg.plutosky.clone(),
             boost_config: cfg.radio.boost.clone(),
             net_config: cfg.net.clone(),
             record_config: cfg.record.clone(),

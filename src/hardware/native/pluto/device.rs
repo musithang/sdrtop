@@ -24,11 +24,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
-    AcquisitionKind, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceListing, GainModel,
-    LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice, SoftwareStack, StageSpec,
-    IQ_TRACE_STALE_MS,
+    AcquisitionKind, Boost, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceListing,
+    DeviceOption, GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice,
+    SoftwareStack, StageSpec, IQ_TRACE_STALE_MS,
 };
 
+use super::gain;
 use super::iiod::{Client, Target, Timeouts};
 use super::stream::{self, Streaming};
 use super::tx::{self, Finding};
@@ -54,12 +55,8 @@ const RATE_FLOOR_WRITE: u64 = 2_083_334;
 const BW_MIN_HZ: f64 = 200_000.0;
 const BW_MAX_HZ: f64 = 56_000_000.0;
 
-/// The whole span `hardwaregain` takes across the three gain-table bands
-/// (-1..73 below 1.3 GHz, -3..71 to 4 GHz, -10..62 above, read from the
-/// radio). The band at hand clamps a value outside its own range, and the
-/// clamp is read back.
-const GAIN_MIN_DB: f64 = -10.0;
-const GAIN_MAX_DB: f64 = 73.0;
+/// The most settings any gain-table band has (-1..73 below 1.3 GHz).
+const GAIN_POSITIONS: u32 = 75;
 
 /// Longer than discovery's: the RF DC calibration answers in about 175 ms on
 /// its own and took 1.7 s while another client streamed.
@@ -68,6 +65,47 @@ const SESSION: Timeouts = Timeouts {
     io: std::time::Duration::from_millis(5000),
 };
 
+/// The AD9361's automatic gain modes offered: the two that follow the signal
+/// on the R2 (hybrid, measured, does not).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgcMode {
+    Slow,
+    Fast,
+}
+
+impl AgcMode {
+    fn driver(self) -> &'static str {
+        match self {
+            AgcMode::Slow => "slow_attack",
+            AgcMode::Fast => "fast_attack",
+        }
+    }
+
+    fn from_driver(s: &str) -> Option<Self> {
+        match s {
+            "slow_attack" => Some(AgcMode::Slow),
+            "fast_attack" => Some(AgcMode::Fast),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            AgcMode::Slow => "Slow attack",
+            AgcMode::Fast => "Fast attack",
+        }
+    }
+}
+
+/// Where the gain stands: the setting as a position from the band's bottom,
+/// the bottom the radio reports for the band it is tuned to, and the LO.
+#[derive(Clone, Copy, Debug)]
+struct Gain {
+    position: f64,
+    bottom_db: i32,
+    lo_hz: u64,
+}
+
 /// A PlutoSky R2, opened.
 pub struct PlutoDevice {
     client: Mutex<Client>,
@@ -75,6 +113,9 @@ pub struct PlutoDevice {
     info: DeviceInfo,
     notes: Vec<String>,
     moved: Mutex<Option<(usize, f64)>>,
+    gain: Mutex<Gain>,
+    agc: Mutex<AgcMode>,
+    agc_on: std::sync::atomic::AtomicBool,
     address: String,
     stream_timeouts: Timeouts,
     streaming: Streaming,
@@ -89,8 +130,15 @@ const STREAM: Timeouts = Timeouts {
 
 impl PlutoDevice {
     /// The R2 a listing names, at the default address.
-    pub fn open(listing: &DeviceListing) -> anyhow::Result<Self> {
-        Self::open_at(DEFAULT_ADDRESS, listing, SESSION, STREAM)
+    pub fn open(
+        listing: &DeviceListing,
+        settings: &crate::config::PlutoSkySettings,
+    ) -> anyhow::Result<Self> {
+        let dev = Self::open_at(DEFAULT_ADDRESS, listing, SESSION, STREAM)?;
+        if let Some(mode) = AgcMode::from_driver(&settings.agc) {
+            *dev.agc.lock().unwrap_or_else(|e| e.into_inner()) = mode;
+        }
+        Ok(dev)
     }
 
     pub(super) fn open_at(
@@ -172,6 +220,23 @@ impl PlutoDevice {
                 "PlutoSky: the receiver's port is {port}, not A_BALANCED."
             ));
         }
+        // The tracking loops the I/Q bench's readings are stated after: on,
+        // as the firmware starts them, whatever another program left.
+        for lp in [
+            "quadrature_tracking_en",
+            "rf_dc_offset_tracking_en",
+            "bb_dc_offset_tracking_en",
+        ] {
+            let on = c.read(rx, lp).map_err(|e| refuse(format!("{lp}: {e}")))?;
+            if on != "1" {
+                c.write(rx, lp, "1")
+                    .map_err(|e| refuse(format!("{lp}: {e}")))?;
+                if c.read(rx, lp).map_err(|e| refuse(e.to_string()))? != "1" {
+                    return Err(refuse(format!("{lp} stays off")));
+                }
+                notes.push(format!("PlutoSky: {lp} was off; switched on."));
+            }
+        }
         c.write(Target::Device(PHY), "calib_mode", "rf_dc_offs")
             .map_err(|e| refuse(format!("RF DC calibration: {e}")))?;
         notes.push(format!(
@@ -202,12 +267,24 @@ impl PlutoDevice {
             .and_then(|v| tx::parse_db(&v))
             .unwrap_or(0.0);
         streaming.set_rate(rate);
+        let lo_hz = Self::number(&mut c, Target::Output(PHY, "altvoltage0"), "frequency")
+            .map_err(|e| refuse(e.to_string()))? as u64;
+        let bottom_db = Self::bottom(&mut c).map_err(|e| refuse(e.to_string()))?;
+        let hw = Self::number(&mut c, rx, "hardwaregain").map_err(|e| refuse(e.to_string()))?;
+        let gain = Gain {
+            position: (hw - f64::from(bottom_db)).max(0.0),
+            bottom_db,
+            lo_hz,
+        };
         Ok(Self {
             client: Mutex::new(c),
             caps: caps(),
             info,
             notes,
             moved: Mutex::new(None),
+            gain: Mutex::new(gain),
+            agc: Mutex::new(AgcMode::Slow),
+            agc_on: std::sync::atomic::AtomicBool::new(false),
             address: address.to_string(),
             stream_timeouts,
             streaming,
@@ -221,6 +298,67 @@ impl PlutoDevice {
     fn number(c: &mut Client, target: Target<'_>, attr: &str) -> anyhow::Result<f64> {
         let v = c.read(target, attr)?;
         tx::parse_db(&v).ok_or_else(|| anyhow::anyhow!("{target} {attr} reads {v:?}"))
+    }
+
+    /// The lowest `hardwaregain` of the band the radio is tuned to, as it
+    /// reports it (`[-3 1 71]`).
+    fn bottom(c: &mut Client) -> anyhow::Result<i32> {
+        let v = c.read(Target::Input(PHY, "voltage0"), "hardwaregain_available")?;
+        v.trim_start_matches('[')
+            .split_whitespace()
+            .next()
+            .and_then(|n| n.parse::<f64>().ok())
+            .map(|n| n.round() as i32)
+            .ok_or_else(|| anyhow::anyhow!("hardwaregain_available reads {v:?}"))
+    }
+
+    /// The AGC on (in the chosen mode) or off, read back. Off, the radio
+    /// keeps the AGC's last gain, so the setting sdrtop holds is written
+    /// again.
+    fn set_agc(&self, on: bool) -> anyhow::Result<()> {
+        let mode = *self.agc.lock().unwrap_or_else(|e| e.into_inner());
+        let want = if on { mode.driver() } else { "manual" };
+        let mut c = self.client();
+        let rx = Target::Input(PHY, "voltage0");
+        c.write(rx, "gain_control_mode", want)?;
+        let got = c.read(rx, "gain_control_mode")?;
+        if got != want {
+            anyhow::bail!("the gain mode reads {got} after {want} was set");
+        }
+        self.agc_on.store(on, std::sync::atomic::Ordering::Relaxed);
+        if !on {
+            let mut g = self.gain.lock().unwrap_or_else(|e| e.into_inner());
+            let position = g.position;
+            self.apply(&mut c, &mut g, position)?;
+        }
+        Ok(())
+    }
+
+    /// The last setting measured at `hz`, which the radio is kept within.
+    fn last_measured(&self, hz: u64) -> f64 {
+        self.caps.gain.stages()[0]
+            .band_at(hz)
+            .map_or(f64::from(GAIN_POSITIONS - 1), |b| {
+                b.db.len().saturating_sub(1) as f64
+            })
+    }
+
+    /// Writes the setting `position` as `hardwaregain` and reads it back;
+    /// a position the radio or the measurements put elsewhere is told once.
+    fn apply(&self, c: &mut Client, g: &mut Gain, position: f64) -> anyhow::Result<()> {
+        let want = position.round().clamp(0.0, self.last_measured(g.lo_hz));
+        let rx = Target::Input(PHY, "voltage0");
+        c.write(
+            rx,
+            "hardwaregain",
+            &format!("{}", f64::from(g.bottom_db) + want),
+        )?;
+        let got = Self::number(c, rx, "hardwaregain")? - f64::from(g.bottom_db);
+        if (got - position.round()).abs() > 0.01 {
+            *self.moved.lock().unwrap_or_else(|e| e.into_inner()) = Some((0, got));
+        }
+        g.position = got;
+        Ok(())
     }
 }
 
@@ -248,16 +386,19 @@ pub fn caps() -> DeviceCapabilities {
             full_scale: 2048.0,
             converter_bits: Some(12),
         },
+        // The setting is a position from the band's bottom; its decibels are
+        // the measured ones at the nearest measured frequency. `[A]` is the
+        // chip's own AGC.
         gain: GainModel::new(
-            vec![StageSpec::ranged(
+            vec![StageSpec::banded(
                 "hardwaregain",
-                GAIN_MIN_DB,
-                GAIN_MAX_DB,
-                1.0,
+                GAIN_POSITIONS,
+                gain::tables(&gain::points(gain::MEASURED)),
             )],
             "Gain",
             "GAIN",
-        ),
+        )
+        .with_boost(Boost::GainMode),
         samples_per_transfer: stream::BLOCK_PAIRS as u64,
         // `rf_bandwidth` sets the chip's analog filters.
         has_bb_filter: true,
@@ -300,11 +441,23 @@ impl SdrDevice for PlutoDevice {
         Some(self.streaming.clock())
     }
 
+    /// Tunes, then keeps the gain's setting where it was in the new band:
+    /// across a gain-table band edge the bottom moves (-1, -3, -10 dB), and a
+    /// measured table may end lower, so `hardwaregain` is written again.
     fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         let mut c = self.client();
         let lo = Target::Output(PHY, "altvoltage0");
         c.write(lo, "frequency", &hz.to_string())?;
-        Ok(Self::number(&mut c, lo, "frequency")? as u64)
+        let tuned = Self::number(&mut c, lo, "frequency")? as u64;
+        let mut g = self.gain.lock().unwrap_or_else(|e| e.into_inner());
+        let bottom = Self::bottom(&mut c)?;
+        let before = *g;
+        g.lo_hz = tuned;
+        g.bottom_db = bottom;
+        if bottom != before.bottom_db || before.position > self.last_measured(tuned) {
+            self.apply(&mut c, &mut g, before.position)?;
+        }
+        Ok(tuned)
     }
 
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
@@ -330,19 +483,77 @@ impl SdrDevice for PlutoDevice {
         self.set_stage_gain(0, "hardwaregain", f64::from(db))
     }
 
-    fn set_stage_gain(&self, index: usize, _name: &str, db: f64) -> anyhow::Result<()> {
+    /// `value` is the setting, a position from the band's bottom.
+    fn set_stage_gain(&self, index: usize, _name: &str, value: f64) -> anyhow::Result<()> {
         if index != 0 {
             return Ok(());
         }
         let mut c = self.client();
-        let rx = Target::Input(PHY, "voltage0");
-        let want = db.round();
-        c.write(rx, "hardwaregain", &format!("{want}"))?;
-        let got = Self::number(&mut c, rx, "hardwaregain")?;
-        if (got - want).abs() > 0.01 {
-            *self.moved.lock().unwrap_or_else(|e| e.into_inner()) = Some((0, got));
+        let mut g = self.gain.lock().unwrap_or_else(|e| e.into_inner());
+        self.apply(&mut c, &mut g, value)
+    }
+
+    fn set_amp_enable(&self, on: bool) -> anyhow::Result<()> {
+        self.set_agc(on)
+    }
+
+    fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
+        self.set_agc(on)
+    }
+
+    /// Under the AGC, the gain it chose, in the measured dB of that setting.
+    fn auto_stage_db(&self, index: usize) -> Option<f64> {
+        if index != 0 || !self.agc_on.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let mut c = self.client();
+        let g = *self.gain.lock().unwrap_or_else(|e| e.into_inner());
+        let hw = Self::number(&mut c, Target::Input(PHY, "voltage0"), "hardwaregain").ok()?;
+        self.caps.gain.stages()[0].gain_db_at(hw - f64::from(g.bottom_db), g.lo_hz)
+    }
+
+    fn options(&self) -> Vec<DeviceOption> {
+        let mode = *self.agc.lock().unwrap_or_else(|e| e.into_inner());
+        vec![DeviceOption {
+            id: "agc".into(),
+            label: "AGC mode".into(),
+            choices: vec![AgcMode::Slow.label().into(), AgcMode::Fast.label().into()],
+            selected_choice: mode.label().into(),
+            integer_range: None,
+        }]
+    }
+
+    /// The mode `[A]` switches on; taken at once if the AGC is on.
+    fn set_option(&self, id: &str, choice: &str) -> anyhow::Result<()> {
+        if id != "agc" {
+            anyhow::bail!("the PlutoSky R2 has no option {id}");
+        }
+        let mode = [AgcMode::Slow, AgcMode::Fast]
+            .into_iter()
+            .find(|m| m.label() == choice)
+            .ok_or_else(|| anyhow::anyhow!("{choice} is not a choice for {id}"))?;
+        *self.agc.lock().unwrap_or_else(|e| e.into_inner()) = mode;
+        if self.agc_on.load(std::sync::atomic::Ordering::Relaxed) {
+            self.set_agc(true)?;
         }
         Ok(())
+    }
+
+    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+        config.plutosky.agc = self
+            .agc
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .driver()
+            .into();
+        Ok(())
+    }
+
+    /// The AD9361's quadrature and DC tracking loops run on every R2 sdrtop
+    /// opens (the firmware's own default, kept): the image and the DC the
+    /// I/Q bench measures are what is left after them.
+    fn upstream_correction(&self) -> Option<&'static str> {
+        Some("after the AD9361's tracking loops")
     }
 
     fn take_moved_stage(&self) -> Option<(usize, f64)> {
@@ -401,6 +612,10 @@ mod tests {
         }
         put("ad9361-phy INPUT voltage0 gain_control_mode", "slow_attack");
         put("ad9361-phy INPUT voltage0 hardwaregain", "71.000000 dB");
+        put(
+            "ad9361-phy INPUT voltage0 hardwaregain_available",
+            "[-3 1 71]",
+        );
         put("ad9361-phy INPUT voltage0 rf_port_select", "A_BALANCED");
         // 3 MS/s rather than the power-up 30.72, so the stand-in's paced
         // blocks (21.8 ms each) are easy for a test to keep up with.
@@ -408,6 +623,13 @@ mod tests {
         put("ad9361-phy INPUT voltage0 rf_bandwidth", "18000000");
         put("ad9361-phy OUTPUT altvoltage0 frequency", "2400000000");
         put("ad9361-phy calib_mode", "auto");
+        for lp in [
+            "quadrature_tracking_en",
+            "rf_dc_offset_tracking_en",
+            "bb_dc_offset_tracking_en",
+        ] {
+            put(&format!("ad9361-phy INPUT voltage0 {lp}"), "1");
+        }
         fake::Radio {
             version: "0.25.v0.25  \n".into(),
             xml: include_str!("../fixtures/pluto-r2-context.xml").into(),
@@ -525,6 +747,25 @@ mod tests {
         assert!(dev.open_notes()[0].contains("already silent"));
     }
 
+    /// A tracking loop another program switched off is switched on again,
+    /// since the I/Q bench says its readings are after them.
+    #[test]
+    fn a_tracking_loop_left_off_is_switched_on() {
+        let mut r = r2_after_power_up();
+        r.attrs.insert(
+            "ad9361-phy INPUT voltage0 quadrature_tracking_en".into(),
+            "0".into(),
+        );
+        let (addr, radio) = fake::serve(r);
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        assert!(written(&radio)
+            .contains(&"ad9361-phy INPUT voltage0 quadrature_tracking_en=1".to_string()));
+        assert!(dev
+            .open_notes()
+            .iter()
+            .any(|n| n.contains("quadrature_tracking_en was off")));
+    }
+
     #[test]
     fn a_receiver_stuck_in_its_agc_refuses_the_open() {
         let mut r = r2_after_power_up();
@@ -549,7 +790,7 @@ mod tests {
     }
 
     /// The radio's readback is the setting: the floor written one higher,
-    /// the filter following the rate, a gain the band clamps told once.
+    /// the filter following the rate.
     #[test]
     fn settings_are_what_the_radio_reads_back() {
         let (addr, radio) = fake::serve(r2_after_power_up());
@@ -562,16 +803,47 @@ mod tests {
         assert_eq!(set.bb_filter_hz, 2_083_334);
         assert!(written(&radio)
             .contains(&"ad9361-phy INPUT voltage0 sampling_frequency=2083334".to_string()));
-        assert_eq!(dev.set_frequency(433_500_000).unwrap(), 433_500_000);
+    }
 
+    /// The setting is a position from the band's bottom: 20 is 17 dB at
+    /// 2.4 GHz (bottom -3) and 19 dB at 433 MHz (bottom -1), and a retune
+    /// across the edge writes it again so the position holds.
+    #[test]
+    fn the_gain_setting_holds_its_position_across_a_band_edge() {
+        let (addr, radio) = fake::serve(r2_after_power_up());
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        dev.set_stage_gain(0, "hardwaregain", 20.0).unwrap();
+        assert!(written(&radio).contains(&"ad9361-phy INPUT voltage0 hardwaregain=17".to_string()));
+        assert_eq!(dev.take_moved_stage(), None);
+        assert_eq!(dev.set_frequency(433_500_000).unwrap(), 433_500_000);
+        assert_eq!(
+            written(&radio).last().unwrap(),
+            "ad9361-phy INPUT voltage0 hardwaregain=19"
+        );
+        assert_eq!(dev.take_moved_stage(), None, "the position held");
+    }
+
+    /// Where the measurements stop (2.4 GHz above 66 dB), the radio is kept
+    /// at the last measured setting, and the move is told once.
+    #[test]
+    fn the_gain_stays_within_what_was_measured() {
+        let (addr, radio) = fake::serve(r2_after_power_up());
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        dev.set_stage_gain(0, "hardwaregain", 74.0).unwrap();
+        assert_eq!(
+            written(&radio).last().unwrap(),
+            "ad9361-phy INPUT voltage0 hardwaregain=66"
+        );
+        assert_eq!(dev.take_moved_stage(), Some((0, 69.0)));
+        assert_eq!(dev.take_moved_stage(), None, "told once");
+        // A radio that will not take the gain: its own value is the setting.
         radio
             .lock()
             .unwrap()
             .ignores
             .insert("ad9361-phy INPUT voltage0 hardwaregain".into());
-        dev.set_stage_gain(0, "hardwaregain", 20.0).unwrap();
-        assert_eq!(dev.take_moved_stage(), Some((0, 71.0)), "the radio's value");
-        assert_eq!(dev.take_moved_stage(), None, "told once");
+        dev.set_stage_gain(0, "hardwaregain", 10.0).unwrap();
+        assert_eq!(dev.take_moved_stage(), Some((0, 69.0)), "the radio's word");
     }
 
     const WAIT: Duration = Duration::from_secs(5);
@@ -696,6 +968,47 @@ mod tests {
                 .any(|l| l.contains("answered a block with nothing")),
             "{said:?}"
         );
+    }
+
+    /// `[A]` switches the chip's AGC in the chosen mode; off again, the
+    /// setting sdrtop holds is written back, since manual keeps the AGC's.
+    #[test]
+    fn the_agc_comes_and_goes_and_the_setting_returns() {
+        let (addr, radio) = fake::serve(r2_after_power_up());
+        let dev = PlutoDevice::open_at(&addr, &listing(), quick(), quick()).unwrap();
+        dev.set_stage_gain(0, "hardwaregain", 20.0).unwrap();
+        dev.set_tuner_agc(true).unwrap();
+        assert_eq!(
+            written(&radio).last().unwrap(),
+            "ad9361-phy INPUT voltage0 gain_control_mode=slow_attack"
+        );
+        // The AGC moves the gain; its choice is shown in measured dB.
+        radio.lock().unwrap().attrs.insert(
+            "ad9361-phy INPUT voltage0 hardwaregain".into(),
+            "40.000000 dB".into(),
+        );
+        let db = dev.auto_stage_db(0).unwrap();
+        assert!((35.0..42.0).contains(&db), "{db}");
+        dev.set_option("agc", "Fast attack").unwrap();
+        assert_eq!(
+            written(&radio).last().unwrap(),
+            "ad9361-phy INPUT voltage0 gain_control_mode=fast_attack",
+            "taken at once while on"
+        );
+        dev.set_tuner_agc(false).unwrap();
+        let w = written(&radio);
+        assert_eq!(
+            w[w.len() - 2..],
+            [
+                "ad9361-phy INPUT voltage0 gain_control_mode=manual".to_string(),
+                "ad9361-phy INPUT voltage0 hardwaregain=17".to_string()
+            ]
+        );
+        assert_eq!(dev.auto_stage_db(0), None, "not under the AGC");
+        let mut cfg = crate::config::AppConfig::default();
+        dev.update_config(&mut cfg).unwrap();
+        assert_eq!(cfg.plutosky.agc, "fast_attack");
+        assert!(dev.set_option("agc", "Hybrid").is_err(), "not offered");
     }
 
     #[test]

@@ -1210,8 +1210,11 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let primary = if gm.has_second_stage() {
         state.stage_reading(0)
     } else if state.agc_sets(0) {
-        // The tuner is setting it: not the last figure the key left behind.
-        Some(StageReading::Auto(None))
+        // The tuner is setting it: not the last figure the key left behind,
+        // but what the radio reports its AGC chose, where it reports one.
+        Some(StageReading::Auto(
+            state.radio.auto_db.first().copied().flatten(),
+        ))
     } else {
         state
             .chain_db_holds()
@@ -1712,6 +1715,24 @@ mod tests {
             out.contains("AGC \u{25b8} LNA 3 \u{00b7} IF AGC 28 dB   77 dB"),
             "{out}"
         );
+    }
+
+    /// A single knob under the radio's AGC shows what the radio reports the
+    /// AGC chose, and only that: without a report it says nothing more.
+    #[test]
+    fn a_single_knob_under_the_agc_shows_the_radios_report() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::native::pluto::device::caps().gain;
+        m.caps = std::sync::Arc::new(caps);
+        m.radio.frequency = 433_500_000;
+        m.radio.gains = vec![20.0];
+        m.radio.amp_enabled = true;
+        let before = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(!before.contains("AGC 37"), "{before}");
+        m.radio.auto_db = vec![Some(37.2)];
+        let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(out.contains("AGC 37 dB"), "{out}");
     }
 
     /// A radio with a gap between its bands shows the gap on the dial where

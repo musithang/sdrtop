@@ -433,6 +433,34 @@ impl AirspySettings {
     }
 }
 
+/// Settings the PlutoSky R2's own backend applies when it opens.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct PlutoSkySettings {
+    /// Which of the AD9361's automatic gain modes `[A]` switches on:
+    /// `slow_attack` or `fast_attack` (the hybrid mode does not follow the
+    /// signal on the R2, measured).
+    #[serde(default = "PlutoSkySettings::default_agc")]
+    pub agc: String,
+}
+
+impl Default for PlutoSkySettings {
+    fn default() -> Self {
+        Self {
+            agc: Self::default_agc(),
+        }
+    }
+}
+
+impl PlutoSkySettings {
+    fn default_agc() -> String {
+        "slow_attack".to_string()
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Settings the Airspy HF+ Discovery's own backend applies when it opens.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct AirspyHfSettings {
@@ -531,6 +559,9 @@ pub struct AppConfig {
     /// Written only once it differs from the default, as `[airspyhf]` is.
     #[serde(default, skip_serializing_if = "SdrplaySettings::is_default")]
     pub sdrplay: SdrplaySettings,
+    /// Written only once it differs from the default, as `[airspyhf]` is.
+    #[serde(default, skip_serializing_if = "PlutoSkySettings::is_default")]
+    pub plutosky: PlutoSkySettings,
     /// User-defined layout presets, merged into the built-in set at startup.
     /// A preset here with the same name as a built-in overrides it. Preserved
     /// verbatim across save so hand-written presets survive a quit.
@@ -1337,6 +1368,18 @@ panels = [
 
     /// The HF+'s library DSP is on unless the file says off, and only an
     /// off is written: a config that never met the radio carries no section.
+    #[test]
+    fn plutosky_settings_default_to_slow_attack_and_round_trip() {
+        let defaults = AppConfig::default();
+        assert_eq!(defaults.plutosky.agc, "slow_attack");
+        assert!(!toml::to_string(&defaults).unwrap().contains("[plutosky]"));
+        let config: AppConfig = toml::from_str("[plutosky]\nagc = \"fast_attack\"\n").unwrap();
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(serialized.contains("[plutosky]"), "{serialized}");
+        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.plutosky.agc, "fast_attack");
+    }
+
     #[test]
     fn airspyhf_settings_default_on_and_round_trip_off() {
         let defaults: AppConfig = toml::from_str("").unwrap();
