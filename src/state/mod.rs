@@ -377,11 +377,17 @@ impl SdrMetrics {
     /// A front stage stored as the radio's own setting reads as its band's dB
     /// here (none where it was not measured): the setting is not a gain.
     pub fn shown_gain(&self) -> u32 {
+        self.shown_gain_db().max(0.0).round() as u32
+    }
+
+    /// [`Self::shown_gain`] with its sign: a radio whose lowest settings are
+    /// below 0 dB (the PlutoSky R2's bands start at -1, -3 and -10) reads as
+    /// what they are. What a readout shows; the cascade keeps the
+    /// non-negative figure.
+    pub fn shown_gain_db(&self) -> f64 {
         if self.caps.gain.is_single() {
             self.chain_total_db()
                 .unwrap_or_else(|| self.radio.total_gain())
-                .max(0.0)
-                .round() as u32
         } else if self
             .caps
             .gain
@@ -389,9 +395,9 @@ impl SdrMetrics {
             .first()
             .is_some_and(|s| s.is_banded())
         {
-            self.stage_db(0).map_or(0, |db| db.max(0.0).round() as u32)
+            self.stage_db(0).unwrap_or(0.0)
         } else {
-            self.radio.primary_gain()
+            f64::from(self.radio.primary_gain())
         }
     }
 

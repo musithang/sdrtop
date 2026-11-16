@@ -1231,7 +1231,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     } else {
         state
             .chain_db_holds()
-            .then_some(StageReading::Db(state.shown_gain() as f64))
+            .then_some(StageReading::Db(state.shown_gain_db()))
     };
     let p_label = format!("{:<4}", gm.primary_label_short());
 
@@ -1728,6 +1728,20 @@ mod tests {
             out.contains("AGC \u{25b8} LNA 3 \u{00b7} IF AGC 28 dB   77 dB"),
             "{out}"
         );
+    }
+
+    /// A gain below 0 dB reads as itself: the R2's 5 GHz band starts at
+    /// -10 dB, and a header that said 0 there hid ten settings' worth.
+    #[test]
+    fn a_gain_below_zero_reads_as_itself() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::native::pluto::device::caps().gain;
+        m.caps = std::sync::Arc::new(caps);
+        m.radio.frequency = 5_000_500_000;
+        m.radio.gains = vec![0.0];
+        let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(out.contains("-10dB"), "{out}");
     }
 
     /// Another program transmitting on the radio is said on the top line.

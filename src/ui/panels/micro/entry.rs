@@ -239,7 +239,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                 } else {
                     state
                         .chain_db_holds()
-                        .then_some(StageReading::Db(state.shown_gain() as f64))
+                        .then_some(StageReading::Db(state.shown_gain_db()))
                 },
                 0.0,
                 gm.primary_max_db() as f64,
