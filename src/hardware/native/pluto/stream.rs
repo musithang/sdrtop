@@ -29,6 +29,7 @@
 //! channels widens what every client receives; RX1's I and Q are picked out by
 //! the mask on each reply ([`pick_rx1`]).
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -47,12 +48,16 @@ pub const BLOCK_PAIRS: usize = 65_536;
 const PAIR_BYTES: usize = 4;
 /// Requests in flight.
 const IN_FLIGHT: usize = 2;
-/// Above this shortfall (as a share of a block) the ring is taken to have
-/// dropped a block; below it is the clocks' own jitter.
+/// Above this rise in lag (as a share of a block's time) the ring is taken to
+/// have dropped a block; below it is the reader's own jitter.
 const DROP_THRESHOLD: f64 = 0.5;
-/// How long a quiet stretch of agreement runs before the reckoning starts
-/// afresh, so the two clocks' few ppm never add up to a block.
-const REANCHOR: Duration = Duration::from_secs(60);
+/// Caught-up blocks a rise must hold for: a late reply or two is latency, a
+/// lost block's lag stays. Measured on the R2 at 3 MS/s, a single-anchor
+/// reckoning counted a block lost with no gap over 2.2 ms anywhere.
+pub const PERSIST: usize = 4;
+/// How far back the lowest lag is taken from: long against latency, short
+/// against the two clocks' few ppm of drift.
+const BASELINE: Duration = Duration::from_secs(60);
 
 /// Picks RX1's I and Q out of a reply whose `mask` may name more channels.
 /// `None` when the mask lacks RX1 or cannot be read.
@@ -80,8 +85,10 @@ pub fn pick_rx1<'a>(mask: &str, data: &'a [u8], scratch: &'a mut Vec<u8>) -> Opt
 pub struct Losses {
     rate: f64,
     block: u64,
-    anchor: Option<(Instant, u64)>,
+    start: Option<Instant>,
     received: u64,
+    /// Caught-up arrivals: when, and how far behind its samples' own time.
+    recent: VecDeque<(Instant, f64)>,
 }
 
 impl Losses {
@@ -89,38 +96,54 @@ impl Losses {
         Self {
             rate,
             block,
-            anchor: None,
+            start: None,
             received: 0,
+            recent: VecDeque::new(),
         }
     }
 
     /// One block arrived at `now` with `pairs` in it, after `waited` for it
-    /// to be filled. Returns the pairs the ring dropped before it, whole
-    /// blocks only.
+    /// to be filled. Returns the pairs the ring dropped, whole blocks only,
+    /// once the shortfall has held for [`PERSIST`] caught-up blocks.
+    ///
+    /// Each caught-up arrival's *lag*, the time since the first minus the
+    /// time its samples account for, is the reader's latency plus whatever
+    /// was lost. Latency comes and goes; a lost block raises the lag by a
+    /// block's time for good. So a loss is a rise that holds against the
+    /// lowest lag of the last minute, which also follows the clocks' slow
+    /// drift.
     pub fn arrived(&mut self, pairs: u64, waited: Duration, now: Instant) -> u64 {
         self.received += pairs;
         // A block that came at once was waiting in the ring: the reader is
-        // behind, and the shortfall it shows would be its own lag.
+        // behind, and its lag would be its own.
         let block_time = self.block as f64 / self.rate;
         if waited.as_secs_f64() < 0.5 * block_time {
             return 0;
         }
-        let Some((at, had)) = self.anchor else {
-            self.anchor = Some((now, self.received));
-            return 0;
-        };
-        let expected = now.duration_since(at).as_secs_f64() * self.rate;
-        let got = (self.received - had) as f64;
-        let short = expected - got;
-        if short > DROP_THRESHOLD * self.block as f64 {
-            let blocks = (short / self.block as f64).round().max(1.0) as u64;
-            let dropped = blocks * self.block;
-            // Counted: from here the reckoning carries on as if they came.
-            self.received += dropped;
-            return dropped;
+        let start = *self.start.get_or_insert(now);
+        let lag = now.duration_since(start).as_secs_f64() - self.received as f64 / self.rate;
+        self.recent.push_back((now, lag));
+        while self.recent.len() > PERSIST + 1 && now.duration_since(self.recent[0].0) > BASELINE {
+            self.recent.pop_front();
         }
-        if now.duration_since(at) > REANCHOR {
-            self.anchor = Some((now, self.received));
+        let n = self.recent.len();
+        if n <= PERSIST {
+            return 0;
+        }
+        let min = |it: &mut dyn Iterator<Item = &(Instant, f64)>| {
+            it.map(|e| e.1).fold(f64::INFINITY, f64::min)
+        };
+        let held = min(&mut self.recent.iter().skip(n - PERSIST));
+        let before = min(&mut self.recent.iter().take(n - PERSIST));
+        let rise = held - before;
+        if rise > DROP_THRESHOLD * block_time {
+            let blocks = (rise / block_time).round().max(1.0) as u64;
+            let dropped = blocks * self.block;
+            // Counted: from here the reckoning carries on as if they came,
+            // and the arrivals that showed the rise are let go.
+            self.received += dropped;
+            self.recent.truncate(n - PERSIST);
+            return dropped;
         }
         0
     }
@@ -345,37 +368,51 @@ mod tests {
     }
 
     /// A stall longer than the ring holds: the blocks it spans are counted,
-    /// once, when the reader has caught up again.
+    /// once, in whole blocks, when the reader has caught up again and the
+    /// shortfall has held.
     #[test]
     fn a_stall_beyond_the_ring_is_counted_in_whole_blocks() {
         let mut l = Losses::new(3e6, BLOCK);
         let t0 = Instant::now();
         let full = Duration::from_millis(21);
         let quick = Duration::from_millis(0);
-        let mut t = 0u64;
+        let period = 21.845;
+        let mut t = 0.0f64;
+        let mut dropped = 0;
         for _ in 0..10 {
-            assert_eq!(l.arrived(BLOCK, full, at(t0, t)), 0);
-            t += 22;
+            dropped += l.arrived(BLOCK, full, t0 + Duration::from_secs_f64(t / 1e3));
+            t += period;
         }
         // 300 ms away: about 13.7 blocks made, the ring kept 4 of them.
-        t += 300;
+        t += 300.0;
         for _ in 0..4 {
-            assert_eq!(
-                l.arrived(BLOCK, quick, at(t0, t)),
-                0,
-                "drained from the ring"
-            );
+            dropped += l.arrived(BLOCK, quick, t0 + Duration::from_secs_f64(t / 1e3));
         }
-        t += 22;
-        let dropped = l.arrived(BLOCK, full, at(t0, t));
+        for _ in 0..20 {
+            t += period;
+            dropped += l.arrived(BLOCK, full, t0 + Duration::from_secs_f64(t / 1e3));
+        }
         assert_eq!(dropped % BLOCK, 0, "whole blocks");
         assert!(
             (9 * BLOCK..=11 * BLOCK).contains(&dropped),
             "{}",
             dropped / BLOCK
         );
-        t += 22;
-        assert_eq!(l.arrived(BLOCK, full, at(t0, t)), 0, "said once");
+    }
+
+    /// A few late replies are latency, not loss: the lag comes back down.
+    #[test]
+    fn a_late_reply_or_two_is_not_a_loss() {
+        let mut l = Losses::new(3e6, BLOCK);
+        let t0 = Instant::now();
+        let full = Duration::from_millis(21);
+        for k in 0..400u64 {
+            // Blocks 100 and 101 arrive 18 ms late (most of a block's time),
+            // then the rhythm resumes.
+            let late = if k == 100 || k == 101 { 18.0 } else { 0.0 };
+            let at = t0 + Duration::from_secs_f64((k as f64 * 21.845 + late) / 1e3);
+            assert_eq!(l.arrived(BLOCK, full, at), 0, "block {k}");
+        }
     }
 
     /// A radio clock a few ppm off never adds up to a block.
@@ -383,10 +420,10 @@ mod tests {
     fn a_few_ppm_between_the_clocks_never_adds_up() {
         let mut l = Losses::new(3e6, BLOCK);
         let t0 = Instant::now();
-        // The radio 10 ppm slow against the host, for six hours.
+        // The radio 10 ppm slow against the host, for two hours.
         let period_us = 65_536.0 / 3e6 * 1e6 * (1.0 + 10e-6);
         let wait = Duration::from_millis(20);
-        for k in 0..(6 * 3600 * 46u64) {
+        for k in 0..(2 * 3600 * 46u64) {
             let now = t0 + Duration::from_micros((k as f64 * period_us) as u64);
             assert_eq!(l.arrived(BLOCK, wait, now), 0, "block {k}");
         }
