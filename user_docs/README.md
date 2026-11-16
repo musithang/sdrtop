@@ -30,6 +30,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 | Install sdrtop and get a picture on screen | [Getting started](getting-started.md) |
 | Find a key I forgot | [Keyboard shortcuts](keys.md) |
 | Know what a number on screen means | [What you see on screen](screens.md) |
+| Know how sdrtop gets from samples to that number | [From the antenna to the screen](signal-path.md) |
 | Set the gain properly | [Tips and tricks](tips-and-tricks.md) |
 | Check whether my radio works with sdrtop | [Supported hardware](hardware.md) |
 | Fix something that doesn't work | [Troubleshooting](troubleshooting.md) |
@@ -51,6 +52,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 | [The Lab presets](lab.md) | The four benches: what each measurement means and how to act on it |
 | [Tips and tricks](tips-and-tricks.md) | Setting gain, pulling weak signals out of the noise, capture checklists |
 | [Advanced features](advanced.md) | Multiple radios, observer mode, the session log, what sdrtop deliberately doesn't do |
+| [From the antenna to the screen](signal-path.md) | How a sample travels through sdrtop, what happens when one gets lost, and a nerd section with the threads |
 
 ## Signals and decoders
 
