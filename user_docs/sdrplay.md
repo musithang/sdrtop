@@ -41,7 +41,7 @@ dB more, and in L-band the table even changes shape with frequency. So sdrtop
 carries its own tables, one per band, measured at 14 frequencies, and shows the
 LNA in dB for the band you are tuned to. The IF is one staircase of 39 dB, the
 same everywhere. Checked against a carrier, the gain on screen holds to about
-half a dB, except at 300 MHz, where it strays about one dB for a reason I
+half a dB, except at 300 MHz, where it strays a little over a dB for a reason I
 haven't found yet.
 
 ### The mixer trap
@@ -103,8 +103,8 @@ the radio back your IF: left alone, the radio stays wherever the AGC last was.
 ## Corrections, image and notches
 
 SDRplay's API removes DC and balances I and Q before sdrtop sees a sample. It is
-on by default, because the radio's own balance is not great above VHF, and the
-correction pushes the image 19 to 32 dB further down. While it is on, the I/Q
+on by default, because the radio's own balance is not great above VHF, and from
+150 to 950 MHz the correction pushes the image 19 to 32 dB further down. While it is on, the I/Q
 bench says `after SDRplay's correction`, since what it measures is what the
 correction left. Switch it off in the Options
 pane to see the radio's own balance. The choice is kept in `[sdrplay]`.

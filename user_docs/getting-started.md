@@ -37,7 +37,8 @@ librtlsdr. `--airspy` adds libairspy, for an Airspy R2. `--airspyhf` adds libair
 an Airspy HF+ Discovery. `--soapy` adds SoapySDR
 and its driver modules. `--sdrplay` installs nothing: SDRplay's API and its
 service come from SDRplay's own installer, and this checks both are there and
-running ([RSP1B](sdrplay.md#installing-the-api)). These flags can be
+running ([RSP1B](sdrplay.md#installing-the-api)). The PlutoSky R2 needs no
+flag at all: sdrtop talks to the radio's own server. These flags can be
 combined. A plain install of a runtime-loading release adds none of these libraries.
 Missing or incompatible libraries disable only their respective backends.
 
@@ -137,7 +138,9 @@ Everything below is the same job done by hand.
 
 - **Host:** A Linux machine. A Mac works too, unofficially: see
   [macOS, unofficially](platforms.md#macos-unofficially).
-- **Radio:** A HackRF One, RTL-SDR or a supported SoapySDR device.
+- **Radio:** One of the [supported radios](hardware.md): a HackRF One, an
+  RTL-SDR, an Airspy R2 or HF+ Discovery, an SDRplay RSP1B, a PlutoSky R2, a
+  tinySA, or anything with a SoapySDR driver.
 - **Source builds:** Rust 1.88+ and a C compiler/linker. Install Rust with
   [rustup](https://rustup.rs). Runtime-loading releases need no SDR development
   headers or pkg-config. Older releases can require both native development libraries.

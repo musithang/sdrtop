@@ -65,8 +65,8 @@ This one took an afternoon. Push the gain up on a strong signal and the level
 stops rising at about −3 dBFS while the noise floor jumps, and the ADC bench says
 `clip none`. The converter's raw samples settle it: they never reach their rails,
 because the tuner's IF output has already squared the signal off. The clip
-counter is right about the converter and wrong about your signal. So on an R2, sdrtop measures headroom from **−3 dBFS**,
-draws the rail there (`CLIP -3 dBFS (tuner)`), calls a peak at it clipping, and
+counter is right about the converter and wrong about your signal. So on an R2,
+sdrtop measures headroom from **−3 dBFS**, draws the rail there (`CLIP -3 dBFS (tuner)`), calls a peak at it clipping, and
 says under `clip none` that the tuner clips there, uncounted. Auto-gain lands
 about 8 dB under it, near −11 dBFS. From a clipped peak it may take two or
 three presses, because a clipped reading only knows "at least this much over".

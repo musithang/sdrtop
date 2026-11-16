@@ -118,6 +118,7 @@ and that's the end of the road for USB 2.0. Ethernet I haven't measured yet.
 
 | Rate | Run | Lost samples | Clock against the PC |
 |---|---|---|---|
+| 2.083 Msps | one minute | 0 | -1 to -4 ppm |
 | 3 Msps | ten minutes | 0 | +6 ppm |
 | 4 Msps | ten minutes | 0 | -2 to +8 ppm |
 

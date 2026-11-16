@@ -29,7 +29,7 @@ own page: **[PlutoSky R2, measured](plutosky-r2-measured.md)**.
 | | |
 |---|---|
 | Range | 70 MHz to 6 GHz |
-| Sample rates | 2.083, 3 and 4 Msps over USB, each run for ten minutes without a lost sample |
+| Sample rates | 2.083, 3 and 4 Msps over USB, none of them losing a sample (3 and 4 ran for ten minutes) |
 | Samples | 12 bits in int16, full scale 2048 |
 | Gain | One control, shown in measured dB (1,860 settings measured at 25 frequencies) |
 | AGC | The AD9361's own, slow or fast attack (`[A]`, the mode in Options) |

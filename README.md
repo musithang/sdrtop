@@ -127,9 +127,9 @@ No SDR library is needed to build; each radio's library is loaded at runtime, an
 |---|---|
 | [HackRF One](user_docs/hackrf.md), [PortaPack H4M](user_docs/hackrf.md#portapack-h4m) | ✅ Tested |
 | [RTL-SDR](user_docs/rtl-sdr.md) | ✅ Tested |
-| [Airspy R2](user_docs/airspy-r2.md) | ✅ Tested |
-| [Airspy HF+ Discovery](user_docs/airspy-hf.md) | ✅ Tested |
-| [SDRplay RSP1B](user_docs/sdrplay.md) | ✅ Tested |
+| [Airspy R2](user_docs/airspy-r2.md) | ✅ Tested, [measured](user_docs/airspy-r2-measured.md) |
+| [Airspy HF+ Discovery](user_docs/airspy-hf.md) | ✅ Tested, [measured](user_docs/airspy-hf-measured.md) |
+| [SDRplay RSP1B](user_docs/sdrplay.md) | ✅ Tested, [measured](user_docs/sdrplay-measured.md) |
 | [PlutoSky R2](user_docs/plutosky-r2.md) | ✅ Tested, [measured](user_docs/plutosky-r2-measured.md) |
 | [tinySA / Ultra / Ultra+](user_docs/tinysa.md) | ✅ Spectrum (ZS405 tested) |
 | [Anything with a SoapySDR driver](user_docs/soapysdr.md) | 🧪 Beta, written from the API |
