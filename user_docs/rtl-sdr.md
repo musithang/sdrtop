@@ -4,7 +4,8 @@
 
 ---
 
-The cheapest way into all of this, and fully supported: the whole spectrum,
+The cheapest way into all of this, and the reason so many of us own a drawer
+of USB sticks that store nothing. Fully supported: the whole spectrum,
 waterfall and lab stack. The dongle has one tuner gain and an AGC, so that is
 what the screen offers, and the panels that need more than that say so instead
 of making something up.

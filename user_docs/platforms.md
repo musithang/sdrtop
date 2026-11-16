@@ -32,7 +32,8 @@ page: [HackRF](hackrf.md#installing-the-library),
 ## macOS, unofficially
 
 Linux is home, and that's not an oversight: it's the only system I have run
-sdrtop on with a radio plugged in. The Mac build is built and tested on every
+sdrtop on with a radio plugged in. The funny part is that the laptop on my
+desk is a Mac. It runs Linux. The Mac build is built and tested on every
 change, on GitHub's Apple Silicon machines, which have no radio. A user proved
 the rest before I did: an M4 MacBook Air with an RTL-SDR Blog V4, through
 Homebrew. [Observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio)

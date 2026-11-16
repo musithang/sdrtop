@@ -18,6 +18,8 @@ set it in your config file.
 | `catppuccin` | Soft pastel colors on a dark background            |
 | `solarized`  | Classic Solarized dark scheme                      |
 
+None of them lowers the noise floor. I checked.
+
 The theme also sets the waterfall's default gradient. If you'd rather have a
 gradient that ignores the theme, `p` in waterfall focus cycles four fixed ones
 (classic, amber, ice, phosphor), and `classic` is the one that follows the theme.

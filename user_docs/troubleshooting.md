@@ -16,7 +16,7 @@ error that arrives mid-session. Everything of that kind goes to:
 Config parse warnings, driver messages, and whatever the backend libraries feel
 like saying (librtlsdr in particular is talkative: "Allocating zero-copy buffers",
 "Found … tuner", "[R82XX] PLL not locked!"). If sdrtop did something strange and
-told you nothing, read that file first. It's also the single most useful thing to
+told you nothing, read that file first. Ask me how I know. It's also the single most useful thing to
 attach to a bug report.
 
 The in-app log is a different thing: that's sdrtop talking to you about retunes,

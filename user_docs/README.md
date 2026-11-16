@@ -5,8 +5,8 @@ Welcome. This is the plain-language guide to using sdrtop.
 > **Status:** spectrum, waterfall, the four lab benches, the sweep scanner, the
 > compact field views, the pager, FT8, IQ recording and the NET section
 > (Bluetooth and Wi-Fi, measured), with the HackRF One, the RTL-SDR, the Airspy
-> R2, the Airspy HF+ Discovery, the SDRplay RSP1B and the tinySA verified on
-> hardware. Anything with a **SoapySDR** driver works too, written from the API
+> R2, the Airspy HF+ Discovery, the SDRplay RSP1B, the PlutoSky R2 and the
+> tinySA verified on hardware. Anything with a **SoapySDR** driver works too, written from the API
 > rather than from owning the radio, which is a different kind of "supported"
 > and [says so out loud](soapysdr.md). The [changelog](../CHANGELOG.md) has what
 > changed lately.

@@ -7,7 +7,8 @@
 The radio sdrtop grew up on. Development runs on a HackRF One and a PortaPack
 H4M, so this is the reference: every bench, every diagnostic, and the one radio
 where the RF bench models the front end stage by stage, Friis noise figure and
-all.
+all. It has also been on the receiving end of more of my mistakes than any
+other radio on this list, and it still talks to me.
 
 ## At a glance
 
