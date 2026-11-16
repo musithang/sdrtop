@@ -669,6 +669,43 @@ mod tests {
         assert!(rate.abs_diff(1_999_800) <= 1, "{rate}");
     }
 
+    /// **A pull stream's clock is read the same way.** A PlutoSky R2 at
+    /// 4 MS/s hands over 65 536-pair blocks every 16.4 ms, mostly on time,
+    /// now and then a reply 24 ms late; read by the last delivery of each
+    /// window it showed -539 to +736 ppm on a stream that lost nothing (and
+    /// +6 ppm measured independently). The earliest delivery of each
+    /// stretch does not see the late replies.
+    #[test]
+    fn a_pull_streams_late_reply_does_not_reach_its_clock() {
+        use crate::state::Lead;
+        let rate = 4_000_000.0;
+        let block = 65_536u64;
+        let base = std::time::Instant::now();
+        let mut clock = RelayClock::default();
+        let mut window: Option<(Lead, Lead)> = None;
+        let mut window_ends = 0.2;
+        for k in 1..=2800u64 {
+            let sent = (block * k) as f64 / rate;
+            // Every 300th reply 24 ms late; the rest a steady 3 ms.
+            let late = if k % 300 == 0 { 24.0 } else { 3.0 };
+            let at = base + std::time::Duration::from_secs_f64(sent + late / 1e3);
+            if sent >= window_ends {
+                clock.push(window.take());
+                window_ends += 0.2;
+            }
+            let lead = Lead::of(at, block * k, rate).unwrap();
+            window = Some(match window {
+                None => (lead, lead),
+                Some((e, l)) => (
+                    if lead.key < e.key { lead } else { e },
+                    if lead.key > l.key { lead } else { l },
+                ),
+            });
+        }
+        let earliest = clock.rate().expect("45 s of it");
+        assert!(earliest.abs_diff(4_000_000) <= 2, "{earliest}");
+    }
+
     /// The hold is the longest any delivery came after the earliest for its
     /// place: 60 ms here, on a radio at its rate.
     #[test]

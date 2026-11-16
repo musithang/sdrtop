@@ -118,7 +118,15 @@ pub fn spawn_rx_task(
                 rate.push(drained.last_block_at, drained.bytes);
                 relay.push(drained.relay);
             }
-            let relayed = device.capabilities().delivery == crate::hardware::DeliveryModel::Relayed;
+            let delivery = device.capabilities().delivery;
+            let relayed = delivery == crate::hardware::DeliveryModel::Relayed;
+            // The clock from each position's earliest delivery wherever the
+            // arrival times are not the radio's own: a relaying service's,
+            // and a pull loop's, whose reads land when the link and our
+            // rhythm let them. Over a 30 s baseline one reply 24 ms late at
+            // either end is 800 ppm; a PlutoSky R2 streaming without a lost
+            // sample read -539 to +736 ppm by the last-delivery figure.
+            let earliest_clock = relayed || delivery == crate::hardware::DeliveryModel::Pull;
 
             let iq = metrics::iq_metrics(
                 drained.moments,
@@ -136,7 +144,7 @@ pub fn spawn_rx_task(
                     drained.jitter_sq_sum,
                     drained.jitter_count,
                 ),
-                measured_rate: if relayed {
+                measured_rate: if earliest_clock {
                     relay.rate()
                 } else {
                     rate.rate(device.capabilities().sample_geometry.bytes_per_pair())
