@@ -211,21 +211,28 @@ pub fn last_problem() -> Option<String> {
 }
 
 /// The device selector's entry for a PlutoSDR on the bus that answered at the
-/// default address. Only when asked for by name: until the backend opens the
-/// radio, offering it unasked would offer a refusal.
+/// default address. An R2 is offered unasked; another PlutoSDR board only
+/// when this backend was asked for by name, and then to name the road that
+/// opens it.
 pub fn list(asked_by_name: bool) -> Vec<DeviceListing> {
-    if !asked_by_name {
-        return Vec::new();
-    }
+    let mut on_usb = None;
     let outcome = match usb::find(&usb::PLUTOSDR) {
         Err(why) => Err(Some(Problem::Usb(why))),
         Ok(None) => Err(None),
-        Ok(Some(info)) => find_at(DEFAULT_ADDRESS, info.serial.as_deref(), SEARCH).map_err(Some),
+        Ok(Some(info)) => {
+            on_usb = info.bus.zip(info.dev);
+            find_at(DEFAULT_ADDRESS, info.serial.as_deref(), SEARCH).map_err(Some)
+        }
     };
     let mut last = LAST_PROBLEM.lock().unwrap_or_else(|e| e.into_inner());
+    let mut ours = OURS.lock().unwrap_or_else(|e| e.into_inner());
+    *ours = None;
     match outcome {
-        Ok(found) => {
+        Ok(found) if found.model == Model::R2 || asked_by_name => {
             *last = None;
+            if found.model == Model::R2 {
+                *ours = on_usb;
+            }
             vec![DeviceListing {
                 kind: DeviceKind::PlutoSky,
                 index: 0,
@@ -236,11 +243,39 @@ pub fn list(asked_by_name: bool) -> Vec<DeviceListing> {
                 tiny_sa_input: None,
             }]
         }
+        Ok(_) => {
+            *last = None;
+            Vec::new()
+        }
         Err(problem) => {
             *last = problem.map(|p| p.text());
             Vec::new()
         }
     }
+}
+
+/// The R2 the last search offered, by its USB bus and device number.
+static OURS: Mutex<Option<(u32, u32)>> = Mutex::new(None);
+
+/// Whether a SoapyPlutoSDR listing, by its `uri`, is the R2 the last search
+/// offered natively: its USB address, or its USB network's address or name.
+/// The native backend wins over the generic one for the same radio; with no
+/// serial in SoapyPlutoSDR's listings, the `uri` is how they are matched.
+pub fn offered_as(uri: &str) -> bool {
+    OURS.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some_and(|ours| uri_is(uri, ours))
+}
+
+/// `usb:<bus>.<device>.<interface>` on the R2's bus address, or the USB
+/// network's default address or the name its `config.txt` gives it.
+fn uri_is(uri: &str, (bus, dev): (u32, u32)) -> bool {
+    if let Some(usb) = uri.strip_prefix("usb:") {
+        let mut parts = usb.split('.');
+        return parts.next().and_then(|b| b.parse().ok()) == Some(bus)
+            && parts.next().and_then(|d| d.parse().ok()) == Some(dev);
+    }
+    matches!(uri.strip_prefix("ip:"), Some(h) if h == DEFAULT_ADDRESS || h == "pluto.local")
 }
 
 fn label(found: &Found) -> String {
@@ -366,6 +401,21 @@ mod tests {
         assert_eq!(
             l,
             format!("PlutoSky R2 \u{00b7} {R2_SERIAL} \u{00b7} v0.38 \u{00b7} iiod 0.25")
+        );
+    }
+
+    /// SoapyPlutoSDR's two listings of the R2 on bus 1, device 28, and one of
+    /// a radio on another USB address.
+    #[test]
+    fn soapys_listings_of_the_r2_are_recognised_by_their_uri() {
+        assert!(uri_is("usb:1.28.5", (1, 28)));
+        assert!(uri_is("ip:pluto.local", (1, 28)));
+        assert!(uri_is("ip:192.168.2.1", (1, 28)));
+        assert!(!uri_is("usb:1.29.5", (1, 28)), "another radio");
+        assert!(!uri_is("usb:2.28.5", (1, 28)), "another bus");
+        assert!(
+            !uri_is("ip:192.168.1.10", (1, 28)),
+            "an address named elsewhere"
         );
     }
 

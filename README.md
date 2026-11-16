@@ -33,6 +33,7 @@
   <a href="user_docs/airspy-r2.md"><img src="https://img.shields.io/badge/Airspy%20R2-brightgreen" alt="Airspy R2"></a>
   <a href="user_docs/airspy-hf.md"><img src="https://img.shields.io/badge/Airspy%20HF%2B%20Discovery-brightgreen" alt="Airspy HF+ Discovery"></a>
   <a href="user_docs/sdrplay.md"><img src="https://img.shields.io/badge/SDRplay%20RSP1B-brightgreen" alt="SDRplay RSP1B"></a>
+  <a href="user_docs/plutosky-r2.md"><img src="https://img.shields.io/badge/PlutoSky%20R2-brightgreen" alt="PlutoSky R2"></a>
   <a href="user_docs/hackrf.md#portapack-h4m"><img src="https://img.shields.io/badge/PortaPack%20H4M-brightgreen" alt="PortaPack H4M"></a>
   <a href="user_docs/tinysa.md"><img src="https://img.shields.io/badge/tinySA%20Ultra-brightgreen" alt="tinySA Ultra"></a>
 </p>
@@ -129,9 +130,9 @@ No SDR library is needed to build; each radio's library is loaded at runtime, an
 | [Airspy R2](user_docs/airspy-r2.md) | ✅ Tested |
 | [Airspy HF+ Discovery](user_docs/airspy-hf.md) | ✅ Tested |
 | [SDRplay RSP1B](user_docs/sdrplay.md) | ✅ Tested |
+| [PlutoSky R2](user_docs/plutosky-r2.md) | ✅ Tested, [measured](user_docs/plutosky-r2-measured.md) |
 | [tinySA / Ultra / Ultra+](user_docs/tinysa.md) | ✅ Spectrum (ZS405 tested) |
 | [Anything with a SoapySDR driver](user_docs/soapysdr.md) | 🧪 Beta, written from the API |
-| PlutoSky R2 (AD9361) | 🔲 On my desk, native backend in the queue |
 
 Native support lands only after testing on a real radio. The RSP1B came from [SDRplay](https://www.sdrplay.com/), the R2 and the HF+ Discovery from [Airspy](https://airspy.com/), and the PlutoSky R2 from [OpenSourceSDRLab](https://opensourcesdrlab.com/). Thank you all. How the radios differ: **[Supported hardware](user_docs/hardware.md)**.
 

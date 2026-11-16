@@ -15,6 +15,7 @@ the SoapySDR row was written from the API, and [says so out loud](soapysdr.md).
 | [Airspy R2](airspy-r2.md) | 24 MHz to 1.8 GHz | 2.5 or 10 Msps | ✅ Measured gain tables, Airspy's curves |
 | [Airspy HF+ Discovery](airspy-hf.md) | 9 kHz to 31 MHz, 60 to 260 MHz | 192 to 912 kS/s | ✅ Its digital gain drawn as digital |
 | [SDRplay RSP1B](sdrplay.md) | 1 kHz to 2 GHz | 62.5 kS/s to 10 Msps | ✅ Measured gain per band, SDRplay-style curves |
+| [PlutoSky R2](plutosky-r2.md) | 70 MHz to 6 GHz | 2.083 to 4 Msps over USB | ✅ Measured gain per band, no library ([measured](plutosky-r2-measured.md)) |
 | [tinySA / Ultra / Ultra+](tinysa.md) | By model | Power traces, not IQ | ✅ Spectrum, waterfall and sweeps in dBm (ZS405) |
 | [Anything SoapySDR drives](soapysdr.md) | The driver's | The driver's | 🧪 Beta: written from the API, not from owning one |
 
@@ -29,10 +30,10 @@ screen leaves out because it would mean nothing) is on its page.
 
 | Device | Status |
 |---|---|
-| PlutoSky R2 (AD9361) | On my desk, sent by [OpenSourceSDRLab](https://opensourcesdrlab.com/). Native backend in the queue |
+| PlutoSky R2 over Ethernet | Waiting for a cable; it is the road to the radio's higher rates |
 | Airspy Mini | Planned, needs hardware to test |
 | HackRF Pro | Planned, needs hardware to test |
-| LimeSDR, bladeRF, PlutoSDR, other SDRplay RSPs | Should already work [through SoapySDR](soapysdr.md). Nobody has told me yet |
+| LimeSDR, bladeRF, other PlutoSDR boards, other SDRplay RSPs | Should already work [through SoapySDR](soapysdr.md). Nobody has told me yet |
 
 Native support means owning and testing the radio, so the list moves at exactly
 the speed of a hobby budget. If you'd like to move it along, the project has a

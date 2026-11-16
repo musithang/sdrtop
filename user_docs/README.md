@@ -110,9 +110,19 @@ page of its own:
 | [Airspy R2](airspy-r2.md) | Measured gain tables, Airspy's curves, the tuner's ceiling |
 | [Airspy HF+ Discovery](airspy-hf.md) | The radio that manages its own levels |
 | [SDRplay RSP1B](sdrplay.md) | The radio behind a service, its measured gain and the mixer trap |
+| [PlutoSky R2](plutosky-r2.md) | Its own server, the transmitter silenced, the gain as measured |
 | [tinySA](tinysa.md) | Calibrated power traces, not IQ |
 | [SoapySDR](soapysdr.md) | Everything else, and the honest version of what that means |
 | [Host platforms](platforms.md) | Linux, the Raspberry Pi, macOS unofficially, and the libraries sdrtop loads |
+
+### Measured on the bench
+
+What sdrtop's bench found on the radio on my desk, with the charts: the
+numbers behind what the screen shows.
+
+| Radio | What was measured |
+|---|---|
+| [PlutoSky R2, measured](plutosky-r2-measured.md) | The idle transmitter, every gain step in three bands, the filter and image, the link, ten-minute timing, against SoapySDR |
 
 ## Making it yours
 
