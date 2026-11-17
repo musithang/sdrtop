@@ -37,7 +37,7 @@ pub(super) fn net_capability(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
         }
         m.radio.frequency
     };
-    let Some(device) = ctx.device.cloned() else {
+    let Some(device) = ctx.core.map(|core| std::sync::Arc::clone(core.device())) else {
         metrics(ctx.state)
             .push_log("Retune timing: no radio to retune in observer mode".to_string());
         return KeyAction::Continue;
@@ -109,7 +109,7 @@ pub(super) fn net_occupancy(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction 
                 );
                 return KeyAction::Continue;
             };
-            if ctx.device.is_none() {
+            if ctx.core.is_none() {
                 m.push_log("Lock: no radio to retune in observer mode".to_string());
                 return KeyAction::Continue;
             }
@@ -181,7 +181,7 @@ pub(super) fn net_wifi_survey(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
                 m.push_log("Lock: select a channel first (\u{2190}\u{2192})".to_string());
                 return KeyAction::Continue;
             };
-            if ctx.device.is_none() {
+            if ctx.core.is_none() {
                 m.push_log("Lock: no radio to retune in observer mode".to_string());
                 return KeyAction::Continue;
             }
@@ -794,7 +794,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -880,7 +880,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -933,7 +933,7 @@ mod tests {
         {
             let mut ctx = InputCtx {
                 state: &state,
-                device: None,
+                core: None,
                 engine: &mut engine,
                 show_footer: &mut show_footer,
                 focus_keys: &focus_keys,
@@ -1049,7 +1049,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -1089,7 +1089,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -1156,7 +1156,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -1382,7 +1382,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -2146,7 +2146,7 @@ mod tests {
             engine.set_preset(preset);
             let mut ctx = InputCtx {
                 state: &state,
-                device: None,
+                core: None,
                 engine,
                 show_footer: &mut show_footer,
                 focus_keys: &focus_keys,
@@ -2202,10 +2202,7 @@ mod tests {
         }
     }
 
-    fn press_k(
-        state: &Arc<Mutex<SdrMetrics>>,
-        device: Option<&Arc<dyn crate::hardware::SdrDevice>>,
-    ) {
+    fn press_k(state: &Arc<Mutex<SdrMetrics>>, core: Option<&crate::engine::Engine>) {
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -2214,7 +2211,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state,
-            device,
+            core,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -2247,8 +2244,8 @@ mod tests {
             caps: crate::hardware::native::hackrf::caps(),
             calls: Mutex::new(Vec::new()),
         });
-        let device: Arc<dyn crate::hardware::SdrDevice> = tuner.clone();
-        press_k(&state, Some(&device));
+        let core = crate::engine::Engine::new(Arc::clone(&state), tuner.clone());
+        press_k(&state, Some(&core));
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while !matches!(
@@ -2315,7 +2312,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -2354,7 +2351,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -2406,17 +2403,17 @@ mod tests {
             caps: crate::hardware::native::hackrf::caps(),
             calls: Mutex::new(Vec::new()),
         });
-        let tuner: Arc<dyn crate::hardware::SdrDevice> = concrete.clone();
+        let tuner = crate::engine::Engine::new(Arc::clone(&state), concrete.clone());
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
         );
         let mut show_footer = true;
         let focus_keys = HashMap::new();
-        let mut press = |device: Option<&Arc<dyn crate::hardware::SdrDevice>>| {
+        let mut press = |core: Option<&crate::engine::Engine>| {
             let mut ctx = InputCtx {
                 state: &state,
-                device,
+                core,
                 engine: &mut engine,
                 show_footer: &mut show_footer,
                 focus_keys: &focus_keys,

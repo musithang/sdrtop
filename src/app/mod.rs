@@ -33,6 +33,8 @@ pub(crate) type FocusKeys = HashMap<char, Vec<&'static str>>;
 pub struct App {
     pub(super) state: Arc<Mutex<SdrMetrics>>,
     pub(super) device: Option<Arc<dyn SdrDevice>>,
+    /// The engine the keys send their commands to; `None` in observer mode.
+    pub(super) core: Option<crate::engine::Engine>,
     pub(super) rx_ctx: Option<Arc<RxContext>>,
     pub(super) config_path: Option<PathBuf>,
     pub(super) events: EventStream,
@@ -157,7 +159,7 @@ impl App {
                         match input::handle_key(
                             key,
                             &self.state,
-                            self.device.as_ref(),
+                            self.core.as_ref(),
                             &mut self.engine,
                             &mut self.show_footer,
                             &self.focus_keys,

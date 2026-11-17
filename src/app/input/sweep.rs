@@ -12,7 +12,7 @@ use super::{global, metrics, InputCtx, KeyAction};
 /// `sweep_panel` focus (`[G]`): cursor with `←/→`, peak/mean with `M`, dwell with
 /// `+/-`, and `[Enter]` to leave the sweep tuned to the cursor frequency.
 pub(super) fn sweep_panel(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     /// Cursor step as a fraction of the swept band per key press.
     const CURSOR_STEP: f64 = 0.01;
     match key.code {

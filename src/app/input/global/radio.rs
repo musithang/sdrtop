@@ -14,7 +14,7 @@ use super::super::{metrics, InputCtx};
 /// `[Space]` - start or stop streaming. The RX task sees the flag on its next
 /// poll and talks to the device itself, so nothing here touches hardware.
 pub(super) fn toggle_rx(ctx: &mut InputCtx<'_>) {
-    if ctx.device.is_none() {
+    if ctx.core.is_none() {
         return;
     }
     let mut m = metrics(ctx.state);
@@ -25,62 +25,23 @@ pub(super) fn toggle_rx(ctx: &mut InputCtx<'_>) {
 /// legal freq/rate instead of HackRF's 2.4 GHz / 10 Msps, and on a legal tuner
 /// step instead of HackRF's raw LNA/VGA constants.
 ///
-/// Every device call is made before the guard is taken, and the state is written
-/// only if all of them succeeded - a half-applied reset would leave the panels
-/// describing a radio that is not in that state.
+/// The engine's reset: all or nothing, so a half-applied reset never leaves the
+/// panels describing a radio that is not in that state.
 pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
-    let Some(device) = ctx.device else { return };
-    let caps = device.capabilities();
-    let def_freq = caps.default_frequency_hz;
-    let def_sr = caps.default_sample_rate_hz;
-    // Every stage the device has, by position, where a first run would put
-    // it: a radio with three stages is not reset in two of them, and one
-    // whose knob starts on a vendor curve goes back onto it.
-    let curve = caps.gain.default_curve();
-    let gains = caps.gain.start_gains(curve, def_freq);
-
-    // The rate is the device's own default, so a driver has no reason to round
-    // it; taking what it reports anyway costs nothing and keeps one account of
-    // where the recorded rate comes from.
-    let (sr_result, settled_sr, bb_bw) = match device.set_sample_rate(def_sr) {
-        Ok(set) => (Ok(()), set.rate_hz, set.bb_filter_hz),
-        Err(e) => (
-            Err(e),
-            def_sr,
-            crate::hardware::native::hackrf::compute_bb_filter_bw(def_sr),
-        ),
-    };
-    let mut results = vec![device.set_stage_gains(&gains)];
-    // Where the radio tuned, which a receiver on a tuning grid may round.
-    let mut tuned_freq = def_freq;
-    results.extend([
-        device.set_frequency(def_freq).map(|hz| tuned_freq = hz),
-        sr_result,
-        device.set_amp_enable(false),
-    ]);
-
+    let Some(core) = ctx.core else { return };
+    let reply = core.apply(crate::engine::command::Command::Reset);
     let mut m = metrics(ctx.state);
-    if results.iter().all(|r| r.is_ok()) {
-        m.radio.gains = gains;
-        m.radio.gain_curve = curve;
-        m.radio.amp_enabled = false;
-        m.lab.rf_autotrack = false;
-        m.radio.frequency = tuned_freq;
-        m.radio.config_sample_rate = settled_sr;
-        m.radio.bb_filter_hz = bb_bw;
-        m.push_log("Settings reset to defaults");
-    } else {
-        for r in &results {
-            if let Err(e) = r {
-                m.push_log(format!("Reset error: {}", e));
-            }
+    match reply {
+        crate::engine::command::Reply::Applied { .. } => m.push_log("Settings reset to defaults"),
+        crate::engine::command::Reply::Refused { reason } => {
+            m.push_log(format!("Reset error: {reason}"))
         }
     }
 }
 
 /// `[F]` - type a frequency.
 pub(super) fn begin_frequency_input(ctx: &mut InputCtx<'_>) {
-    if ctx.device.is_none() {
+    if ctx.core.is_none() {
         return;
     }
     let mut m = metrics(ctx.state);
@@ -92,9 +53,11 @@ pub(super) fn begin_frequency_input(ctx: &mut InputCtx<'_>) {
 /// `[S]` - type a sample rate, with the device's own legal range in the prompt,
 /// or on a radio that takes only a list of rates, step through the list.
 pub(super) fn begin_sample_rate_input(ctx: &mut InputCtx<'_>) {
-    let Some(device) = ctx.device else { return };
+    if ctx.core.is_none() {
+        return;
+    }
     let (lo, hi, name, listed) = {
-        let c = device.capabilities();
+        let c = metrics(ctx.state).caps.clone();
         (
             crate::ui::widgets::timing_fmt::fmt_msps(c.sample_rate_min_hz),
             crate::ui::widgets::timing_fmt::fmt_msps(c.sample_rate_max_hz),

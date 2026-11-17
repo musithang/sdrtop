@@ -103,15 +103,14 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
                 return true;
             };
             drop(m);
-            let Some(device) = ctx.device else {
+            let Some(core) = ctx.core else {
                 metrics(ctx.state).push_log("FT8: no radio to tune".to_string());
                 return true;
             };
-            let result = device.set_frequency(hz);
+            let result = super::tune(core, hz);
             let mut m = metrics(ctx.state);
             match result {
                 Ok(tuned) => {
-                    m.radio.frequency = tuned;
                     m.push_log(format!("FT8: {band}, dial {:.3} MHz", tuned as f64 / 1e6));
                 }
                 Err(e) => m.push_log(format!("FT8: could not tune to {band}: {e}")),

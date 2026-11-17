@@ -19,7 +19,7 @@ use super::{global, metrics, InputCtx, KeyAction};
 /// (`1·2·3·M`) and the log overlay (`L`) arrive in later steps. Every other key
 /// falls through to the global handler (so `Esc` exits focus as usual).
 pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, device) = (ctx.state, ctx.device);
+    let (state, core) = (ctx.state, ctx.core);
     match key.code {
         // Esc closes the log overlay first (if open), only then exits focus.
         KeyCode::Esc => {
@@ -42,20 +42,17 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             m.ui.log_overlay = !m.ui.log_overlay;
         }
         KeyCode::Left | KeyCode::Right => {
-            if let Some(device) = device {
-                let caps = device.capabilities();
+            if let Some(core) = core {
+                let caps = metrics(state).caps.clone();
                 let new_freq = {
                     let m = metrics(state);
                     let up = matches!(key.code, KeyCode::Right);
                     caps.step_within_band(m.radio.frequency, m.spectrum.step_hz, up)
                 };
-                let result = device.set_frequency(new_freq);
+                let result = super::tune(core, new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(tuned) => {
-                        m.radio.frequency = tuned;
-                        m.ui.note_mode_action(RailMode::Hunt);
-                    }
+                    Ok(_) => m.ui.note_mode_action(RailMode::Hunt),
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
                 }
             }
@@ -80,13 +77,12 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Char(c @ '1'..='3') => {
             let slot = c as usize - '1' as usize;
             let target = { metrics(state).ui.recall[slot] };
-            match (target, device) {
-                (Some(hz), Some(device)) => {
-                    let result = device.set_frequency(hz);
+            match (target, core) {
+                (Some(hz), Some(core)) => {
+                    let result = super::tune(core, hz);
                     let mut m = metrics(state);
                     match result {
                         Ok(tuned) => {
-                            m.radio.frequency = tuned;
                             m.ui.note_mode_action(RailMode::Hunt);
                             m.push_log(format!(
                                 "Recall {} → {:.3} MHz",

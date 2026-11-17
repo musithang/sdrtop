@@ -7,6 +7,7 @@
 //! What they have in common is that each drives the *radio* rather than the
 //! view - gain, calibration, capture - so most of them need the device.
 
+use crate::engine::command::{Command, Reply};
 use std::sync::Arc;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -17,7 +18,7 @@ use crate::ui;
 use super::{global, metrics, InputCtx, KeyAction};
 
 pub(super) fn lab_banner(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     match key.code {
         KeyCode::Up => {
             metrics(state).lab.adjust_ref(1.0);
@@ -65,7 +66,7 @@ pub(super) fn lab_banner(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 }
 
 pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     match key.code {
         // [M] - pin / unpin the carrier+image markers (override the live auto-track).
         KeyCode::Char('m') => {
@@ -149,7 +150,7 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 /// latch. `[⎵]`/`[F]` freeze or thaw the histogram + level diagram. Everything else
 /// (incl. the [↑↓]/[ ] gain nudges) falls through to the global handler.
 pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, device) = (ctx.state, ctx.device);
+    let (state, core) = (ctx.state, ctx.core);
     match key.code {
         // [A] - auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
@@ -212,15 +213,20 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             if moved {
                 // Off-optimal → one-shot jump, one call per stage, through the
                 // same per-stage path the manual keys use.
-                if let Some(device) = device {
-                    let failed = device
-                        .set_stage_gains(&targets)
-                        .err()
-                        .map(|e| e.to_string());
+                if let Some(core) = core {
+                    // The jump is the tracker's own, so it leaves the latch
+                    // as it found it; a gain from anywhere else stops it.
+                    let tracking = metrics(state).lab.rf_autotrack;
+                    let failed = match core.apply(Command::Gains {
+                        values: targets.clone(),
+                    }) {
+                        Reply::Applied { .. } => None,
+                        Reply::Refused { reason } => Some(reason),
+                    };
                     let mut m = metrics(state);
                     match failed {
                         None => {
-                            m.radio.gains = targets.clone();
+                            m.lab.rf_autotrack = tracking;
                             m.ui.note_mode_action(RailMode::Bench);
                             let split: Vec<String> = stages
                                 .iter()
@@ -397,7 +403,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 /// the footer while both fell through to the global handler, where `[R]` resets
 /// the whole radio to defaults.
 pub(super) fn timing_vitals(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     match key.code {
         KeyCode::Char('r') => {
             let mut m = metrics(state);
@@ -427,7 +433,7 @@ pub(super) fn timing_vitals(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction 
 /// `[C]` clears the jitter / throughput / sample-rate histories. Same story as
 /// the vitals arm above: pointed at the retired `timing_panel` until now.
 pub(super) fn timing_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     match key.code {
         KeyCode::Char('r') => {
             let mut m = metrics(state);
@@ -465,7 +471,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -507,7 +513,7 @@ mod tests {
         let focus_keys = HashMap::new();
         let mut ctx = InputCtx {
             state: &state,
-            device: None,
+            core: None,
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,

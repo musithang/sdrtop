@@ -48,40 +48,34 @@ fn adjust_level_floor(
 // ── Spectrum focus keys ───────────────────────────────────────────────────────
 
 pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, device) = (ctx.state, ctx.device);
+    let (state, core) = (ctx.state, ctx.core);
     match key.code {
         KeyCode::Left => {
-            if let Some(device) = device {
-                let caps = device.capabilities();
+            if let Some(core) = core {
+                let caps = metrics(state).caps.clone();
                 let new_freq = {
                     let m = metrics(state);
                     caps.step_within_band(m.radio.frequency, m.spectrum.step_hz, false)
                 };
-                let result = device.set_frequency(new_freq);
+                let result = super::tune(core, new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(tuned) => {
-                        m.radio.frequency = tuned;
-                        m.ui.note_mode_action(RailMode::Hunt);
-                    }
+                    Ok(_) => m.ui.note_mode_action(RailMode::Hunt),
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
                 }
             }
         }
         KeyCode::Right => {
-            if let Some(device) = device {
-                let caps = device.capabilities();
+            if let Some(core) = core {
+                let caps = metrics(state).caps.clone();
                 let new_freq = {
                     let m = metrics(state);
                     caps.step_within_band(m.radio.frequency, m.spectrum.step_hz, true)
                 };
-                let result = device.set_frequency(new_freq);
+                let result = super::tune(core, new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(tuned) => {
-                        m.radio.frequency = tuned;
-                        m.ui.note_mode_action(RailMode::Hunt);
-                    }
+                    Ok(_) => m.ui.note_mode_action(RailMode::Hunt),
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
                 }
             }
@@ -455,7 +449,7 @@ mod tests {
                 let focus_keys = HashMap::new();
                 let mut ctx = InputCtx {
                     state: &state,
-                    device: None,
+                    core: None,
                     engine: &mut engine,
                     show_footer: &mut show_footer,
                     focus_keys: &focus_keys,

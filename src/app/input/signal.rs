@@ -13,7 +13,7 @@ use crate::ui::widgets::micro_common::fmt_bw;
 use super::{global, metrics, InputCtx, KeyAction};
 
 pub(super) fn signal_metrics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     if let KeyCode::Char('c') = key.code {
         let mut m = metrics(state);
         let snr = m.signal.peak_to_nf_db;
@@ -37,7 +37,7 @@ pub(super) fn signal_metrics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 /// current characterization - modulation, SNR, occupied BW, and ACPR when it's
 /// been measured. The `lab_signal` analogue of `handle_signal_metrics_focus`.
 pub(super) fn signal_characterization(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     if let KeyCode::Char('c') = key.code {
         let mut m = metrics(state);
         let modulation = m.signal.modulation.label();
@@ -73,7 +73,7 @@ pub(super) fn signal_characterization(key: KeyEvent, ctx: &mut InputCtx<'_>) -> 
 /// DC offset and LO leakage; moving the channel off it is what makes the reading
 /// trustworthy, so it belongs on the arrow keys rather than buried in a submenu.
 pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let (state, _device) = (ctx.state, ctx.device);
+    let state = ctx.state;
     match key.code {
         KeyCode::Char(' ') => {
             let mut m = metrics(state);

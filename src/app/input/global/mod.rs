@@ -129,9 +129,9 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 /// `[F]` and the gain keys stay inert while the waterfall holds focus, rather
 /// than quietly becoming live.
 pub(super) fn handle_no_device(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    let saved = ctx.device.take();
+    let saved = ctx.core.take();
     let action = handle(key, ctx);
-    ctx.device = saved;
+    ctx.core = saved;
     action
 }
 #[cfg(test)]
@@ -152,7 +152,7 @@ mod tests {
         engine: ui::LayoutEngine,
         show_footer: bool,
         focus_keys: crate::app::FocusKeys,
-        device: Option<Arc<dyn crate::hardware::SdrDevice>>,
+        core: Option<crate::engine::Engine>,
     }
 
     impl Harness {
@@ -165,7 +165,7 @@ mod tests {
                 engine,
                 show_footer: true,
                 focus_keys: HashMap::new(),
-                device: None,
+                core: None,
             }
         }
 
@@ -173,7 +173,10 @@ mod tests {
         /// measured band, with its stages at `gains`.
         fn on_r2(r2: &crate::hardware::native::airspy::bench::BenchR2, gains: [f64; 3]) -> Self {
             let mut h = Self::new();
-            h.device = Some(Arc::clone(&r2.device));
+            h.core = Some(crate::engine::Engine::new(
+                Arc::clone(&h.state),
+                Arc::clone(&r2.device) as Arc<dyn crate::hardware::SdrDevice>,
+            ));
             let mut m = metrics(&h.state);
             m.caps = Arc::new(r2.device.capabilities().clone());
             m.radio.frequency = 92_800_000;
@@ -189,7 +192,7 @@ mod tests {
         fn key(&mut self, code: KeyCode) -> KeyAction {
             let mut ctx = InputCtx {
                 state: &self.state,
-                device: self.device.as_ref(),
+                core: self.core.as_ref(),
                 engine: &mut self.engine,
                 show_footer: &mut self.show_footer,
                 focus_keys: &self.focus_keys,

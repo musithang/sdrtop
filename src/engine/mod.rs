@@ -17,5 +17,50 @@
 //! the key handling. While that test holds, moving this module into a crate
 //! of its own is a mechanical change, whenever there is a reason for one.
 
+pub mod command;
 pub mod mode;
 pub mod testimony;
+
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use crate::hardware::SdrDevice;
+use crate::state::SdrMetrics;
+
+/// The one handle to everything that measures. Cheap to clone: every clone
+/// is the same engine.
+#[derive(Clone)]
+pub struct Engine {
+    state: Arc<Mutex<SdrMetrics>>,
+    device: Arc<dyn SdrDevice>,
+}
+
+impl Engine {
+    pub fn new(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) -> Self {
+        Self { state, device }
+    }
+
+    /// Everything the engine knows, as of now: the copy a frame is drawn from.
+    #[cfg(test)]
+    pub fn snapshot(&self) -> SdrMetrics {
+        self.lock().clone()
+    }
+
+    /// Change the shared state directly. For what is not yet a command; every
+    /// use is one the commands have still to absorb.
+    pub fn with_state<R>(&self, f: impl FnOnce(&mut SdrMetrics) -> R) -> R {
+        f(&mut self.lock())
+    }
+
+    /// The radio itself. Only for what measures the radio's own calls (the
+    /// retune timing bench), never to change a setting: settings are
+    /// [`command::Command`]s.
+    pub fn device(&self) -> &Arc<dyn SdrDevice> {
+        &self.device
+    }
+
+    /// The state, locked. A poisoned lock is recovered, never propagated: a
+    /// panic on one thread must not take every reader down with it.
+    fn lock(&self) -> MutexGuard<'_, SdrMetrics> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}

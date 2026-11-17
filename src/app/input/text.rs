@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::hardware;
+use crate::engine::command::{Command, Reply};
 use crate::state::{InputMode, RailMode, SdrMetrics, SpectrumMarker, StationField};
 
 use super::{menu, metrics, KeyAction};
@@ -125,7 +125,7 @@ fn clear_option_error(m: &mut SdrMetrics) {
 pub(super) fn frequency(
     key: KeyEvent,
     state: &Arc<Mutex<SdrMetrics>>,
-    device: Option<&Arc<dyn hardware::SdrDevice>>,
+    core: Option<&crate::engine::Engine>,
 ) {
     match key.code {
         KeyCode::Esc => {
@@ -141,8 +141,8 @@ pub(super) fn frequency(
             metrics(state).ui.input_buf.push(c);
         }
         KeyCode::Enter => {
-            if let Some(device) = device {
-                let caps = device.capabilities();
+            if let Some(core) = core {
+                let caps = metrics(state).caps.clone();
                 // Clamped into the hull rather than rejected, as the arrows
                 // clamp; but a frequency in a gap between bands is refused,
                 // because neither edge of the gap is what was asked for.
@@ -157,11 +157,10 @@ pub(super) fn frequency(
                         })
                         .filter(|&hz| caps.tunes(hz))
                 };
-                let result = freq_hz.map(|hz| device.set_frequency(hz));
+                let result = freq_hz.map(|hz| super::tune(core, hz));
                 let mut m = metrics(state);
                 match (freq_hz, result) {
                     (Some(_), Some(Ok(hz))) => {
-                        m.radio.frequency = hz;
                         m.ui.note_mode_action(RailMode::Hunt);
                         m.ui.input_mode = InputMode::Normal;
                         m.ui.input_buf.clear();
@@ -188,7 +187,7 @@ pub(super) fn frequency(
 pub(super) fn sample_rate(
     key: KeyEvent,
     state: &Arc<Mutex<SdrMetrics>>,
-    device: Option<&Arc<dyn hardware::SdrDevice>>,
+    core: Option<&crate::engine::Engine>,
 ) {
     match key.code {
         KeyCode::Esc => {
@@ -229,8 +228,8 @@ pub(super) fn sample_rate(
             }
         }
         KeyCode::Enter => {
-            if let Some(device) = device {
-                let caps = device.capabilities();
+            if let Some(core) = core {
+                let caps = metrics(state).caps.clone();
                 let lo_hz = caps.sample_rate_min_hz;
                 let hi_hz = caps.sample_rate_max_hz;
                 // Clamp into the device's legal range rather than rejecting, so a
@@ -245,10 +244,15 @@ pub(super) fn sample_rate(
                         // under 768 000, and every radio's rates are whole.
                         .map(|mhz| (mhz * 1_000_000.0).round().clamp(lo_hz, hi_hz))
                 };
-                // Release lock before calling device - set_sample_rate is a
-                // blocking USB control transfer; holding the mutex here deadlocks the
-                // rx_callback thread that needs the same lock to return.
-                let result = rate_hz.map(|hz| device.set_sample_rate(hz));
+                // No lock held across the command: set_sample_rate is a
+                // blocking USB control transfer, and holding the mutex through
+                // it deadlocks the rx_callback thread that needs the same lock
+                // to return.
+                let result = rate_hz.map(|hz| match core.apply(Command::SampleRate { hz }) {
+                    // The rate the radio came back with, as the engine wrote it.
+                    Reply::Applied { .. } => Ok(core.with_state(|m| m.radio.config_sample_rate)),
+                    Reply::Refused { reason } => Err(reason),
+                });
                 let mut m = metrics(state);
                 let (name, lower_name) = if m.caps.sample_rate_is_span {
                     ("Span", "span")
@@ -260,19 +264,17 @@ pub(super) fn sample_rate(
                     // not the one that was typed: a driver is free to round onto
                     // its own grid, and every frequency on screen is derived from
                     // this figure.
-                    (Some(hz), Some(Ok(set))) => {
-                        m.radio.config_sample_rate = set.rate_hz;
-                        m.radio.bb_filter_hz = set.bb_filter_hz;
+                    (Some(hz), Some(Ok(set_hz))) => {
                         m.ui.input_mode = InputMode::Normal;
                         m.ui.input_buf.clear();
-                        m.push_log(if set.rate_hz == hz {
+                        m.push_log(if set_hz == hz {
                             format!("{name} set to {:.3} MHz", hz / 1e6)
                         } else {
                             format!(
                                 "{name} {:.3} MHz is not on this device's grid; running at \
                                  {:.3} MHz",
                                 hz / 1e6,
-                                set.rate_hz / 1e6
+                                set_hz / 1e6
                             )
                         });
                     }
@@ -476,6 +478,7 @@ pub(super) fn reference_accuracy(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware;
     use std::collections::HashMap;
 
     use crate::config::LayoutConfig;
@@ -533,9 +536,9 @@ mod tests {
     }
 
     fn type_frequency(state: &Arc<Mutex<SdrMetrics>>, radio: &Arc<TwoBands>, text: &str) {
-        let device: Arc<dyn hardware::SdrDevice> = radio.clone();
+        let core = crate::engine::Engine::new(Arc::clone(state), radio.clone());
         metrics(state).ui.input_buf = text.to_string();
-        frequency(KeyEvent::from(KeyCode::Enter), state, Some(&device));
+        frequency(KeyEvent::from(KeyCode::Enter), state, Some(&core));
     }
 
     /// A frequency typed into the gap between bands is refused, the radio
@@ -561,13 +564,13 @@ mod tests {
     #[test]
     fn the_arrows_stop_at_the_bands_edge() {
         let (state, radio) = two_bands();
-        let device: Arc<dyn hardware::SdrDevice> = radio.clone();
+        let core = crate::engine::Engine::new(Arc::clone(&state), radio.clone());
         let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
         let mut show_footer = true;
         let focus_keys = HashMap::new();
         let mut ctx = super::super::InputCtx {
             state: &state,
-            device: Some(&device),
+            core: Some(&core),
             engine: &mut engine,
             show_footer: &mut show_footer,
             focus_keys: &focus_keys,
@@ -647,13 +650,13 @@ mod tests {
             crate::hardware::native::airspyhf::caps(&[912_000, 768_000, 192_000], 2048),
             Mutex::new(Vec::new()),
         ));
-        let device: Arc<dyn hardware::SdrDevice> = radio.clone();
         let mut m = SdrMetrics::fixture().airspyhf();
         m.radio.config_sample_rate = 912_000.0;
         m.ui.input_mode = InputMode::SampleRateInput;
         let state = Arc::new(Mutex::new(m));
+        let core = crate::engine::Engine::new(Arc::clone(&state), radio.clone());
         rate_key(&state, KeyCode::Left);
-        sample_rate(KeyEvent::from(KeyCode::Enter), &state, Some(&device));
+        sample_rate(KeyEvent::from(KeyCode::Enter), &state, Some(&core));
         assert_eq!(*radio.1.lock().unwrap(), vec![768_000.0]);
         let m = metrics(&state);
         assert_eq!(m.radio.config_sample_rate, 768_000.0);

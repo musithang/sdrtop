@@ -15,7 +15,7 @@ target/
 
 # Editor backups
 *~
-*.swps
+*.swp
 *.swo
 
 # Obsidian — machine-specific config

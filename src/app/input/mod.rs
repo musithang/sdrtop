@@ -38,7 +38,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::event::{DeviceOptionCompletion, DeviceOptionRequest};
-use crate::hardware;
 use crate::state::{InputMode, SdrMetrics};
 use crate::ui;
 
@@ -58,14 +57,15 @@ pub enum KeyAction {
 /// did not, and why the waterfall's fall-through needed a separate
 /// `handle_global_no_device` to express "not this one".
 ///
-/// The shared references are `Copy`, so a handler can pull `state` and `device`
+/// The shared references are `Copy`, so a handler can pull `state` and `core`
 /// out into locals and still pass `ctx` on to [`global::handle`] afterwards -
 /// that is what keeps the fall-through a single line.
 pub(super) struct InputCtx<'a> {
     pub state: &'a Arc<Mutex<SdrMetrics>>,
-    /// `None` in observer mode, when the radio belongs to another process - and
-    /// temporarily `None` inside [`global::handle_no_device`].
-    pub device: Option<&'a Arc<dyn hardware::SdrDevice>>,
+    /// The engine the keys send their commands to. `None` in observer mode,
+    /// when the radio belongs to another process - and temporarily `None`
+    /// inside [`global::handle_no_device`].
+    pub core: Option<&'a crate::engine::Engine>,
     pub engine: &'a mut ui::LayoutEngine,
     pub show_footer: &'a mut bool,
     /// Focus key → panel name, harvested from the registry by `App::build_ui`.
@@ -82,18 +82,28 @@ pub(super) fn metrics(state: &Arc<Mutex<SdrMetrics>>) -> MutexGuard<'_, SdrMetri
     state.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Tune through the engine: the frequency the radio settled on, which a
+/// receiver on a tuning grid may round, or the reason it did not.
+pub(super) fn tune(core: &crate::engine::Engine, hz: u64) -> Result<u64, String> {
+    use crate::engine::command::{Command, Reply};
+    match core.apply(Command::Tune { hz }) {
+        Reply::Applied { .. } => Ok(core.with_state(|m| m.radio.frequency)),
+        Reply::Refused { reason } => Err(reason),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_key(
     key: KeyEvent,
     state: &Arc<Mutex<SdrMetrics>>,
-    device: Option<&Arc<dyn hardware::SdrDevice>>,
+    core: Option<&crate::engine::Engine>,
     engine: &mut ui::LayoutEngine,
     show_footer: &mut bool,
     focus_keys: &crate::app::FocusKeys,
 ) -> KeyAction {
     let mut ctx = InputCtx {
         state,
-        device,
+        core,
         engine,
         show_footer,
         focus_keys,
@@ -112,7 +122,7 @@ pub fn handle_key(
         }
 
         InputMode::FrequencyInput => {
-            text::frequency(key, state, device);
+            text::frequency(key, state, core);
             KeyAction::Continue
         }
         InputMode::DeviceOptionInput { id, .. } => text::device_option(key, state, &id),
@@ -121,7 +131,7 @@ pub fn handle_key(
             KeyAction::Continue
         }
         InputMode::SampleRateInput => {
-            text::sample_rate(key, state, device);
+            text::sample_rate(key, state, core);
             KeyAction::Continue
         }
         InputMode::MarkerNameInput => {

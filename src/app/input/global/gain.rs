@@ -5,18 +5,23 @@
 //! picked), `[`/`]` on the second stage, `[A]` on the front-end boost, and
 //! `,` / `.` to pick a stage, from any section.
 //!
-//! All four share one shape - read the current value, ask the device to change
-//! it, and only write the state back if the device agreed. The device call
-//! happens with **no lock held**, which is why each of these takes the guard
-//! twice rather than holding it across the USB round trip.
+//! All four share one shape - read the current value, work out where the knob
+//! goes next, and send the engine the absolute setting as a command; the
+//! engine makes the device call and writes the state back only if the radio
+//! agreed. The command is sent with **no lock held**, which is why each of
+//! these takes the guard twice rather than holding it across the USB round
+//! trip.
 //!
 //! `↑` and `↓` were 26 identical lines apart from one `true`/`false`, and `[` and
 //! `]` twenty more; they are one function each now, with the direction as an
 //! argument.
 
+use crate::engine::command::{Command, Reply};
+#[cfg(test)]
+use crate::hardware::Boost;
 #[cfg(test)]
 use crate::hardware::GainModel;
-use crate::hardware::{Boost, StageReading, StageSpec};
+use crate::hardware::{StageReading, StageSpec};
 use crate::state::RailMode;
 
 use super::super::{metrics, InputCtx};
@@ -90,12 +95,21 @@ fn next_on_stage(stage: &StageSpec, current: f64, up: bool, hz: u64) -> f64 {
     f64::from(next)
 }
 
+/// Send one command and say whether the radio took it. The engine writes
+/// the state; the key only logs what happened.
+fn send(core: &crate::engine::Engine, command: Command) -> Result<(), String> {
+    match core.apply(command) {
+        Reply::Applied { .. } => Ok(()),
+        Reply::Refused { reason } => Err(reason),
+    }
+}
+
 /// Before a key sets stages the tuner AGC is setting, the AGC goes off: as
 /// libairspy's presets switch it off before they set anything, and as an
 /// RTL-SDR's manual gain always has. Said in the log. `false` when the AGC
 /// would not switch off, and the key should not go on.
 fn release_agc(ctx: &mut InputCtx<'_>, touched: &[usize]) -> bool {
-    let Some(device) = ctx.device else {
+    let Some(core) = ctx.core else {
         return false;
     };
     let governed: Vec<String> = {
@@ -110,11 +124,10 @@ fn release_agc(ctx: &mut InputCtx<'_>, touched: &[usize]) -> bool {
     if governed.is_empty() {
         return true;
     }
-    let result = device.set_tuner_agc(false);
+    let result = send(core, Command::Agc { on: false });
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.amp_enabled = false;
             m.push_log(format!("AGC off: {} set by hand", governed.join(" and ")));
             true
         }
@@ -191,8 +204,8 @@ pub(super) fn next_stage(current: Option<usize>, count: usize, forward: bool) ->
 /// VGA in 2, and a driver that reports no step gets 1 dB. Nothing is
 /// redistributed, which is the whole point of the mode.
 pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
-    let Some(device) = ctx.device else { return };
-    let stages = device.capabilities().gain.stages();
+    let Some(core) = ctx.core else { return };
+    let stages = metrics(ctx.state).caps.gain.stages();
     let Some(index) = metrics(ctx.state).ui.gain_stage else {
         return;
     };
@@ -230,12 +243,17 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
         next.clamp(spec.min_db, spec.max_db)
     };
 
-    let result = device.set_stage_gain(index, &spec.name, next);
+    let result = send(
+        core,
+        Command::Gain {
+            stage: spec.name.clone(),
+            db: next,
+        },
+    );
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.set_stage_gain(index, next);
-            m.lab.rf_autotrack = false;
+            let next = m.radio.stage_gain(index);
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!("{} \u{2192} {}", spec.name, said(spec, next, hz)));
         }
@@ -248,14 +266,14 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
 /// picked across layouts and focus until the ring comes back round, and the
 /// footer says which stage `↑` / `↓` are moving.
 pub(super) fn select_stage(ctx: &mut InputCtx<'_>, forward: bool) {
-    let has_curves = ctx
-        .device
-        .is_some_and(|d| !d.capabilities().gain.curves().is_empty());
+    let has_curves = ctx.core.is_some() && !metrics(ctx.state).caps.gain.curves().is_empty();
     if has_curves {
         select_on_curve_ring(ctx, forward);
         return;
     }
-    let count = ctx.device.map(|d| d.capabilities().gain.stages().len());
+    let count = ctx
+        .core
+        .map(|_| metrics(ctx.state).caps.gain.stages().len());
     let Some(count) = count.filter(|n| *n > 1) else {
         return;
     };
@@ -310,8 +328,9 @@ fn select_on_curve_ring(ctx: &mut InputCtx<'_>, forward: bool) {
 /// From the nearest step, so a chain moved off the curve by hand rejoins it
 /// where it is rather than jumping back to where the curve last was.
 fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
-    let Some(device) = ctx.device else { return };
-    let gm = &device.capabilities().gain;
+    let Some(core) = ctx.core else { return };
+    let caps = metrics(ctx.state).caps.clone();
+    let gm = &caps.gain;
     let Some(c) = gm.curves().get(curve) else {
         return;
     };
@@ -334,8 +353,8 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
     };
     let values = c.values(step, &stages, hz);
 
-    // Device calls with no lock held, as everywhere else in this file.
-    let failed = device.set_stage_gains(&values).err().map(|e| e.to_string());
+    // The command is sent with no lock held, as everywhere else in this file.
+    let failed = send(core, Command::Gains { values }).err();
 
     let mut m = metrics(ctx.state);
     match failed {
@@ -343,11 +362,9 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
         None => {
             let split: Vec<String> = stages
                 .iter()
-                .zip(&values)
+                .zip(&m.radio.gains)
                 .map(|(s, &v)| format!("{} {}", s.name, said(s, v, hz)))
                 .collect();
-            m.radio.gains = values;
-            m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!(
                 "{} {step}/{} \u{2192} {}",
@@ -368,10 +385,11 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
 /// spreads that figure itself rather than handing it to the driver. See
 /// [`step_distributed`].
 pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
-    let Some(device) = ctx.device else { return };
+    let Some(core) = ctx.core else { return };
+    let caps = metrics(ctx.state).caps.clone();
     // On a vendor curve the knob is the curve.
     let curve = metrics(ctx.state).radio.gain_curve;
-    if let Some(curve) = curve.filter(|&c| c < device.capabilities().gain.curves().len()) {
+    if let Some(curve) = curve.filter(|&c| c < caps.gain.curves().len()) {
         step_curve(ctx, curve, up);
         return;
     }
@@ -379,12 +397,12 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     // "more than one stage and no key of its own for the second", which is what
     // that has always meant: a HackRF drives its two stages from two keys, and
     // an RTL-SDR's single tuner is stepped directly.
-    let gm = &device.capabilities().gain;
+    let gm = &caps.gain;
     if !gm.has_second_stage() && gm.stages().len() > 1 {
         step_distributed(ctx, up);
         return;
     }
-    let gain = &device.capabilities().gain;
+    let gain = &caps.gain;
     let Some(front) = gain.stages().into_iter().next() else {
         return;
     };
@@ -399,17 +417,19 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
 
     // By position, with the exact value: the one setter every backend has for
     // every stage.
-    let result = device.set_stage_gain(0, &front.name, new_gain);
+    // The engine keeps the AGC flag in step: on a single-tuner radio a manual
+    // gain turns the tuner AGC off in hardware.
+    let result = send(
+        core,
+        Command::Gain {
+            stage: front.name.clone(),
+            db: new_gain,
+        },
+    );
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.set_stage_gain(0, new_gain);
-            // On a single-tuner device, setting a manual gain turns the tuner AGC
-            // off in hardware - keep the UI's AGC flag in sync.
-            if gain.is_single() {
-                m.radio.amp_enabled = false;
-            }
-            m.lab.rf_autotrack = false;
+            let new_gain = m.radio.stage_gain(0);
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!(
                 "{} gain \u{2192} {}",
@@ -438,8 +458,8 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
 /// have moved an element behind our back, and the cost of being sure is a
 /// handful of USB control transfers on a keypress.
 fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
-    let Some(device) = ctx.device else { return };
-    let stages = device.capabilities().gain.stages();
+    let Some(core) = ctx.core else { return };
+    let stages = metrics(ctx.state).caps.gain.stages();
     if stages.is_empty() {
         return;
     }
@@ -459,15 +479,14 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
     let want = crate::hardware::gain::next_total(&stages, from, up, hz);
     let (values, achieved) = crate::hardware::gain::distribute(&stages, want, hz);
 
-    // Device calls with no lock held, as everywhere else in this file.
-    let failed = device.set_stage_gains(&values).err().map(|e| e.to_string());
+    // The command is sent with no lock held, as everywhere else in this file.
+    let failed = send(core, Command::Gains { values }).err();
 
     let mut m = metrics(ctx.state);
     match failed {
         Some(why) => m.push_log(format!("Gain error: {why}")),
         None => {
-            m.radio.gains = values.clone();
-            m.lab.rf_autotrack = false;
+            let values = m.radio.gains.clone();
             m.ui.note_mode_action(RailMode::Bench);
             // The achieved total, never the request: a request that is not
             // reachable would put a number on screen the radio is not set to.
@@ -490,8 +509,9 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
 /// The step comes from the stage, not from a datasheet written down here: the
 /// 2 dB grid is the model's to state, the same way the front stage's 8 dB is.
 pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
-    let Some(device) = ctx.device else { return };
-    let gm = &device.capabilities().gain;
+    let Some(core) = ctx.core else { return };
+    let caps = metrics(ctx.state).caps.clone();
+    let gm = &caps.gain;
     if !gm.has_second_stage() {
         return;
     }
@@ -512,12 +532,17 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     // By position, not through `set_vga_gain`: on an R2 the second stage is
     // the mixer, and a VGA setter it does not have answered `Ok` and moved
     // nothing.
-    let result = device.set_stage_gain(1, &label, new_gain);
+    let result = send(
+        core,
+        Command::Gain {
+            stage: label.clone(),
+            db: new_gain,
+        },
+    );
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.set_stage_gain(1, new_gain);
-            m.lab.rf_autotrack = false;
+            let new_gain = m.radio.stage_gain(1);
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!(
                 "{label} gain \u{2192} {}",
@@ -549,31 +574,17 @@ pub(super) fn toggle_boost(ctx: &mut InputCtx<'_>) {
         return;
     }
 
-    let Some(device) = ctx.device else { return };
+    let Some(core) = ctx.core else { return };
     let new_state = !metrics(ctx.state).radio.amp_enabled;
-    // **Which trait call, asked of the mechanism rather than of the shape.**
-    // This used to ask `is_single()`, which happened to give the right answer
-    // and meant the wrong thing: "one knob" is not the same question as "the
-    // boost is an automatic gain mode". A device with one knob and a discrete
-    // amplifier exists, and a HackRF reached through SoapySDR is one.
-    //
-    // Getting it backwards is silent, which is why it is worth spelling out.
-    // `RtlDevice` does not implement `set_amp_enable` and `HackRfDevice` does
-    // not implement `set_tuner_agc`; both fall back to the trait's `Ok(())`. A
-    // misrouted key would report success and toggle nothing.
-    let result = match gm.boost() {
-        Some(Boost::GainMode) => device.set_tuner_agc(new_state),
-        Some(Boost::Element(_)) => device.set_amp_enable(new_state),
-        // Unreachable: `has_boost()` above returned early.
-        None => Ok(()),
-    };
+    // Which trait call is the engine's to decide, from the boost's
+    // mechanism: getting it backwards is silent, because each native backend
+    // leaves the other setter at the trait's `Ok(())`.
+    let result = send(core, Command::Boost { on: new_state });
     let label = gm.boost_label();
 
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.amp_enabled = new_state;
-            m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(boost_line(&gm, new_state));
         }

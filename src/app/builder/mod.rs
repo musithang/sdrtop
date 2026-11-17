@@ -387,9 +387,13 @@ impl App {
             m.ui.menu = startup_menu(&engine, m.observer.active, saved);
         }
 
+        let core = device
+            .as_ref()
+            .map(|device| crate::engine::Engine::new(Arc::clone(&state), Arc::clone(device)));
         Ok(Self {
             state,
             device,
+            core,
             rx_ctx,
             config_path,
             events: EventStream::new(Duration::from_millis(33)),
