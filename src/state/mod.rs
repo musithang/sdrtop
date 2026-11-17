@@ -9,6 +9,7 @@ pub mod ft8;
 mod home;
 mod iq;
 mod lab;
+pub mod log;
 mod micro;
 mod net;
 mod observer;
@@ -47,6 +48,7 @@ pub use net::ROSTER_SORT_KEYS;
 // funnel and latest frame with it.
 pub use ft8::{verdict as ft8_verdict, CycleEntry, CycleOutcome, Ft8State, Station};
 pub use home::{Home, StationField};
+pub use log::{LogEntry, LogLevel};
 #[cfg(test)]
 pub use net::WifiSurvey;
 pub use net::{AirColumn, Rhythm, Spender, READING_COLUMNS, RHYTHM_BINS};
@@ -75,8 +77,8 @@ pub use timing::{
     RELAY_BASELINE_US, RELAY_STRETCH_US,
 };
 pub use ui::{
-    active_recall_slot, recall_from_hz, recall_to_hz, DeviceOptionUpdate, InputMode, LogEntry,
-    LogLevel, MenuFocus, MenuPath, MenuState, MenuTile, RailMode, UiState, RECALL_SLOTS,
+    active_recall_slot, recall_from_hz, recall_to_hz, DeviceOptionUpdate, InputMode, MenuFocus,
+    MenuPath, MenuState, MenuTile, RailMode, UiState, RECALL_SLOTS,
 };
 pub use waterfall::{BinAxis, BinWindow, FftFrame, WaterfallState, WATERFALL_MIN_ROWS};
 
@@ -131,6 +133,8 @@ pub struct SdrMetrics {
     pub timing: TimingState,
     pub sweep: SweepState,
     pub ui: UiState,
+    /// What happened, in words. See [`log`].
+    pub log: std::collections::VecDeque<LogEntry>,
     /// What the engine computes and so what it feeds, which the screen's
     /// section and layout only ask for. See [`crate::engine::mode`].
     pub mode: crate::engine::mode::Mode,
@@ -432,7 +436,7 @@ impl SdrMetrics {
     }
 
     pub fn push_log(&mut self, msg: impl Into<String>) {
-        self.ui.push_log(msg);
+        log::push(&mut self.log, msg);
     }
 }
 

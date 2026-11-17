@@ -411,12 +411,12 @@ mod tests {
         let logged = apply_refusal(&mut m, &why, false);
         assert_eq!(m.net.survey_refused, why);
         assert!(logged);
-        let said = m.ui.log.len();
+        let said = m.log.len();
 
         // Still refused: the state keeps saying so, the log does not repeat it.
         let logged = apply_refusal(&mut m, &why, logged);
         assert_eq!(m.net.survey_refused, why);
-        assert_eq!(m.ui.log.len(), said, "the log repeated itself");
+        assert_eq!(m.log.len(), said, "the log repeated itself");
 
         // The rate is widened and the survey runs again.
         let logged = apply_refusal(&mut m, &None, logged);
@@ -431,7 +431,7 @@ mod tests {
 
         // Refused once more, and it is said again.
         apply_refusal(&mut m, &why, logged);
-        assert!(m.ui.log.len() > said);
+        assert!(m.log.len() > said);
     }
 
     /// A radio that records where it was tuned.
@@ -498,7 +498,6 @@ mod tests {
         let log: Vec<String> = state
             .lock()
             .unwrap()
-            .ui
             .log
             .iter()
             .map(|e| e.text.to_string())
@@ -531,7 +530,7 @@ mod tests {
         assert_eq!(*radio.tuned.lock().unwrap(), vec![target.tune_hz]);
         let m = state.lock().unwrap();
         assert_eq!(m.radio.frequency, target.tune_hz);
-        let log: Vec<String> = m.ui.log.iter().map(|e| e.text.to_string()).collect();
+        let log: Vec<String> = m.log.iter().map(|e| e.text.to_string()).collect();
         assert!(
             log.iter()
                 .any(|l| l.contains("NET locked to") && l.contains("clear of the radio's own DC")),

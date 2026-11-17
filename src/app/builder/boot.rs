@@ -467,6 +467,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             recall,
             ..UiState::default()
         },
+        log: VecDeque::new(),
         mode: crate::engine::mode::Mode::idle(),
         lab: crate::state::LabState::default(),
         demod: crate::state::DemodState::default(),

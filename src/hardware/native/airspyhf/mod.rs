@@ -1623,7 +1623,6 @@ mod tests {
             .metrics
             .lock()
             .unwrap()
-            .ui
             .log
             .iter()
             .map(|e| e.text.to_string())

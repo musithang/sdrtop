@@ -993,7 +993,6 @@ mod tests {
             DeviceOptionUpdate::Idle
         ));
         assert!(m
-            .ui
             .log
             .back()
             .is_some_and(|entry| entry.text.contains("Bandwidth set to Wide")));
@@ -1304,7 +1303,7 @@ mod tests {
             &m.ui.device_option_update,
             DeviceOptionUpdate::Failed { id } if id == "bandwidth"
         ));
-        assert!(m.ui.log.back().is_some_and(|entry| entry
+        assert!(m.log.back().is_some_and(|entry| entry
             .text
             .contains("Bandwidth error: device rejected choice")));
         drop(m);
@@ -1528,7 +1527,6 @@ mod tests {
             let m = state.lock().unwrap();
             assert_eq!(m.radio.frequency, 7_074_000);
             assert!(m
-                .ui
                 .log
                 .back()
                 .is_some_and(|e| e.text.contains("Grid: tuned to 7.074000 MHz, -300 Hz")));
@@ -1537,7 +1535,6 @@ mod tests {
         let m = state.lock().unwrap();
         assert_eq!(m.radio.frequency, 7_074_000);
         assert!(m
-            .ui
             .log
             .back()
             .is_some_and(|e| e.text.contains("Grid: retune refused: below the grid")));

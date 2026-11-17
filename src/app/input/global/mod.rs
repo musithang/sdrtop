@@ -202,7 +202,6 @@ mod tests {
 
         fn log(&self) -> String {
             metrics(&self.state)
-                .ui
                 .log
                 .iter()
                 .map(|e| e.text.clone())
@@ -369,13 +368,13 @@ mod tests {
     fn a_digit_past_the_end_of_a_section_does_nothing() {
         let mut h = Harness::new();
         h.engine.set_preset("lab_sweep");
-        let before = metrics(&h.state).ui.log.len();
+        let before = metrics(&h.state).log.len();
         for c in ['3', '7', '9'] {
             h.press(c);
             assert_eq!(h.engine.active_preset(), "lab_sweep", "'{c}' moved us");
         }
         assert_eq!(
-            metrics(&h.state).ui.log.len(),
+            metrics(&h.state).log.len(),
             before,
             "a key that names nothing should say nothing:\n{}",
             h.log()
@@ -471,12 +470,12 @@ mod tests {
     fn the_retired_keys_do_nothing() {
         let mut h = Harness::new();
         let preset = h.engine.active_preset().to_string();
-        let logs_before = metrics(&h.state).ui.log.len();
+        let logs_before = metrics(&h.state).log.len();
         for c in ['0', '?'] {
             assert_eq!(h.press(c), KeyAction::Continue);
         }
         assert_eq!(h.engine.active_preset(), preset);
-        assert_eq!(metrics(&h.state).ui.log.len(), logs_before);
+        assert_eq!(metrics(&h.state).log.len(), logs_before);
     }
 
     /// `handle_no_device` exists so the waterfall's fall-through cannot reach the
@@ -539,12 +538,12 @@ mod tests {
     fn an_unbound_key_does_nothing_at_all() {
         let mut h = Harness::new();
         let preset = h.engine.active_preset().to_string();
-        let logs_before = metrics(&h.state).ui.log.len();
+        let logs_before = metrics(&h.state).log.len();
         for c in ['x', 'z', '@'] {
             assert_eq!(h.press(c), KeyAction::Continue);
         }
         assert_eq!(h.engine.active_preset(), preset);
-        assert_eq!(metrics(&h.state).ui.log.len(), logs_before);
+        assert_eq!(metrics(&h.state).log.len(), logs_before);
     }
     /// The boost key on a device with no boost changes nothing and says so.
     ///
@@ -563,9 +562,7 @@ mod tests {
         let m = metrics(&h.state);
         assert_eq!(m.radio.amp_enabled, before, "the flag must not move");
         assert!(
-            m.ui.log
-                .iter()
-                .any(|e| e.text.contains("no front end boost")),
+            m.log.iter().any(|e| e.text.contains("no front end boost")),
             "and the user is told why nothing happened"
         );
     }

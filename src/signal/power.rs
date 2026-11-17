@@ -412,7 +412,6 @@ mod tests {
             "the Lab's channel figures read the trace"
         );
         assert!(metrics
-            .ui
             .log
             .iter()
             .all(|entry| !entry.text.contains("Power trace rejected")));
@@ -565,11 +564,9 @@ mod tests {
         );
 
         let metrics = state.lock().unwrap_or_else(|error| error.into_inner());
-        assert_eq!(metrics.ui.log.len(), 2);
-        assert!(metrics.ui.log[0].text.contains("empty trace"));
-        assert!(metrics.ui.log[1]
-            .text
-            .contains("1 additional trace rejected"));
+        assert_eq!(metrics.log.len(), 2);
+        assert!(metrics.log[0].text.contains("empty trace"));
+        assert!(metrics.log[1].text.contains("1 additional trace rejected"));
     }
 
     #[test]

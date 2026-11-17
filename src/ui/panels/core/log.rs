@@ -56,22 +56,22 @@ pub(crate) fn fmt_clock(epoch_secs: u64) -> String {
 pub fn render(f: &mut Frame, inner: Rect, m: &SdrMetrics, theme: &crate::Theme) {
     // Each entry → `lamp  HH:MM:SS  message`. The lamp + dim, fixed-width
     // timestamp form an aligned gutter; the message reads in normal value colour.
-    let lines: Vec<Line> =
-        m.ui.log
-            .iter()
-            .map(|e| {
-                Line::from(vec![
-                    lamp(e.level, theme),
-                    Span::raw(" "),
-                    Span::styled(
-                        fmt_clock(e.at_epoch_secs),
-                        Style::default().fg(theme.border_dim),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(e.text.as_ref(), Style::default().fg(theme.value)),
-                ])
-            })
-            .collect();
+    let lines: Vec<Line> = m
+        .log
+        .iter()
+        .map(|e| {
+            Line::from(vec![
+                lamp(e.level, theme),
+                Span::raw(" "),
+                Span::styled(
+                    fmt_clock(e.at_epoch_secs),
+                    Style::default().fg(theme.border_dim),
+                ),
+                Span::raw("  "),
+                Span::styled(e.text.as_ref(), Style::default().fg(theme.value)),
+            ])
+        })
+        .collect();
 
     let scroll = lines.len().saturating_sub(inner.height as usize) as u16;
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);

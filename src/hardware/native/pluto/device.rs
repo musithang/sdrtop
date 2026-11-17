@@ -994,7 +994,7 @@ mod tests {
         net.recv_timeout(WAIT).unwrap();
         dev.stop_rx().unwrap();
         let m = ctx.metrics.lock().unwrap();
-        let said: Vec<&str> = m.ui.log.iter().map(|e| e.text.as_ref()).collect();
+        let said: Vec<&str> = m.log.iter().map(|e| e.text.as_ref()).collect();
         assert!(
             said.iter()
                 .any(|l| l.contains("answered a block with nothing")),

@@ -491,7 +491,7 @@ mod tests {
         {
             let m = metrics(&state);
             assert!(!m.iq.cal.cal_pending, "nothing captured");
-            let log = &m.ui.log.back().unwrap().text;
+            let log = &m.log.back().unwrap().text;
             assert!(
                 log.starts_with("IQ auto-cal refused: the samples are turned +5.0 kHz off the LO"),
                 "{log}"
@@ -521,7 +521,7 @@ mod tests {
         super::rf_chain(KeyEvent::from(KeyCode::Char('k')), &mut ctx);
         let m = metrics(&state);
         assert!(m.lab.noise_sweep.is_none(), "no sweep started");
-        let log = &m.ui.log.back().unwrap().text;
+        let log = &m.log.back().unwrap().text;
         assert!(
             log.starts_with("Noise sweep: ATT is digital gain after the converter"),
             "{log}"

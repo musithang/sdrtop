@@ -460,7 +460,7 @@ mod power_control_tests {
         let metrics = state.lock().unwrap();
         assert!(!metrics.radio.rx_enabled);
         assert!(!metrics.radio.hw_streaming);
-        assert!(metrics.ui.log.back().unwrap().text.contains("start failed"));
+        assert!(metrics.log.back().unwrap().text.contains("start failed"));
     }
 
     #[test]
@@ -501,12 +501,11 @@ mod power_control_tests {
         assert!(!metrics.radio.rx_enabled);
         assert!(!metrics.radio.hw_streaming);
         assert_eq!(device.stops.load(Ordering::Relaxed), 1);
-        assert!(metrics.ui.log.iter().any(|entry| {
+        assert!(metrics.log.iter().any(|entry| {
             entry.text.contains("stopped unexpectedly")
                 && entry.text.contains("press [Space] to restart")
         }));
         assert!(metrics
-            .ui
             .log
             .iter()
             .any(|entry| entry.text.contains("cleaning up") && entry.text.contains("stop failed")));
@@ -558,7 +557,6 @@ mod power_control_tests {
             state
                 .lock()
                 .unwrap()
-                .ui
                 .log
                 .back()
                 .map(|e| e.text.clone())

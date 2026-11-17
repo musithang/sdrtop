@@ -469,7 +469,7 @@ mod tests {
                 };
                 press(KeyCode::Up);
                 assert_eq!(
-                    metrics(&state).ui.log.back().unwrap().text.as_ref(),
+                    metrics(&state).log.back().unwrap().text.as_ref(),
                     format!(
                         "{prefix}: {:.0}\u{2026}{max:.0} dBFS",
                         (min + 10.0).min(highest_floor)
@@ -498,7 +498,7 @@ mod tests {
                 };
                 assert_eq!(floor, min);
                 assert_eq!(
-                    m.ui.log.back().unwrap().text.as_ref(),
+                    m.log.back().unwrap().text.as_ref(),
                     format!("{prefix}: {min:.0}\u{2026}{max:.0} dBFS")
                 );
             }

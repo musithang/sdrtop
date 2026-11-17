@@ -808,7 +808,7 @@ mod tests {
 
     /// Whether the log says `text` anywhere.
     fn said(m: &SdrMetrics, text: &str) -> bool {
-        m.ui.log.iter().any(|l| l.text.contains(text))
+        m.log.iter().any(|l| l.text.contains(text))
     }
 
     /// The arrows walk the thirteen channels and round the ends; the first
@@ -983,11 +983,7 @@ mod tests {
             let m = metrics(&state);
             assert!(m.radio.reference.is_none());
             assert!(m.ui.input_mode == InputMode::Normal);
-            assert!(m
-                .ui
-                .log
-                .iter()
-                .any(|l| l.text.contains("no longer trusted")));
+            assert!(m.log.iter().any(|l| l.text.contains("no longer trusted")));
         }
 
         // On another device, with a reference in place, it asks to replace it
@@ -1021,7 +1017,7 @@ mod tests {
         m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 1]);
         trust_selected(&mut m);
         assert!(m.ui.input_mode == InputMode::Normal);
-        let said = |m: &SdrMetrics, text: &str| m.ui.log.iter().any(|l| l.text.contains(text));
+        let said = |m: &SdrMetrics, text: &str| m.log.iter().any(|l| l.text.contains(text));
         assert!(said(&m, "nothing to reference against"));
 
         m.net.census.selection.selected = None;
@@ -1204,7 +1200,6 @@ mod tests {
         filter_to_selected(&mut m);
         assert_eq!(m.net.ble_view.filter, None);
         assert!(m
-            .ui
             .log
             .iter()
             .any(|l| l.text.contains("no advertiser address")));
@@ -1280,11 +1275,11 @@ mod tests {
         assert_eq!(m.net.mode, crate::state::NetMode::Lock);
         assert!(m.net.lock_at.is_none(), "where it is, not somewhere asked");
         assert!(
-            m.ui.log
+            m.log
                 .iter()
                 .any(|l| l.text.contains("following needs the radio still")),
             "{:?}",
-            m.ui.log.iter().map(|l| &l.text).collect::<Vec<_>>()
+            m.log.iter().map(|l| &l.text).collect::<Vec<_>>()
         );
     }
 
@@ -1297,7 +1292,6 @@ mod tests {
         key(&mut engine, &keys, &state, KeyCode::Enter);
         assert_eq!(engine.active_preset(), "net_ble");
         assert!(metrics(&state)
-            .ui
             .log
             .iter()
             .any(|l| l.text.contains("not followed")));
@@ -1963,7 +1957,6 @@ mod tests {
         key(&mut engine, &keys, &state, KeyCode::Enter);
         assert_eq!(engine.active_preset(), "net_bt");
         assert!(metrics(&state)
-            .ui
             .log
             .iter()
             .any(|l| l.text.contains("select a piconet")));
@@ -2112,7 +2105,6 @@ mod tests {
         switch(&mut engine, "net_ble");
         assert_eq!(metrics(&state).net.ble_view.filter, Some(device));
         assert!(metrics(&state)
-            .ui
             .log
             .iter()
             .any(|l| l.text.contains("as selected in the census")));
@@ -2224,7 +2216,6 @@ mod tests {
 
     fn log(state: &Arc<Mutex<SdrMetrics>>) -> String {
         metrics(state)
-            .ui
             .log
             .iter()
             .map(|e| e.text.clone())

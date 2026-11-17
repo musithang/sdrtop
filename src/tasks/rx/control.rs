@@ -355,7 +355,7 @@ mod tests {
         track_gain(&state, &r2.device, -30.0);
         let m = state.lock().unwrap();
         assert!(!m.lab.rf_autotrack);
-        let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
+        let last = m.log.back().map(|e| e.text.clone()).unwrap_or_default();
         assert!(last.contains("the tuner AGC sets LNA and MIX"), "{last}");
         assert_eq!(r2.registers(), [-1, -1, -1]);
     }
@@ -374,7 +374,7 @@ mod tests {
         let gm = &m.caps.gain;
         let step = gm.curves()[0].step_of(&gm.stages(), &m.radio.gains, m.radio.frequency);
         assert!(step.is_some_and(|s| s > 10), "{:?}", m.radio.gains);
-        let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
+        let last = m.log.back().map(|e| e.text.clone()).unwrap_or_default();
         assert!(
             last.contains(&format!("Linearity {}/21", step.unwrap())),
             "{last}"
@@ -400,7 +400,7 @@ mod tests {
         track_gain(&state, &r2.device, -30.0);
         let m = state.lock().unwrap();
         assert!(!m.lab.rf_autotrack);
-        let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
+        let last = m.log.back().map(|e| e.text.clone()).unwrap_or_default();
         assert!(last.contains("LNA's gain in dB was measured"), "{last}");
         assert_eq!(r2.registers(), [-1, -1, -1]);
         drop(m);

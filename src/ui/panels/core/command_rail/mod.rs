@@ -118,7 +118,7 @@ impl Panel for CommandRailPanel {
         f.render_widget(Paragraph::new(lines), stack_area);
 
         if let Some(foot) = foot_area {
-            if let Some(entry) = state.ui.log.back() {
+            if let Some(entry) = state.log.back() {
                 f.render_widget(Paragraph::new(log_foot(entry, theme)), foot);
             }
         }

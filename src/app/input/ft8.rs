@@ -335,11 +335,7 @@ mod tests {
         assert_eq!(map.window, Window::Session);
         // The view's own keys still work in focus.
         assert_eq!(m.ft8.view.range, MapRange::Km1500);
-        assert!(m
-            .ui
-            .log
-            .iter()
-            .any(|l| l.text.contains("FT8 map: rays off")));
+        assert!(m.log.iter().any(|l| l.text.contains("FT8 map: rays off")));
     }
 
     #[test]
@@ -404,7 +400,7 @@ mod tests {
         press(&s, KeyCode::Char('u'));
         let m = s.lock().unwrap();
         assert!(!m.ft8.view.only_yours);
-        assert!(m.ui.log.iter().any(|l| l.text.contains("Options")));
+        assert!(m.log.iter().any(|l| l.text.contains("Options")));
     }
 
     #[test]

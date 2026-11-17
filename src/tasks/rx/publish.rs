@@ -411,7 +411,7 @@ mod tests {
         assert!(m.radio.amp_enabled);
         assert_eq!(m.radio.gains[0], 40.0);
         assert_eq!(m.radio.other_tx.as_deref(), Some("1 DDS tone set"));
-        let said: Vec<&str> = m.ui.log.iter().map(|e| e.text.as_ref()).collect();
+        let said: Vec<&str> = m.log.iter().map(|e| e.text.as_ref()).collect();
         assert_eq!(said.len(), 5);
         assert!(said
             .iter()

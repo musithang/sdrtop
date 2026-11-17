@@ -703,7 +703,7 @@ mod tests {
         let m = metrics(&h.state);
         assert_eq!(m.device_options[1].selected_choice, "-10");
         assert_eq!(m.ui.device_option_update, DeviceOptionUpdate::Idle);
-        assert!(m.ui.log.back().unwrap().text.contains("Gain set to -10"));
+        assert!(m.log.back().unwrap().text.contains("Gain set to -10"));
     }
 
     #[test]
@@ -782,12 +782,12 @@ mod tests {
         h.show_options(vec![option]);
         h.key(KeyCode::Enter);
         h.type_number("9");
-        let log_count = metrics(&h.state).ui.log.len();
+        let log_count = metrics(&h.state).log.len();
         for _ in 0..3 {
             assert_eq!(h.key(KeyCode::Enter), KeyAction::Continue);
         }
         let m = metrics(&h.state);
-        assert_eq!(m.ui.log.len(), log_count);
+        assert_eq!(m.log.len(), log_count);
         assert_eq!(m.ui.input_buf, "9");
         assert_eq!(m.device_options[0].selected_choice, "0");
         assert_eq!(m.ui.device_option_update, DeviceOptionUpdate::Idle);
@@ -1290,7 +1290,6 @@ mod tests {
             DeviceOptionUpdate::Idle
         ));
         assert!(m
-            .ui
             .log
             .back()
             .is_some_and(|entry| entry.text.contains("Bandwidth set to Wide")));
@@ -1319,7 +1318,7 @@ mod tests {
             m.ui.device_option_update,
             DeviceOptionUpdate::Failed { .. }
         ));
-        assert!(m.ui.log.back().is_some_and(|entry| entry
+        assert!(m.log.back().is_some_and(|entry| entry
             .text
             .contains("Bandwidth error: device rejected choice")));
     }
@@ -1348,7 +1347,6 @@ mod tests {
         let m = h.state.lock().unwrap();
         assert_eq!(m.device_options[0].selected_choice, "Auto");
         assert!(m
-            .ui
             .log
             .back()
             .is_some_and(|entry| entry.text.contains("Bandwidth set to Auto")));
@@ -1372,7 +1370,6 @@ mod tests {
 
         let m = h.state.lock().unwrap();
         assert!(m
-            .ui
             .log
             .back()
             .is_some_and(|entry| entry.text.as_ref() == "Bandwidth updated"));
@@ -1524,7 +1521,6 @@ mod tests {
             assert!(matches!(m.ui.input_mode, InputMode::Normal));
             assert_eq!(m.home.latitude, Some(47.497));
             assert!(m
-                .ui
                 .log
                 .iter()
                 .any(|l| l.text.contains("latitude set to 47.497")));

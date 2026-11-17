@@ -548,7 +548,7 @@ mod tests {
         let (state, radio) = two_bands();
         type_frequency(&state, &radio, "45");
         assert!(radio.tuned.lock().unwrap().is_empty(), "nothing was tuned");
-        let log = metrics(&state).ui.log.back().unwrap().text.clone();
+        let log = metrics(&state).log.back().unwrap().text.clone();
         assert!(
             log.contains("this radio tunes 9 kHz to 31 MHz, 60 to 260 MHz"),
             "{log}"
@@ -660,7 +660,7 @@ mod tests {
         assert_eq!(*radio.1.lock().unwrap(), vec![768_000.0]);
         let m = metrics(&state);
         assert_eq!(m.radio.config_sample_rate, 768_000.0);
-        let log = &m.ui.log.back().unwrap().text;
+        let log = &m.log.back().unwrap().text;
         assert!(log.contains("set to 0.768 MHz"), "{log}");
     }
 }
