@@ -231,7 +231,7 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         };
-        return headless::run(app_cfg, config_path, &devices[chosen], plan)
+        return headless::run(app_cfg, config_path, &devices, chosen, plan)
             .await
             .context("Headless error");
     }

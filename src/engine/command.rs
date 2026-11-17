@@ -43,6 +43,13 @@ pub enum Command {
     Reset,
     /// Compute for this view in this section. See [`super::mode`].
     SetMode { section: String, view: String },
+    /// Stream from the radio, or stop.
+    Stream { on: bool },
+    /// Take the DC offset out of the samples the spectrum, the demodulator
+    /// and the constellation see; the statistics stay on the raw samples.
+    DcBlock { on: bool },
+    /// Set one of the radio's own options, by its id, to one of its choices.
+    DeviceOption { id: String, choice: String },
 }
 
 /// The answer to a command.
@@ -149,9 +156,42 @@ pub fn plan(m: &SdrMetrics, command: &Command) -> Result<Planned, String> {
         Command::Boost { .. } if !caps.gain.has_boost() => {
             Err("this radio has no front end boost".to_string())
         }
-        Command::Agc { .. } | Command::Boost { .. } | Command::Reset | Command::SetMode { .. } => {
-            Ok(Planned::as_asked(command))
+        Command::DeviceOption { id, choice } => {
+            let Some(option) = m.device_options.iter().find(|o| o.id == *id) else {
+                let ids: Vec<&str> = m.device_options.iter().map(|o| o.id.as_str()).collect();
+                return Err(if ids.is_empty() {
+                    format!("this radio offers no options, so not {id}")
+                } else {
+                    format!(
+                        "this radio has no option {id}; it offers {}",
+                        ids.join(", ")
+                    )
+                });
+            };
+            if option.choices.contains(choice) {
+                return Ok(Planned::as_asked(command));
+            }
+            match option.integer_choice(choice) {
+                Ok(canonical) => Ok(Planned {
+                    command: Command::DeviceOption {
+                        id: id.clone(),
+                        choice: canonical.to_string(),
+                    },
+                    note: None,
+                }),
+                Err(_) => Err(format!(
+                    "{} cannot be {choice}; it can be {}",
+                    option.label,
+                    option.choices.join(", ")
+                )),
+            }
         }
+        Command::Agc { .. }
+        | Command::Boost { .. }
+        | Command::Reset
+        | Command::SetMode { .. }
+        | Command::Stream { .. }
+        | Command::DcBlock { .. } => Ok(Planned::as_asked(command)),
     }
 }
 
@@ -282,6 +322,49 @@ impl Engine {
                 }
             }
             Command::Reset => self.reset(),
+            Command::Stream { on } => {
+                // The rx task starts and stops the stream on its next poll.
+                self.lock().radio.rx_enabled = on;
+                Reply::Applied {
+                    detail: format!("streaming {}", on_off(on)),
+                }
+            }
+            Command::DcBlock { on } => {
+                self.lock().iq.cal.dc_block_on = on;
+                Reply::Applied {
+                    detail: format!("DC block {}", on_off(on)),
+                }
+            }
+            Command::DeviceOption { id, choice } => {
+                let device = std::sync::Arc::clone(device);
+                match super::option::set(
+                    &id,
+                    &choice,
+                    |id, choice| device.set_option(id, choice),
+                    || device.options(),
+                ) {
+                    Ok(options) => {
+                        let now = options
+                            .iter()
+                            .find(|o| o.id == id)
+                            .map_or(choice.clone(), |o| o.selected_choice.clone());
+                        self.lock().device_options = std::sync::Arc::new(options);
+                        let retune =
+                            match super::option::retune_after(device.as_ref(), &id, &self.state) {
+                                Some(Ok(tuned)) => {
+                                    self.lock().radio.frequency = tuned;
+                                    format!(", retuned to {:.6} MHz", tuned as f64 / 1e6)
+                                }
+                                Some(Err(why)) => format!(", retune refused: {why}"),
+                                None => String::new(),
+                            };
+                        Reply::Applied {
+                            detail: format!("{id} is {now}{retune}"),
+                        }
+                    }
+                    Err(e) => refused(e),
+                }
+            }
             Command::SetMode { section, view } => {
                 self.lock().mode = super::mode::Mode::for_view(&section, &view);
                 Reply::Applied {
@@ -545,5 +628,78 @@ mod tests {
                 reply,
             }
         );
+    }
+
+    fn with_an_option(m: &mut SdrMetrics) {
+        m.device_options = Arc::new(vec![crate::hardware::DeviceOption {
+            id: "bias".into(),
+            label: "Bias tee".into(),
+            choices: vec!["Off".into(), "On".into()],
+            selected_choice: "Off".into(),
+            integer_range: None,
+        }]);
+    }
+
+    /// An option the radio does not offer, or a choice it does not list, is
+    /// refused with what it does offer.
+    #[test]
+    fn a_device_option_the_radio_does_not_offer_is_refused_with_what_it_does() {
+        let mut m = SdrMetrics::fixture();
+        with_an_option(&mut m);
+        let why = plan(
+            &m,
+            &Command::DeviceOption {
+                id: "lna_boost".into(),
+                choice: "On".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(why.contains("lna_boost") && why.contains("bias"), "{why}");
+        let why = plan(
+            &m,
+            &Command::DeviceOption {
+                id: "bias".into(),
+                choice: "Maybe".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(why.contains("Off") && why.contains("On"), "{why}");
+        assert!(plan(
+            &m,
+            &Command::DeviceOption {
+                id: "bias".into(),
+                choice: "On".into()
+            }
+        )
+        .is_ok());
+    }
+
+    /// An option set through the engine leaves the options as the radio
+    /// reports them afterwards.
+    #[test]
+    fn a_device_option_applied_is_the_radios_word_afterwards() {
+        let (engine, device) = engine_on(Bench::new());
+        engine.with_state(with_an_option);
+        let reply = engine.apply(Command::DeviceOption {
+            id: "bias".into(),
+            choice: "On".into(),
+        });
+        assert!(matches!(reply, Reply::Applied { .. }), "{reply:?}");
+        assert_eq!(
+            *device.options_set.lock().unwrap(),
+            vec![("bias".to_string(), "On".to_string())]
+        );
+        assert_eq!(engine.snapshot().device_options[0].selected_choice, "On");
+    }
+
+    #[test]
+    fn streaming_and_the_dc_block_land_in_the_state() {
+        let (engine, _) = engine_on(Bench::new());
+        engine.apply(Command::Stream { on: true });
+        engine.apply(Command::DcBlock { on: true });
+        let m = engine.snapshot();
+        assert!(m.radio.rx_enabled && m.iq.cal.dc_block_on);
+        engine.apply(Command::Stream { on: false });
+        assert!(!engine.snapshot().radio.rx_enabled);
     }
 }

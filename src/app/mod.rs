@@ -219,45 +219,23 @@ impl App {
         let worker_request = request.clone();
         let state = Arc::clone(&self.state);
         Self::spawn_device_option_task(tx, move || {
-            let result = Self::execute_device_option(
-                &worker_request,
+            let result = crate::engine::option::set(
+                &worker_request.id,
+                &worker_request.choice,
                 |id, choice| device.set_option(id, choice),
                 || device.options(),
             );
             let retune = result
                 .is_ok()
-                .then(|| Self::retune_after_option(device.as_ref(), &worker_request.id, &state))
+                .then(|| {
+                    crate::engine::option::retune_after(device.as_ref(), &worker_request.id, &state)
+                })
                 .flatten();
             DeviceOptionCompletion {
                 result: result.map_err(|error| format!("{error:#}")),
                 retune,
             }
         });
-    }
-
-    /// Set the frequency again after an option that can move the tuning, and
-    /// keep the radio's word for where it landed. The frequency is read when
-    /// the option has been applied, not when it was asked for, so a retune made
-    /// while the option was being set is the one the radio gets.
-    fn retune_after_option(
-        device: &dyn SdrDevice,
-        id: &str,
-        state: &Arc<Mutex<SdrMetrics>>,
-    ) -> Option<Result<u64, String>> {
-        if !device.option_moves_tuning(id) {
-            return None;
-        }
-        let hz = state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .radio
-            .frequency;
-        // Device call with no lock held, as everywhere else.
-        Some(
-            device
-                .set_frequency(hz)
-                .map_err(|error| format!("{error:#}")),
-        )
     }
 
     fn device_option_pending(&self) -> bool {
@@ -588,15 +566,6 @@ impl App {
         std::thread::spawn(move || {
             let _ = tx.send(AppEvent::DeviceOptionComplete(apply()));
         });
-    }
-
-    fn execute_device_option(
-        request: &DeviceOptionRequest,
-        set: impl FnOnce(&str, &str) -> anyhow::Result<()>,
-        refresh: impl FnOnce() -> Vec<hardware::DeviceOption>,
-    ) -> anyhow::Result<Vec<hardware::DeviceOption>> {
-        set(&request.id, &request.choice)?;
-        Ok(refresh())
     }
 
     /// Put the tuner back before the app goes away: see
@@ -1341,8 +1310,9 @@ mod tests {
 
         App::spawn_device_option_task(event_tx, move || DeviceOptionCompletion {
             retune: None,
-            result: App::execute_device_option(
-                &worker_request,
+            result: crate::engine::option::set(
+                &worker_request.id,
+                &worker_request.choice,
                 |_, _| {
                     assert!(
                         worker_state.try_lock().is_ok(),
@@ -1445,8 +1415,11 @@ mod tests {
         let device = GridDevice(SdrMetrics::fixture().caps.as_ref().clone());
         let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
         state.lock().unwrap().radio.frequency = 7_074_300;
-        assert_eq!(App::retune_after_option(&device, "other", &state), None);
-        let retune = App::retune_after_option(&device, "grid", &state);
+        assert_eq!(
+            crate::engine::option::retune_after(&device, "other", &state),
+            None
+        );
+        let retune = crate::engine::option::retune_after(&device, "grid", &state);
         assert_eq!(retune, Some(Ok(7_074_000)));
 
         let request = DeviceOptionRequest {
@@ -1494,8 +1467,9 @@ mod tests {
         };
         let refreshed = Cell::new(false);
 
-        let result = App::execute_device_option(
-            &request,
+        let result = crate::engine::option::set(
+            &request.id,
+            &request.choice,
             |_, _| anyhow::bail!("device rejected choice"),
             || {
                 refreshed.set(true);

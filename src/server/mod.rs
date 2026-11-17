@@ -24,10 +24,14 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
+use serde::Serialize;
+
+use crate::config::{AppConfig, ENGINE_BLOCKS};
 use crate::engine::command::{Command, Reply};
 use crate::engine::events::Waited;
 use crate::engine::testimony::Staleness;
 use crate::engine::Engine;
+use crate::hardware::DeviceKind;
 
 /// The engine, and who may ask it.
 #[derive(Clone)]
@@ -35,6 +39,37 @@ pub struct Access {
     engine: Engine,
     /// Required on every request when set.
     token: Option<Arc<str>>,
+    /// The radios found when the engine started. Not looked for again while
+    /// one streams: some libraries open every radio to describe it.
+    radios: Arc<Vec<Radio>>,
+    /// The config as loaded, for the blocks the state does not hold.
+    config: Arc<AppConfig>,
+}
+
+/// One radio found, as the API lists it.
+#[derive(Clone, Debug, Serialize)]
+pub struct Radio {
+    pub label: String,
+    /// The backend, spelled as `--device` takes it.
+    pub backend: String,
+    pub serial: Option<String>,
+    /// Written with this radio on the bench, rather than reasoned from a
+    /// library's headers (POLICY rule 1).
+    pub verified: bool,
+    /// The one this engine runs.
+    pub open: bool,
+}
+
+impl Radio {
+    pub fn new(label: &str, kind: DeviceKind, serial: Option<String>, open: bool) -> Self {
+        Self {
+            label: label.to_string(),
+            backend: format!("{kind:?}").to_lowercase(),
+            serial,
+            verified: kind.verified(),
+            open,
+        }
+    }
 }
 
 impl Access {
@@ -43,14 +78,32 @@ impl Access {
         Self {
             engine,
             token: None,
+            radios: Arc::default(),
+            config: Arc::default(),
         }
     }
 
     /// Served beyond this machine: `token` on every request.
     pub fn with_token(engine: Engine, token: String) -> Self {
         Self {
-            engine,
             token: Some(Arc::from(token)),
+            ..Self::loopback(engine)
+        }
+    }
+
+    /// The radios found at start.
+    pub fn with_radios(self, radios: Vec<Radio>) -> Self {
+        Self {
+            radios: Arc::new(radios),
+            ..self
+        }
+    }
+
+    /// The config as loaded.
+    pub fn with_config(self, config: AppConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            ..self
         }
     }
 }
@@ -59,6 +112,8 @@ impl Access {
 pub fn router(access: Access) -> Router {
     Router::new()
         .route("/v1/health", get(health))
+        .route("/v1/radios", get(radios))
+        .route("/v1/config", get(config))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -93,9 +148,12 @@ async fn require_token(State(access): State<Access>, req: Request, next: Next) -
     next.run(req).await
 }
 
-/// Whether the radio is delivering, and which radio, where, doing what.
+/// Whether the radio is delivering, and which radio, where, doing what;
+/// the samples lost this session, split as the timing bench splits them;
+/// each sample feed's own account; and what the process costs the machine.
 async fn health(State(access): State<Access>) -> Json<serde_json::Value> {
     Json(access.engine.with_state(|m| {
+        let feed = |refused, session| serde_json::json!({ "refused": refused, "refused_session": session });
         serde_json::json!({
             "radio": &*m.system.board_name,
             "streaming": m.radio.hw_streaming,
@@ -103,8 +161,49 @@ async fn health(State(access): State<Access>) -> Json<serde_json::Value> {
             "frequency_hz": m.radio.frequency,
             "sample_rate_hz": m.radio.config_sample_rate,
             "view": m.mode.view,
+            "lost_samples": {
+                "all": m.signal.total_drops_session,
+                "driver": m.signal.driver_drops_session,
+                "sdrtop": m.signal.total_drops_session.saturating_sub(m.signal.driver_drops_session),
+            },
+            "feeds": {
+                "spectrum": feed(m.iq.fft_drops, m.iq.fft_drops_session),
+                "net": feed(m.net.health.refused, m.net.health.refused_session),
+                "pager": feed(m.pager.feed.refused, m.pager.feed.refused_session),
+                "ft8": feed(m.ft8.feed.refused, m.ft8.feed.refused_session),
+            },
+            "process": {
+                "cpu_pct": m.system.process_cpu_pct,
+                "rss_mb": m.system.process_rss_mb,
+            },
         })
     }))
+}
+
+/// The radios found at start, verified or reasoned, and which one runs.
+async fn radios(State(access): State<Access>) -> Json<Vec<Radio>> {
+    Json(access.radios.as_ref().clone())
+}
+
+/// The engine's blocks of the config as they would be saved now. The token
+/// is never sent back, to anyone: only whether one is set.
+async fn config(State(access): State<Access>) -> Response {
+    let mut cfg = access.config.as_ref().clone();
+    cfg.radio = access
+        .engine
+        .with_state(|m| crate::engine::boot::radio_block(m, &cfg.radio));
+    if cfg.headless.token.is_some() {
+        cfg.headless.token = Some("(set)".to_string());
+    }
+    let Ok(all) = toml::Table::try_from(&cfg) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let engine_blocks: serde_json::Map<String, serde_json::Value> = all
+        .into_iter()
+        .filter(|(block, _)| ENGINE_BLOCKS.contains(&block.as_str()))
+        .filter_map(|(block, value)| Some((block, serde_json::to_value(value).ok()?)))
+        .collect();
+    Json(engine_blocks).into_response()
 }
 
 /// One command, answered: 200 when applied, 422 with the reason when not.
@@ -272,5 +371,75 @@ mod tests {
         let (status, _) = ask(app, post("/v1/command", r#"{"command":"explode"}"#)).await;
         assert!(status.is_client_error(), "{status}");
         assert!(device.tuned.lock().unwrap().is_empty());
+    }
+
+    /// Rule 1 over the API: a radio reached through SoapySDR is said to be
+    /// reasoned from its headers, every other one verified on the bench, and
+    /// the one this engine runs is marked.
+    #[tokio::test]
+    async fn radios_lists_each_with_verified_or_reasoned() {
+        let (engine, _) = engine_on(Bench::new());
+        let radios = vec![
+            Radio::new(
+                "HackRF One",
+                crate::hardware::DeviceKind::HackRf,
+                Some("ab12".into()),
+                true,
+            ),
+            Radio::new(
+                "LimeSDR Mini",
+                crate::hardware::DeviceKind::Soapy,
+                None,
+                false,
+            ),
+        ];
+        let app = router(Access::loopback(engine).with_radios(radios));
+        let (status, json) = ask(app, get("/v1/radios")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json[0]["label"], "HackRF One");
+        assert_eq!(json[0]["backend"], "hackrf");
+        assert_eq!(json[0]["verified"], true);
+        assert_eq!(json[0]["open"], true);
+        assert_eq!(json[1]["verified"], false);
+        assert_eq!(json[1]["open"], false);
+    }
+
+    /// The loss the timing bench splits, split the same way, and each feed's
+    /// own account beside it.
+    #[tokio::test]
+    async fn health_splits_loss_by_driver_and_sdrtop() {
+        let (engine, _) = engine_on(Bench::new());
+        engine.with_state(|m| {
+            m.signal.total_drops_session = 1000;
+            m.signal.driver_drops_session = 400;
+            m.net.health.refused_session = 3;
+        });
+        let (_, json) = ask(router(Access::loopback(engine)), get("/v1/health")).await;
+        assert_eq!(json["lost_samples"]["all"], 1000);
+        assert_eq!(json["lost_samples"]["driver"], 400);
+        assert_eq!(json["lost_samples"]["sdrtop"], 600);
+        assert_eq!(json["feeds"]["net"]["refused_session"], 3);
+        assert!(json["process"]["rss_mb"].is_number());
+    }
+
+    /// The engine's blocks, as they would be saved now; the token is never
+    /// sent back, to anyone.
+    #[tokio::test]
+    async fn config_is_the_engines_blocks_with_the_token_withheld() {
+        let (engine, _) = engine_on(Bench::new());
+        engine.with_state(|m| m.radio.frequency = 433_920_000);
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.headless.token = Some("s3cret".into());
+        cfg.display.active_preset = "net_survey".into();
+        let app = router(Access::loopback(engine).with_config(cfg));
+        let (status, json) = ask(app, get("/v1/config")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["radio"]["frequency_hz"], 433_920_000);
+        assert!(
+            json.get("display").is_none(),
+            "the screen's block is not the engine's"
+        );
+        assert_eq!(json["headless"]["token"], "(set)");
+        assert!(!json.to_string().contains("s3cret"));
     }
 }

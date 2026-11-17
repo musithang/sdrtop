@@ -78,6 +78,13 @@ pub struct Relay {
 }
 
 impl DeviceKind {
+    /// Whether this backend was written with the radio on the bench
+    /// (POLICY rule 1). SoapySDR's is written from the API's headers, for
+    /// radios sdrtop has not held, and is reasoned rather than verified.
+    pub fn verified(self) -> bool {
+        self != DeviceKind::Soapy
+    }
+
     /// Reports a missing or incompatible native runtime library
     pub fn check_available(self) -> anyhow::Result<()> {
         match self {

@@ -22,6 +22,7 @@ pub mod command;
 pub mod events;
 pub mod headless;
 pub mod mode;
+pub mod option;
 pub mod start;
 pub mod testimony;
 #[cfg(test)]

@@ -14,6 +14,8 @@ pub(crate) struct Bench {
     pub caps: DeviceCapabilities,
     pub tuned: Mutex<Vec<u64>>,
     pub refuse_gain: bool,
+    /// Every option set, in order; `options` answers as if each was taken.
+    pub options_set: Mutex<Vec<(String, String)>>,
 }
 
 impl Bench {
@@ -22,6 +24,7 @@ impl Bench {
             caps: crate::hardware::native::hackrf::caps(),
             tuned: Mutex::new(Vec::new()),
             refuse_gain: false,
+            options_set: Mutex::new(Vec::new()),
         }
     }
 }
@@ -51,6 +54,23 @@ impl SdrDevice for Bench {
     }
     fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
         Ok(())
+    }
+    fn set_option(&self, id: &str, choice: &str) -> anyhow::Result<()> {
+        self.options_set
+            .lock()
+            .unwrap()
+            .push((id.to_string(), choice.to_string()));
+        Ok(())
+    }
+    fn options(&self) -> Vec<crate::hardware::DeviceOption> {
+        let chosen = self.options_set.lock().unwrap().last().cloned();
+        vec![crate::hardware::DeviceOption {
+            id: "bias".into(),
+            label: "Bias tee".into(),
+            choices: vec!["Off".into(), "On".into()],
+            selected_choice: chosen.map_or("Off".into(), |(_, c)| c),
+            integer_range: None,
+        }]
     }
     fn set_stage_gain(&self, _index: usize, _name: &str, _db: f64) -> anyhow::Result<()> {
         if self.refuse_gain {

@@ -14,11 +14,9 @@ use super::super::{metrics, InputCtx};
 /// `[Space]` - start or stop streaming. The RX task sees the flag on its next
 /// poll and talks to the device itself, so nothing here touches hardware.
 pub(super) fn toggle_rx(ctx: &mut InputCtx<'_>) {
-    if ctx.core.is_none() {
-        return;
-    }
-    let mut m = metrics(ctx.state);
-    m.radio.rx_enabled = !m.radio.rx_enabled;
+    let Some(core) = ctx.core else { return };
+    let on = !metrics(ctx.state).radio.rx_enabled;
+    core.apply(crate::engine::command::Command::Stream { on });
 }
 
 /// `[R]` - back to the **active device's own** defaults, so an RTL-SDR lands on a

@@ -26,9 +26,11 @@ use crate::server;
 pub async fn run(
     mut cfg: AppConfig,
     config_path: Option<PathBuf>,
-    listing: &hardware::DeviceListing,
+    found: &[hardware::DeviceListing],
+    chosen: usize,
     plan: HeadlessPlan,
 ) -> anyhow::Result<()> {
+    let listing = &found[chosen];
     let device = hardware::open_device(listing, &cfg)?;
     let observable = listing.kind.observer_profile().is_some();
     let geometry = device.capabilities().sample_geometry;
@@ -66,8 +68,8 @@ pub async fn run(
         m.spectrum.wanted = plan.spectrum;
         m.demod.enabled = false;
         m.sweep.active = false;
-        m.radio.rx_enabled = true;
     });
+    engine.apply(Command::Stream { on: true });
     // Bound before anything streams: an address already taken is said
     // before the radio is put to work.
     let listener = tokio::net::TcpListener::bind(plan.listen)
@@ -77,6 +79,12 @@ pub async fn run(
         (Some(token), false) => server::Access::with_token(engine.clone(), token.clone()),
         _ => server::Access::loopback(engine.clone()),
     };
+    let radios = found
+        .iter()
+        .enumerate()
+        .map(|(i, d)| server::Radio::new(&d.label, d.kind, d.serial.clone(), i == chosen))
+        .collect();
+    let access = access.with_radios(radios).with_config(cfg.clone());
 
     let (rx_ctx, feeds) = start::feeds(&state, geometry);
     start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
@@ -98,12 +106,14 @@ pub async fn run(
     }
 
     engine.hand_back_the_tuner();
-    engine.with_state(|m| {
-        m.radio.rx_enabled = false;
-        m.push_log("Headless: stopping")
-    });
-    if let Err(e) = engine.device().stop_rx() {
-        eprintln!("stopping the stream: {e}");
+    engine.apply(Command::Stream { on: false });
+    engine.with_state(|m| m.push_log("Headless: stopping"));
+    // A stream already stopped (by a client, or by the radio) has nothing to
+    // stop, and asking a driver to stop one it is not running is an error.
+    if engine.device().is_streaming() {
+        if let Err(e) = engine.device().stop_rx() {
+            eprintln!("stopping the stream: {e}");
+        }
     }
     if let Some(path) = config_path {
         cfg.radio = engine::boot::radio_block(&engine.snapshot(), &cfg.radio);
