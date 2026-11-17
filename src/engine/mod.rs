@@ -18,3 +18,4 @@
 //! of its own is a mechanical change, whenever there is a reason for one.
 
 pub mod mode;
+pub mod testimony;

@@ -33,92 +33,7 @@ pub struct Bonding {
     pub partner: &'static str,
 }
 
-/// What makes a panel's readings go stale, i.e. when the engine tags its title
-/// `[STALE]` and cools its border.
-///
-/// Declaring this instead of computing it per panel is what makes the project's
-/// "a frozen number must never read as live" rule enforceable in one place.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Staleness {
-    /// Stale whenever the radio is not streaming. For anything read from
-    /// hardware counters: timing, drops, gain staging, IQ balance.
-    NotStreaming,
-    /// Stale when the newest FFT frame exceeds the device's trace-age limit, or
-    /// there is no frame yet. For anything derived from the spectrum.
-    FftAge,
-    /// Never stale. For panels that show configuration rather than measurement.
-    Never,
-}
-
-impl Staleness {
-    /// Resolve the rule against a metrics snapshot.
-    pub fn resolve(self, state: &SdrMetrics) -> bool {
-        let age = state
-            .waterfall
-            .last_fft
-            .as_ref()
-            .map(|frame| frame.timestamp.elapsed().as_millis());
-        let stale = self.decide(state.radio.hw_streaming, age, state.caps.trace_stale_ms);
-        stale
-            || (self == Staleness::FftAge
-                && state.caps.acquisition == crate::hardware::AcquisitionKind::PowerTrace
-                && !state.radio.hw_streaming)
-    }
-
-    /// The rule itself, on plain inputs: `fft_age_ms` is `None` when no frame has
-    /// arrived yet. Split out from [`resolve`](Self::resolve) so the decision can
-    /// be tested without building a whole metrics snapshot.
-    fn decide(self, streaming: bool, fft_age_ms: Option<u128>, trace_stale_ms: u128) -> bool {
-        match self {
-            Staleness::NotStreaming => !streaming,
-            Staleness::FftAge => fft_age_ms
-                .map(|milliseconds| milliseconds > trace_stale_ms)
-                .unwrap_or(true),
-            Staleness::Never => false,
-        }
-    }
-}
-
-/// How far back into the sample feed a panel's numbers reach - declared so the
-/// engine can say, in one place, whether the feed lost anything inside that
-/// span.
-///
-/// Foundation design 13.2: every count in the NET section is a lower bound
-/// once the feed has dropped samples, because the three ways a block goes
-/// missing are invisible downstream. But "the feed lost something" is only a
-/// caveat on the numbers that span the loss: a census accumulated over the
-/// session is undercounted by a drop ten minutes ago, the duty cycle of the
-/// dwell just finished is not. So a panel declares the span its numbers
-/// cover, and the engine tags it [`Tag::FeedLoss`] only when the last loss
-/// falls inside it - never computed in the panel, the same rule as
-/// [`Staleness`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum FeedSpan {
-    /// Accumulated for as long as the feed's own account runs: totals, the
-    /// census, per-channel counts.
-    Session,
-    /// Measured over the most recent stretch of this length only: a dwell, a
-    /// scrolling window.
-    Window(std::time::Duration),
-}
-
-impl FeedSpan {
-    /// Resolve against a metrics snapshot: did the feed lose anything inside
-    /// this span?
-    pub fn resolve(self, state: &SdrMetrics) -> bool {
-        self.decide(state.net.health.last_loss.map(|t| t.elapsed()))
-    }
-
-    /// The rule on plain inputs: `since_loss` is how long ago the feed last
-    /// lost anything, `None` if it never has.
-    fn decide(self, since_loss: Option<std::time::Duration>) -> bool {
-        match (self, since_loss) {
-            (_, None) => false,
-            (FeedSpan::Session, Some(_)) => true,
-            (FeedSpan::Window(span), Some(age)) => age <= span,
-        }
-    }
-}
+pub use crate::engine::testimony::{FeedSpan, Staleness};
 
 /// A live-state tag the engine appends to a panel's title after the name.
 ///
@@ -431,10 +346,16 @@ impl PanelChrome {
         self
     }
 
+    /// What the engine says about this panel's readings, from the grounds the
+    /// panel declared: the one verdict the frame and every other client read.
+    pub fn testimony(&self, state: &SdrMetrics) -> crate::engine::testimony::Testimony {
+        crate::engine::testimony::Testimony::resolve(state, self.staleness, self.feed, None)
+    }
+
     /// Add the tags the engine owns - the ones a panel declares the grounds for
     /// but never pushes itself. Called once, where the frame is drawn.
     pub fn with_engine_tags(mut self, state: &SdrMetrics) -> Self {
-        if self.feed.is_some_and(|span| span.resolve(state)) {
+        if self.testimony(state).feed_loss {
             self.tags.push(Tag::FeedLoss);
         }
         if self.offsets {
@@ -610,32 +531,6 @@ mod tests {
         assert_eq!(built.suffix.as_deref(), Some(" · held"));
     }
 
-    /// A loss is a caveat only on the numbers whose span it falls inside.
-    #[test]
-    fn a_feed_loss_caveats_only_the_spans_it_falls_inside() {
-        use std::time::Duration;
-        let ten_min_ago = Some(Duration::from_secs(600));
-        let just_now = Some(Duration::from_millis(300));
-        let window = FeedSpan::Window(Duration::from_secs(20));
-
-        // Never lost anything: nothing is caveated, whatever the span.
-        assert!(!FeedSpan::Session.decide(None));
-        assert!(!window.decide(None));
-
-        // A session total spans every loss there has been.
-        assert!(FeedSpan::Session.decide(ten_min_ago));
-        assert!(FeedSpan::Session.decide(just_now));
-
-        // A window spans only the recent ones: an old drop says nothing about
-        // what was measured since.
-        assert!(!window.decide(ten_min_ago));
-        assert!(window.decide(just_now));
-        assert!(
-            window.decide(Some(Duration::from_secs(20))),
-            "the edge is inside"
-        );
-    }
-
     /// The engine adds the tag; a panel only declares the span. A panel that
     /// declares nothing is never tagged, however lossy the feed.
     #[test]
@@ -703,78 +598,5 @@ mod tests {
 
         let silent = PanelChrome::new("Capability").with_engine_tags(&m);
         assert!(!silent.tags.iter().any(|t| matches!(t, Tag::Offsets(_))));
-    }
-
-    #[test]
-    fn staleness_rules_are_independent_of_each_other() {
-        // A dead radio staleness NotStreaming, and nothing else.
-        let stale_ms = crate::hardware::IQ_TRACE_STALE_MS;
-        assert!(Staleness::NotStreaming.decide(false, Some(0), stale_ms));
-        assert!(
-            !Staleness::FftAge.decide(false, Some(0), stale_ms),
-            "fresh frame, dead radio → live"
-        );
-        assert!(
-            !Staleness::Never.decide(false, None, stale_ms),
-            "Never means never"
-        );
-
-        // A streaming radio whose FFT has dried up staleness only FftAge.
-        assert!(!Staleness::NotStreaming.decide(true, None, stale_ms));
-        assert!(
-            Staleness::FftAge.decide(true, None, stale_ms),
-            "no frame yet → stale"
-        );
-        assert!(Staleness::FftAge.decide(true, Some(stale_ms + 1), stale_ms));
-        assert!(
-            !Staleness::FftAge.decide(true, Some(stale_ms), stale_ms),
-            "the threshold itself is live"
-        );
-    }
-
-    #[test]
-    fn power_trace_staleness_uses_the_device_limit_and_rx_state() {
-        let mut state = SdrMetrics::fixture().streaming().with_carrier(0.0, 20.0);
-        let mut caps = (*state.caps).clone();
-        caps.acquisition = crate::hardware::AcquisitionKind::PowerTrace;
-        caps.trace_stale_ms = 100;
-        state.caps = std::sync::Arc::new(caps);
-        state.waterfall.last_fft.as_mut().unwrap().timestamp =
-            std::time::Instant::now() - std::time::Duration::from_millis(50);
-
-        assert!(!Staleness::FftAge.resolve(&state));
-        state.caps = {
-            let mut caps = (*state.caps).clone();
-            caps.trace_stale_ms = 10;
-            std::sync::Arc::new(caps)
-        };
-        assert!(Staleness::FftAge.resolve(&state));
-
-        state.waterfall.last_fft.as_mut().unwrap().timestamp = std::time::Instant::now();
-        state.radio.hw_streaming = false;
-        assert!(Staleness::FftAge.resolve(&state));
-    }
-
-    #[test]
-    fn trace_staleness_uses_the_device_limit() {
-        let mut state = SdrMetrics::fixture().streaming().with_carrier(0.0, 20.0);
-        std::sync::Arc::make_mut(&mut state.caps).trace_stale_ms = 60_000;
-        state.waterfall.last_fft.as_mut().unwrap().timestamp =
-            std::time::Instant::now() - std::time::Duration::from_secs(1);
-        assert!(!Staleness::FftAge.resolve(&state));
-
-        std::sync::Arc::make_mut(&mut state.caps).trace_stale_ms = 100;
-        assert!(Staleness::FftAge.resolve(&state));
-
-        state.waterfall.last_fft = None;
-        assert!(Staleness::FftAge.resolve(&state));
-    }
-
-    #[test]
-    fn trace_age_threshold_is_inclusive_for_each_device() {
-        for limit in [0, 100, 500, 60_000] {
-            assert!(!Staleness::FftAge.decide(false, Some(limit), limit));
-            assert!(Staleness::FftAge.decide(true, Some(limit + 1), limit));
-        }
     }
 }

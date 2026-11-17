@@ -54,7 +54,7 @@ impl PanelRegistry {
             panel.render(f, area, state, theme, focused);
             return;
         }
-        let stale = chrome.staleness.resolve(state);
+        let stale = chrome.testimony(state).stale;
         // A frame that leaves no inner rect still draws: the border is the only
         // honest thing to show in a panel too small for its contents.
         if let Some(inner) =

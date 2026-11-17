@@ -4,6 +4,7 @@ target/
 /Dockerfile
 /.dockerignore
 /scripts/
+/.superpowers/
 
 # Build output / extracted binaries
 /dist/
@@ -14,7 +15,7 @@ target/
 
 # Editor backups
 *~
-*.swp
+*.swps
 *.swo
 
 # Obsidian — machine-specific config
