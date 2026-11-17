@@ -113,10 +113,7 @@ impl Header {
                 "{}, serial {}",
                 state.system.board_name, state.system.serial
             ),
-            description: format!(
-                "recorded by sdrtop from the {} layout",
-                state.ui.active_preset
-            ),
+            description: format!("recorded by sdrtop from the {} layout", state.mode.view),
             full_scale: geometry.full_scale,
             // The depth at the rate it records at, where that changes it.
             bits: state.converter_bits(),

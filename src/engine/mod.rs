@@ -16,3 +16,5 @@
 //! line under `src/engine/` that names the drawing libraries, the panels or
 //! the key handling. While that test holds, moving this module into a crate
 //! of its own is a mechanical change, whenever there is a reason for one.
+
+pub mod mode;

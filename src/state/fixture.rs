@@ -121,6 +121,7 @@ impl SdrMetrics {
             timing: TimingState::default(),
             sweep: SweepState::default(),
             ui: UiState::default(),
+            mode: crate::engine::mode::Mode::idle(),
             lab: LabState::default(),
             demod: DemodState::default(),
             net: crate::state::NetState::default(),

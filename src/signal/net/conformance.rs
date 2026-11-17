@@ -970,8 +970,8 @@ mod chain {
         bt_channels: usize,
     ) -> (SdrMetrics, f64) {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset(preset);
         m.radio.frequency = tuned;
         m.radio.config_sample_rate = rate;
         m.radio.bb_filter_hz = 0;

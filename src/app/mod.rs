@@ -413,19 +413,18 @@ impl App {
             // The FFT worker is fed only while a panel on screen reads what it
             // makes: on a NET view nothing does, and at 20 Msps it is a core.
             guard.spectrum.wanted = spectrum_wanted;
-            guard.ui.section = self
+            let section = self
                 .engine
                 .scope()
                 .map(|s| s.id.clone())
                 .unwrap_or_default();
-            // On the shared side, not only the snapshot below - `tasks::net`'s
-            // survey task reads this off this thread to decide whether a BLE
-            // preset means rotating the three advertising channels instead of
-            // the wideband occupancy grid. Setting it only on `m`, the
-            // clone, was exactly the bug `section` above already had and was
-            // fixed for: it looked right on every screen and meant the one
-            // reader on another thread saw an empty string for ever.
-            guard.ui.active_preset = active_preset.clone();
+            // On the shared side, not only the snapshot below: the section
+            // and the layout are what the screen asks the engine to compute,
+            // and the engine reads that request, its mode, on other threads.
+            // Setting them only on `m`, the clone, once meant `tasks::net`
+            // and the NET feed read an empty string for ever while every
+            // screen looked right.
+            guard.show_view(&section, &active_preset);
             guard.clone()
         };
         m.ui.preset_names = self.engine.preset_names();
@@ -1564,28 +1563,16 @@ mod tests {
         assert!(!refreshed.get());
     }
 
-    /// **What other threads read is written to the shared state, not to the
-    /// snapshot.**
+    /// **The view and the mode it asks for are set on the shared state.**
     ///
-    /// The frame the UI draws is a *clone* of `SdrMetrics`, and most of what is
-    /// stamped onto it afterwards is the UI thread talking to itself - the
-    /// footer reads back the preset name it was just handed. `ui.section` is not
-    /// like that: `hardware::process` gates the NET sample feed on it and
-    /// `tasks::net` decides whether to survey by it, and both read the shared
-    /// state.
-    ///
-    /// It was set on the snapshot, one line below the clone. Every screen looked
-    /// right, because every panel renders from the snapshot - and the two
-    /// consumers off this thread read an empty string for ever, so the NET
-    /// section rendered its header, its mode and its empty panel while no block
-    /// was ever forwarded and the radio never hopped. Nothing failed: every test
-    /// of the consumers sets `ui.section` by hand, which is exactly the shape of
-    /// test that verifies a reader and never its writer.
-    ///
-    /// Read as source text because nothing in the type system tells `guard.ui`
-    /// from `m.ui`: they are the same type, one lock apart.
+    /// The engine reads the mode off this thread: the hot path gates the
+    /// NET, pager and FT8 feeds on it and `tasks::net` decides whether and
+    /// how to survey by it. Both bugs this replaces had the same shape: the
+    /// section, then the layout, written to `m`, the snapshot, one line after
+    /// `guard.clone()`, so every panel looked right and every reader on
+    /// another thread saw an empty string for ever.
     #[test]
-    fn the_section_is_mirrored_into_the_shared_state_and_not_the_snapshot() {
+    fn the_view_and_its_mode_are_set_on_the_shared_state_and_not_only_the_snapshot() {
         let src = include_str!("mod.rs");
         let body = src
             .split_once("let demod_preset = self.engine.is_panel_visible(\"fm_demod\");")
@@ -1598,46 +1585,20 @@ mod tests {
             .split_once("guard.clone()")
             .expect("the snapshot is no longer a clone of the guard");
         assert!(
-            guard_side.contains("guard.ui.section ="),
-            "ui.section must be written to the shared state: the NET feed gate \
-             and the survey task read it from there, not from the frame"
+            guard_side.contains("guard.show_view(&section, &active_preset)"),
+            "the view must be set on the shared state, where the engine reads its mode"
         );
-        assert!(
-            !snapshot_side.contains("ui.section ="),
-            "ui.section is written to the snapshot after the clone, so every \
-             reader off the UI thread sees an empty string"
-        );
-    }
-
-    /// **The same bug, in the same shape, found the same way `ui.section`'s own
-    /// bug was.** `tasks::net`'s survey task reads `active_preset` off the UI
-    /// thread - to decide whether a BLE preset means rotating the three
-    /// advertising channels rather than covering the wideband occupancy grid -
-    /// and it read an empty string every time, because `active_preset` was
-    /// written to `m`, the snapshot, one line after `guard.clone()`, exactly
-    /// where `ui.section` used to be written before the test above existed.
-    /// Every screen still looked right, for the same reason: every panel
-    /// renders from the snapshot, and the one consumer that does not is off
-    /// this thread.
-    #[test]
-    fn the_active_preset_is_mirrored_into_the_shared_state_and_not_only_the_snapshot() {
-        let src = include_str!("mod.rs");
-        let body = src
-            .split_once("let demod_preset = self.engine.is_panel_visible(\"fm_demod\");")
-            .expect("the frame composition has been rewritten")
-            .1
-            .split_once("self.engine.render(")
-            .map(|(before, _)| before)
-            .unwrap_or(src);
-        let (guard_side, _snapshot_side) = body
-            .split_once("guard.clone()")
-            .expect("the snapshot is no longer a clone of the guard");
-        assert!(
-            guard_side.contains("guard.ui.active_preset ="),
-            "active_preset must be written to the shared state: tasks::net's \
-             survey task reads it from there, not from the frame, to tell a \
-             BLE preset's rotation from the wideband survey"
-        );
+        for late in [
+            "show_view(",
+            "ui.section =",
+            "ui.active_preset =",
+            ".mode =",
+        ] {
+            assert!(
+                !snapshot_side.contains(late),
+                "`{late}` after the clone reaches only the snapshot, never the engine"
+            );
+        }
     }
 
     /// **Every scanner that parks the radio gives the tuner back on quit.**

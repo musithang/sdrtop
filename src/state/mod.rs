@@ -131,6 +131,9 @@ pub struct SdrMetrics {
     pub timing: TimingState,
     pub sweep: SweepState,
     pub ui: UiState,
+    /// What the engine computes and so what it feeds, which the screen's
+    /// section and layout only ask for. See [`crate::engine::mode`].
+    pub mode: crate::engine::mode::Mode,
     /// Lab "instrument mode" measurement state (REF/AVG/CAL). See [`LabState`].
     pub lab: LabState,
     /// Demodulator measurement + gating for the `lab_signal` bench. See [`DemodState`].
@@ -401,6 +404,33 @@ impl SdrMetrics {
         }
     }
 
+    /// The screen shows a layout in a section: its own mirror, and the mode
+    /// it asks the engine for, set together so neither is ever a frame
+    /// behind the other.
+    pub fn show_view(&mut self, section: &str, preset: &str) {
+        if self.ui.section != section || self.ui.active_preset != preset {
+            self.ui.section = section.to_string();
+            self.ui.active_preset = preset.to_string();
+            self.mode = crate::engine::mode::Mode::for_view(section, preset);
+        }
+    }
+
+    /// The screen moved to a section: its own mirror, and the mode it asks
+    /// the engine for.
+    #[cfg(test)]
+    pub fn show_section(&mut self, section: &str) {
+        self.ui.section = section.to_string();
+        self.mode = crate::engine::mode::Mode::for_view(section, &self.ui.active_preset);
+    }
+
+    /// The screen moved to a layout: its own mirror, and the mode it asks
+    /// the engine for.
+    #[cfg(test)]
+    pub fn show_preset(&mut self, preset: &str) {
+        self.ui.active_preset = preset.to_string();
+        self.mode = crate::engine::mode::Mode::for_view(&self.ui.section, preset);
+    }
+
     pub fn push_log(&mut self, msg: impl Into<String>) {
         self.ui.push_log(msg);
     }
@@ -630,5 +660,36 @@ mod stage_reading_tests {
         m.radio.frequency = 5_800_000_000;
         assert!(m.chain_db_holds());
         assert!(matches!(m.stage_reading(0), Some(StageReading::Db(_))));
+    }
+
+    /// The screen's mirror and the engine's mode never disagree, whichever
+    /// way the screen moves: a mode a frame behind its view is a feed fed
+    /// for nobody, or a view whose decoder never sees a block.
+    #[test]
+    fn showing_a_view_sets_the_mirror_and_the_mode_together() {
+        use crate::engine::mode::Mode;
+        let mut m = SdrMetrics::fixture();
+        m.show_view(crate::signal::net::SECTION, "net_survey");
+        assert_eq!(m.ui.section, crate::signal::net::SECTION);
+        assert_eq!(m.ui.active_preset, "net_survey");
+        assert_eq!(
+            m.mode,
+            Mode::for_view(crate::signal::net::SECTION, "net_survey")
+        );
+        assert!(m.mode.feeds.net && m.mode.net.survey);
+
+        m.show_preset("net_ble");
+        assert_eq!(
+            m.mode,
+            Mode::for_view(crate::signal::net::SECTION, "net_ble")
+        );
+        assert!(!m.mode.net.survey && m.mode.net.advertising);
+
+        m.show_section(crate::signal::pocsag::SECTION);
+        assert_eq!(
+            m.mode,
+            Mode::for_view(crate::signal::pocsag::SECTION, "net_ble")
+        );
+        assert!(!m.mode.feeds.net && m.mode.feeds.pager);
     }
 }

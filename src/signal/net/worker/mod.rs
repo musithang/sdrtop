@@ -72,7 +72,6 @@ use crate::state::SdrMetrics;
 // view): a plain string comparison, because that is what the menu is keyed
 // by, and the registry's structural tests hold the strings and the preset
 // files' names to agreeing. A view left out would show an empty list forever.
-use super::lock::CLASSIC_VIEWS;
 
 mod band;
 mod ble;
@@ -149,12 +148,12 @@ impl View {
             rate_hz
         };
         let view = View {
-            open: m.ui.is_net_section(),
-            classic: CLASSIC_VIEWS.contains(&m.ui.active_preset.as_str()),
-            survey: m.ui.active_preset == super::lock::SURVEY_VIEW,
-            coded: super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
-            wifi: super::is_wifi(&m.ui.section),
-            wifi_visits: super::lock::WIFI_VISIT_VIEWS.contains(&m.ui.active_preset.as_str()),
+            open: m.mode.feeds.net,
+            classic: m.mode.net.classic,
+            survey: m.mode.net.survey,
+            coded: m.mode.net.coded,
+            wifi: m.mode.net.wifi,
+            wifi_visits: m.mode.net.wifi_visits,
             phy: m.net.ble_phy,
             locked: m.net.mode == crate::state::NetMode::Lock,
             following: m
@@ -415,8 +414,8 @@ mod tests {
     #[test]
     fn the_survey_runs_no_classic_channel_until_its_load_leaves_room() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = super::super::lock::SURVEY_VIEW.to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset(super::super::lock::SURVEY_VIEW);
         m.radio.frequency = 2_441_000_000;
         m.radio.config_sample_rate = 8e6;
         m.radio.bb_filter_hz = 0;
@@ -495,8 +494,8 @@ mod tests {
                 continue;
             }
             let mut m = SdrMetrics::fixture().streaming();
-            m.ui.section = crate::signal::net::SECTION.to_string();
-            m.ui.active_preset = preset.to_string();
+            m.show_section(crate::signal::net::SECTION);
+            m.show_preset(preset);
             m.radio.frequency = tuned;
             m.radio.config_sample_rate = rate;
             m.radio.bb_filter_hz = 0;
@@ -538,11 +537,11 @@ mod tests {
     /// CI.
     fn feed(blocks: &[(u64, bool, usize)], open: bool) -> crate::state::NetDecodeHealth {
         let mut m = SdrMetrics::fixture();
-        m.ui.section = if open {
-            crate::signal::net::SECTION.to_string()
+        m.show_section(if open {
+            crate::signal::net::SECTION
         } else {
-            String::new()
-        };
+            ""
+        });
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
         for &(seq, gap_before, pairs) in blocks {
@@ -638,9 +637,9 @@ mod tests {
 
         let mut rng = Rng::new(0xB0_1234);
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         // The band is measured on the survey, the view that shows it.
-        m.ui.active_preset = super::super::lock::SURVEY_VIEW.to_string();
+        m.show_preset(super::super::lock::SURVEY_VIEW);
         m.radio.frequency = CENTRE;
         m.radio.config_sample_rate = RATE;
         m.radio.bb_filter_hz = 18_000_000;
@@ -709,7 +708,7 @@ mod tests {
     #[test]
     fn a_partial_dwell_is_not_published() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 20_000_000.0;
         m.radio.bb_filter_hz = 18_000_000;
@@ -791,7 +790,7 @@ mod tests {
             .collect();
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.radio.frequency = 2_402_000_000;
         m.radio.config_sample_rate = SAMPLE_RATE;
         m.radio.bb_filter_hz = 0;
@@ -1006,8 +1005,8 @@ mod tests {
     /// the ones `skip` names (a lost block), and returns the state.
     fn follow_over(blocks: &[Vec<u8>], skip: &[usize]) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "le".to_string();
-        m.ui.active_preset = "net_ble".to_string();
+        m.show_section("le");
+        m.show_preset("net_ble");
         m.radio.frequency = 2_426_000_000;
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
@@ -1060,8 +1059,8 @@ mod tests {
     fn replay(path: &str, section: &str, preset: &str) -> (SdrMetrics, u64) {
         use std::io::Read;
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = section.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(section);
+        m.show_preset(preset);
         m.net.mode = crate::state::NetMode::Lock;
         // Tuned and sampled as the recording says beside it, where it says.
         let meta = std::fs::read_to_string(path.replace(".sigmf-data", ".sigmf-meta"))
@@ -1202,8 +1201,8 @@ mod tests {
             .collect();
         names.sort();
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_survey".to_string();
+        m.show_section("wifi_channel");
+        m.show_preset("wifi_survey");
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
         let state = Arc::new(Mutex::new(m));
@@ -1683,8 +1682,8 @@ mod tests {
             .collect();
         let run = |section: &str, preset: &str| {
             let mut m = SdrMetrics::fixture().streaming();
-            m.ui.section = section.to_string();
-            m.ui.active_preset = preset.to_string();
+            m.show_section(section);
+            m.show_preset(preset);
             m.radio.frequency = 2_426_000_000;
             m.radio.config_sample_rate = 20e6;
             m.radio.bb_filter_hz = 0;
@@ -1726,8 +1725,8 @@ mod tests {
             .collect();
         let run = |section: &str, preset: &str| {
             let mut m = SdrMetrics::fixture().streaming();
-            m.ui.section = section.to_string();
-            m.ui.active_preset = preset.to_string();
+            m.show_section(section);
+            m.show_preset(preset);
             m.radio.frequency = 2_426_000_000;
             m.radio.config_sample_rate = 20e6;
             m.radio.bb_filter_hz = 0;
@@ -1776,8 +1775,8 @@ mod tests {
     /// tuned to `hz` at `rate`: the state it leaves.
     fn run_noise(section: &str, preset: &str, hz: u64, rate: f64) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = section.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(section);
+        m.show_preset(preset);
         m.radio.frequency = hz;
         m.radio.config_sample_rate = rate;
         m.radio.bb_filter_hz = 0;
@@ -1799,8 +1798,8 @@ mod tests {
     fn the_wifi_visits_are_kept_on_the_views_that_read_them() {
         let on = |preset: &str| {
             let mut m = SdrMetrics::fixture().streaming();
-            m.ui.section = "wifi_channel".into();
-            m.ui.active_preset = preset.into();
+            m.show_section("wifi_channel");
+            m.show_preset(preset);
             View::read(&m, 20e6).0.wifi_visits
         };
         assert!(on("wifi_survey"));
@@ -1900,8 +1899,8 @@ mod tests {
         setup: impl FnOnce(&mut SdrMetrics),
     ) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = section.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(section);
+        m.show_preset(preset);
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
@@ -2530,8 +2529,8 @@ mod tests {
     #[test]
     fn leaving_the_wifi_view_stands_the_receiver_down() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_survey".to_string();
+        m.show_section("wifi_channel");
+        m.show_preset("wifi_survey");
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
@@ -2551,8 +2550,8 @@ mod tests {
         }
         {
             let mut m = state.lock().unwrap();
-            m.ui.section = "le".to_string();
-            m.ui.active_preset = "net_ble".to_string();
+            m.show_section("le");
+            m.show_preset("net_ble");
         }
         tx.send(stamped(&state, 2, false, block)).unwrap();
         drop(tx);
@@ -2594,8 +2593,8 @@ mod tests {
 
     fn run_view(section: &str, preset: &str, blocks: &[(u64, Vec<u8>)]) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = section.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(section);
+        m.show_preset(preset);
         m.radio.frequency = 2_426_000_000;
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
@@ -2984,8 +2983,8 @@ mod tests {
             (v >> 16) as u8,
         ];
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "le".to_string();
-        m.ui.active_preset = "net_ble".to_string();
+        m.show_section("le");
+        m.show_preset("net_ble");
         m.radio.frequency = 2_426_000_000;
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
@@ -3185,8 +3184,8 @@ mod tests {
             .collect();
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_survey".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_survey");
         m.radio.frequency = tuned;
         m.radio.config_sample_rate = RATE;
         m.radio.bb_filter_hz = 0;
@@ -3213,7 +3212,7 @@ mod tests {
         let data_ch = 10u8;
         let (bytes, addr) = ble_2m_bytes(data_ch);
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.radio.frequency = crate::signal::ble::channel::centre_hz(data_ch).unwrap();
         m.radio.config_sample_rate = 8_000_000.0;
         m.radio.bb_filter_hz = 0;
@@ -3290,7 +3289,7 @@ mod tests {
             .collect();
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.radio.frequency = 2_402_000_000;
         m.radio.config_sample_rate = 4_000_000.0;
         m.radio.bb_filter_hz = 0;
@@ -3369,7 +3368,7 @@ mod tests {
     #[test]
     fn an_off_channel_tuning_is_refused_with_a_reason() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.radio.frequency = 2_437_000_000; // Wi-Fi channel 6, not a BLE one
         m.radio.config_sample_rate = 4_000_000.0;
         let state = Arc::new(Mutex::new(m));
@@ -3388,7 +3387,7 @@ mod tests {
     #[test]
     fn a_closed_section_leaves_no_receiver_or_load_behind() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "lab".to_string();
+        m.show_section("lab");
         m.radio.frequency = 2_402_000_000;
         m.radio.config_sample_rate = 4_000_000.0;
         m.net.ble_channel = Some(37);
@@ -3407,8 +3406,8 @@ mod tests {
     /// LE Coded account left over from before: what one block makes of it.
     fn coded_account_after(section: &str, preset: &str) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = section.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(section);
+        m.show_preset(preset);
         m.radio.frequency = 2_426_000_000;
         m.radio.config_sample_rate = 4_000_000.0;
         m.radio.bb_filter_hz = 0;
@@ -3465,7 +3464,7 @@ mod tests {
     #[test]
     fn the_worker_publishes_a_load_once_a_window_of_stream_has_passed() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 1_000_000.0;
         let state = Arc::new(Mutex::new(m));
@@ -3487,8 +3486,8 @@ mod tests {
     #[test]
     fn a_view_too_narrow_for_the_working_rate_is_refused() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_bt".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_bt");
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 2_000_000.0; // below the 4 Msps working rate
         let state = Arc::new(Mutex::new(m));
@@ -3509,8 +3508,8 @@ mod tests {
     #[test]
     fn a_wide_enough_view_clears_the_refusal_and_names_the_watched_channels() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_bt".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_bt");
         m.radio.frequency = 2_441_000_000;
         m.radio.config_sample_rate = 20_000_000.0;
         m.radio.bb_filter_hz = 0;
@@ -3568,8 +3567,8 @@ mod tests {
             .collect();
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_bt".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_bt");
         m.radio.frequency = channel_hz;
         m.radio.config_sample_rate = RAW_RATE;
         m.radio.bb_filter_hz = 0;
@@ -3620,8 +3619,8 @@ mod tests {
             .collect();
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = super::super::lock::SURVEY_VIEW.to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset(super::super::lock::SURVEY_VIEW);
         m.radio.frequency = channel_hz;
         m.radio.config_sample_rate = RAW_RATE;
         m.radio.bb_filter_hz = 0;
@@ -3670,8 +3669,8 @@ mod tests {
     /// Run one capture through the worker on `preset`, tuned to `tuned`.
     fn run_classic(preset: &str, tuned: u64, bytes: Vec<u8>) -> Arc<Mutex<SdrMetrics>> {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = preset.to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset(preset);
         m.radio.frequency = tuned;
         m.radio.config_sample_rate = 20_000_000.0;
         m.radio.bb_filter_hz = 0;
@@ -3856,8 +3855,8 @@ mod tests {
         let lt_addr = 0b010u8;
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_bt".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_bt");
         m.radio.frequency = channel_hz;
         m.radio.config_sample_rate = RAW_RATE;
         m.radio.bb_filter_hz = 0;
@@ -3930,8 +3929,8 @@ mod tests {
         let giac = 0x9E_8B33;
         let (bytes, channel_hz) = dh1_capture(giac, 0x7b);
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_bt".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_bt");
         m.radio.frequency = channel_hz;
         m.radio.config_sample_rate = RAW_RATE;
         m.radio.bb_filter_hz = 0;
@@ -4002,8 +4001,8 @@ mod tests {
             .collect();
 
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_bt".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_bt");
         m.radio.frequency = channel_hz;
         m.radio.config_sample_rate = RAW_RATE;
         m.radio.bb_filter_hz = 0;
@@ -4054,8 +4053,8 @@ mod tests {
     #[test]
     fn a_different_preset_leaves_bt_refused_unset() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_ble".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_ble");
         m.radio.frequency = 2_402_000_000;
         m.radio.config_sample_rate = 4_000_000.0;
         let state = Arc::new(Mutex::new(m));

@@ -111,7 +111,7 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
         mode_line(state, &field),
         // NET's rows show addresses in this mode, so the file says which;
         // FT8's distances are measured from you, so it says from where.
-        if state.ui.is_ft8_section() {
+        if state.mode.feeds.ft8 {
             field("station", station_line(state))
         } else {
             field("addresses", addresses_line(state))
@@ -123,7 +123,7 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
 
 /// What the section was doing: NET's mode, or FT8 and the band it was on.
 fn mode_line(state: &SdrMetrics, field: &dyn Fn(&str, String) -> String) -> String {
-    if state.ui.is_ft8_section() {
+    if state.mode.feeds.ft8 {
         let hz = state.radio.frequency;
         let band = crate::signal::ft8::bands::band_of(hz)
             .map_or("not an FT8 frequency".to_string(), str::to_string);
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn an_ft8_file_names_its_band_and_its_station() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::ft8::SECTION.to_string();
+        m.show_section(crate::signal::ft8::SECTION);
         m.radio.frequency = 7_074_000;
         m.home.latitude = Some(46.2917);
         m.home.longitude = Some(18.5254);

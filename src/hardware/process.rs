@@ -251,9 +251,10 @@ pub fn arrive(
     // split it was describing lives in `tasks::rx::metrics::iq_metrics`.
     // Read both feed gates in the same lock as the correction state - each
     // costs an extra copy of the block, so each must be free when switched off.
-    // The NET gate is the section on screen rather than a switch of its own:
-    // that section is the only consumer, and a preset the user is not looking at
-    // is not a reason to copy every block off the USB callback.
+    // The NET, pager and FT8 gates are the engine's mode rather than switches
+    // of their own: what the mode asks for is the only consumer, and a view
+    // nobody asked for is not a reason to copy every block off the USB
+    // callback.
     // The tuning is read in the same lock: it travels with the block, so a
     // worker that processes it later still knows where it was captured.
     // The recorder's gate is its own atomic, read before the lock so an idle
@@ -284,9 +285,9 @@ pub fn arrive(
             m.iq.cal,
             m.spectrum.wanted || m.radio.reference_request,
             m.demod.enabled,
-            m.ui.is_net_section(),
-            m.ui.is_pager_section(),
-            m.ui.is_ft8_section(),
+            m.mode.feeds.net,
+            m.mode.feeds.pager,
+            m.mode.feeds.ft8,
             m.radio.frequency,
             m.radio.config_sample_rate,
             recording.then(|| (m.radio.gains.clone(), m.radio.amp_enabled)),
@@ -892,7 +893,7 @@ pub(crate) mod tests {
         let (power_tx, _) = crossbeam_channel::bounded(1);
         let mut m = SdrMetrics::fixture();
         m.demod.enabled = true;
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         let ctx = RxContext {
             metrics: Arc::new(Mutex::new(m)),
             sample_tx,
@@ -1152,7 +1153,7 @@ pub(crate) mod tests {
     fn what_a_block_costs() {
         let (ctx, sample_rx, _d, _n) = rx_ctx();
         ctx.metrics.lock().unwrap().demod.enabled = false;
-        ctx.metrics.lock().unwrap().ui.section = "lab".to_string();
+        ctx.metrics.lock().unwrap().show_section("lab");
         let mut rng = crate::signal::dsp::testkit::Rng::new(3);
         let block: Vec<u8> = rng
             .noise(131_072, 0.02)
@@ -1209,19 +1210,19 @@ pub(crate) mod tests {
         assert_eq!(depth, 1, "and the queue was full when it happened");
     }
 
-    /// A section nobody is looking at costs nothing on the hot path.
+    /// A mode nobody asked for costs nothing on the hot path.
     ///
-    /// The gate is the section on screen rather than a switch of its own,
-    /// because the section is the feed's only consumer. Forwarding costs a full
-    /// copy of every block inside the USB callback, and paying it for a preset
-    /// the user has not opened is exactly the kind of cost that is invisible
-    /// until it is a dropped frame.
+    /// The gate is the engine's mode rather than a switch of its own, because
+    /// what the mode asks for is the feed's only consumer. Forwarding costs a
+    /// full copy of every block inside the USB callback, and paying it for a
+    /// view nobody opened is exactly the kind of cost that is invisible until
+    /// it is a dropped frame.
     #[test]
-    fn a_section_nobody_is_looking_at_is_never_fed() {
+    fn a_mode_nobody_asked_for_is_never_fed() {
         let (ctx, _sample_rx, _demod_rx, net_rx) = rx_ctx();
         {
             let mut m = ctx.metrics.lock().unwrap();
-            m.ui.section = "lab".to_string();
+            m.show_section("lab");
         }
         super::process_block(&[0x10u8; 64], eight_bit(), 0, &ctx, Instant::now());
         assert!(net_rx.is_empty(), "nothing forwarded, and nothing copied");
@@ -1235,7 +1236,7 @@ pub(crate) mod tests {
         // Open it, and the same block arrives with its continuity facts.
         {
             let mut m = ctx.metrics.lock().unwrap();
-            m.ui.section = crate::signal::net::SECTION.to_string();
+            m.show_section(crate::signal::net::SECTION);
         }
         super::process_block(&[0x10u8; 64], eight_bit(), 0, &ctx, Instant::now());
         let block = net_rx.try_recv().expect("one block");
@@ -1337,7 +1338,10 @@ pub(crate) mod tests {
         assert_eq!(ctx.pager_feed.take(), (0, 0));
         assert!(pager_rx.is_empty());
 
-        ctx.metrics.lock().unwrap().ui.section = crate::signal::pocsag::SECTION.to_string();
+        ctx.metrics
+            .lock()
+            .unwrap()
+            .show_section(crate::signal::pocsag::SECTION);
         super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
         assert_eq!(ctx.pager_feed.take(), (1, 0), "the queue took it");
         super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
@@ -1398,7 +1402,10 @@ pub(crate) mod tests {
         assert_eq!(ctx.ft8_feed.take(), (0, 0));
         assert!(ft8_rx.is_empty());
 
-        ctx.metrics.lock().unwrap().ui.section = crate::signal::ft8::SECTION.to_string();
+        ctx.metrics
+            .lock()
+            .unwrap()
+            .show_section(crate::signal::ft8::SECTION);
         let before = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

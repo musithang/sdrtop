@@ -32,7 +32,7 @@ pub const HEADER: &str =
 /// The band as CSV rows, or the reason there are none.
 pub fn rows(state: &SdrMetrics) -> Result<Vec<String>, String> {
     let band = &state.net.band;
-    if state.ui.active_preset != crate::signal::net::lock::SURVEY_VIEW {
+    if !state.mode.net.survey {
         return Err(
             "the band is measured on NET 2 Survey only; export from there for a current one"
                 .to_string(),
@@ -102,7 +102,7 @@ mod tests {
             window_s: 6.4e-6,
             ..Default::default()
         };
-        m.ui.active_preset = crate::signal::net::lock::SURVEY_VIEW.to_string();
+        m.show_preset(crate::signal::net::lock::SURVEY_VIEW);
         m
     }
 
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn off_the_survey_the_band_is_not_exported() {
         let mut m = band(vec![measured(0.25, 8_000); occupancy::CELLS]);
-        m.ui.active_preset = "net_ble".to_string();
+        m.show_preset("net_ble");
         let why = rows(&m).unwrap_err();
         assert!(why.contains("NET 2"), "{why}");
     }

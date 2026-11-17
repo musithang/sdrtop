@@ -695,8 +695,8 @@ mod tests {
 
     fn state() -> Arc<Mutex<SdrMetrics>> {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".into();
-        m.ui.active_preset = "wifi_survey".into();
+        m.show_section("wifi_channel");
+        m.show_preset("wifi_survey");
         Arc::new(Mutex::new(m))
     }
 

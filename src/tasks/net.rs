@@ -92,13 +92,12 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     m.radio.config_sample_rate
                 };
                 (
-                    m.ui.is_net_section() && m.net.mode == NetMode::Survey && m.radio.hw_streaming,
+                    m.mode.feeds.net && m.net.mode == NetMode::Survey && m.radio.hw_streaming,
                     span,
                     m.radio.config_sample_rate,
                     m.radio.frequency,
-                    crate::signal::net::lock::ADVERTISING_VIEWS
-                        .contains(&m.ui.active_preset.as_str()),
-                    crate::signal::net::is_wifi(&m.ui.section),
+                    m.mode.net.advertising,
+                    m.mode.net.wifi,
                 )
             };
 
@@ -132,12 +131,12 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 // back, so it is applied here, the one place NET retunes from.
                 let pending = {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if m.net.mode == NetMode::Lock && m.ui.is_net_section() {
-                        if m.ui.active_preset != locked_view {
-                            locked_view = m.ui.active_preset.clone();
+                    if m.net.mode == NetMode::Lock && m.mode.feeds.net {
+                        if m.mode.view != locked_view {
+                            locked_view = m.mode.view.clone();
                             if m.net.lock_at.is_none() {
                                 m.net.lock_at = crate::signal::net::lock::entering_view(
-                                    &m.ui.section,
+                                    &m.mode.section,
                                     &locked_view,
                                     m.radio.frequency,
                                 );
@@ -194,9 +193,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 for hz in hops {
                     {
                         let m = state.lock().unwrap_or_else(|e| e.into_inner());
-                        if m.net.mode != NetMode::Survey
-                            || !crate::signal::net::is_wifi(&m.ui.section)
-                        {
+                        if m.net.mode != NetMode::Survey || !m.mode.net.wifi {
                             break;
                         }
                     }
@@ -232,10 +229,9 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 for hz in crate::signal::ble::channel::advertising_channels_hz() {
                     {
                         let m = state.lock().unwrap_or_else(|e| e.into_inner());
-                        if !m.ui.is_net_section()
+                        if !m.mode.feeds.net
                             || m.net.mode != NetMode::Survey
-                            || !crate::signal::net::lock::ADVERTISING_VIEWS
-                                .contains(&m.ui.active_preset.as_str())
+                            || !m.mode.net.advertising
                         {
                             break;
                         }
@@ -286,7 +282,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
             for hz in &plan.hops {
                 {
                     let m = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if !m.ui.is_net_section() || m.net.mode != NetMode::Survey {
+                    if !m.mode.feeds.net || m.net.mode != NetMode::Survey {
                         break;
                     }
                 }
@@ -477,8 +473,8 @@ mod tests {
     #[tokio::test]
     async fn opening_the_ble_view_locked_off_channel_moves_to_advertising() {
         let mut m = SdrMetrics::fixture();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net_ble".to_string();
+        m.show_section(crate::signal::net::SECTION);
+        m.show_preset("net_ble");
         m.net.mode = NetMode::Lock;
         m.radio.frequency = 2_435_500_000;
         let state = Arc::new(Mutex::new(m));
@@ -516,7 +512,7 @@ mod tests {
     #[tokio::test]
     async fn the_task_applies_a_lock_asked_for_while_already_locked() {
         let mut m = SdrMetrics::fixture();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_section(crate::signal::net::SECTION);
         m.net.mode = NetMode::Lock;
         let target = crate::signal::net::survey::lock_target(41);
         m.net.lock_at = Some(target.clone());

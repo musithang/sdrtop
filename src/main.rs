@@ -591,6 +591,63 @@ mod source_tests {
         );
     }
 
+    /// **What the engine computes is the engine's to decide.** The screen's
+    /// own state (its section, its layout, its focus) is a mirror the
+    /// terminal keeps, and a headless instance has no terminal to keep it,
+    /// so nothing that measures may read it. The engine's [`engine::mode`]
+    /// is what they read instead. Test modules are left alone: a test may
+    /// set the screen up to check how the engine follows it.
+    #[test]
+    fn no_engine_side_code_reads_the_ui_state() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        for dir in [
+            "src/signal",
+            "src/hardware",
+            "src/tasks",
+            "src/export",
+            "src/engine",
+        ] {
+            walk(&root.join(dir), &mut files);
+        }
+        assert!(files.len() > 100, "the source tree was not found");
+        let mut found = Vec::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            for (n, line) in lines.iter().enumerate() {
+                // A test module runs to the end of its file.
+                if line.trim() == "#[cfg(test)]"
+                    && lines
+                        .get(n + 1)
+                        .is_some_and(|next| next.contains("mod ") && next.ends_with('{'))
+                {
+                    break;
+                }
+                let code = line.split("//").next().unwrap_or("");
+                if code.contains(".ui.") {
+                    let at = file.strip_prefix(root).unwrap_or(&file).display();
+                    found.push(format!("{at}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "engine-side code reading the screen's state:\n{}",
+            found.join("\n")
+        );
+    }
+
     /// The forms it looks for, and the ordinary words it must leave alone.
     #[test]
     fn plan_references_are_told_from_ordinary_words() {
