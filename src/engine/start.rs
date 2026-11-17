@@ -11,10 +11,140 @@
 
 use std::sync::{Arc, Mutex};
 
+use super::boot::{initial_metrics, resolve_tuning, Boot};
+use crate::config::AppConfig;
 use crate::hardware::{self, SampleGeometry, SdrDevice};
 use crate::signal::{DemodWorker, FftWorker, NetWorker, PowerWorker};
 use crate::state::SdrMetrics;
 use crate::tasks;
+
+/// Program an open radio from the config (rate, frequency, every gain stage,
+/// the boost) and build the state a session starts from, with the log saying
+/// who the radio is and anything the config asked for and did not get.
+///
+/// `observable` is whether observer mode could watch this radio were another
+/// process to hold it.
+pub fn open(
+    cfg: &AppConfig,
+    device: &Arc<dyn SdrDevice>,
+    observable: bool,
+) -> anyhow::Result<SdrMetrics> {
+    let info = device.info();
+    let caps = Arc::new(device.capabilities().clone());
+
+    let mut tuning = resolve_tuning(&cfg.radio, &caps);
+    // Taken out before `tuning` is moved into `Boot`, rather than cloning
+    // the whole thing to keep them.
+    let mut boot_notes = std::mem::take(&mut tuning.notes);
+    let asked_rate = tuning.sample_rate;
+    let sr_result = match device.set_sample_rate(asked_rate) {
+        // The device is the authority on both figures: the baseband width it
+        // actually selected, and the rate it actually landed on. The computed
+        // width and the requested rate stand in only when the call failed.
+        Ok(set) => {
+            tuning.sample_rate = set.rate_hz;
+            tuning.bb_filter_hz = set.bb_filter_hz;
+            // A driver that rounded the configured rate onto its own grid
+            // would otherwise change it silently, and the config is rewritten
+            // on quit, so the user's own figure would disappear without ever
+            // having been contradicted.
+            if set.rate_hz != asked_rate {
+                boot_notes.push(format!(
+                    "Sample rate {:.6} MHz is not on this radio's grid; running at {:.6} MHz",
+                    asked_rate / 1e6,
+                    set.rate_hz / 1e6
+                ));
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    };
+    // `amp_enabled` is the front-end-boost state for both device families:
+    // HackRF's RF amp (set_amp_enable) and RTL-SDR's tuner AGC (set_tuner_agc).
+    // Calling both applies the right one per device (the other is a no-op) so
+    // the programmed state matches what the UI shows.
+    // One call per stage the device actually has, in its own order. The two
+    // named setters are what the default `set_stage_gain` maps onto, so both
+    // native radios are programmed exactly as they always were.
+    let stages = caps.gain.stages();
+    // The radio says where it tuned, which is not always where it was asked
+    // (a receiver on a tuning grid), and the state starts from its word.
+    let freq_result = device.set_frequency(tuning.frequency_hz).map(|tuned| {
+        tuning.frequency_hz = tuned;
+    });
+    let mut startup_results = vec![freq_result, sr_result];
+    let gains: Vec<f64> = stages
+        .iter()
+        .enumerate()
+        .map(|(index, spec)| tuning.gains.get(index).copied().unwrap_or(spec.min_db))
+        .collect();
+    startup_results.push(device.set_stage_gains(&gains));
+    let boost = cfg.radio.boost_for(&info.board_name);
+    startup_results.push(device.set_amp_enable(boost));
+    startup_results.push(device.set_tuner_agc(boost));
+
+    let device_options = device.options();
+    hardware::debug_assert_device_options(&device_options);
+    let mut initial = initial_metrics(
+        cfg,
+        Boot::normal(cfg, Arc::clone(&caps), tuning, &info, observable),
+    )?;
+    initial.device_options = Arc::new(device_options);
+    {
+        let m = &mut initial;
+        // Read the identity back out of the state rather than off `info`
+        // again: `Boot::normal` already applied the "unknown" / `0xFE`
+        // fall-backs, and the log must say the same thing the header does.
+        let connected = format!(
+            "Connected: {} | Serial: {}",
+            m.system.board_name, m.system.serial
+        );
+        let board = format!(
+            "Board: {} | USB API: {:#06x}",
+            hardware::native::hackrf::board_rev_name(m.system.board_rev),
+            m.system.usb_api_version
+        );
+        m.push_log(connected);
+        // Firmware is a HackRF concept; RTL-SDR (no on-device FW) skips it.
+        if let Some(fw) = &info.fw_version {
+            m.push_log(format!("Firmware: {}", fw));
+        }
+        // RTL-SDR reports a tuner instead of a board revision / USB-API version.
+        if let Some(tuner) = &info.tuner_name {
+            m.push_log(format!("Tuner: {}", tuner));
+        } else if caps.acquisition == hardware::AcquisitionKind::IqSamples {
+            m.push_log(board);
+        }
+        // Anything the backend declined while opening. Both native paths
+        // have nothing to say; a SoapySDR device names any gain element
+        // whose range the driver described unusably.
+        for note in device.open_notes() {
+            m.push_log(note.clone());
+        }
+        // Anything the configured tuning asked for and did not get: a gain
+        // stage name this radio does not have, an entry that is not
+        // `NAME=value` at all, or a sample rate the driver rounded. The gain
+        // ones are computed by `resolve_tuning`, which is pure, and surfaced
+        // here.
+        for note in &boot_notes {
+            m.push_log(note.clone());
+        }
+        let names = [
+            "frequency",
+            "sample rate",
+            "LNA gain",
+            "VGA gain",
+            "amp",
+            "tuner AGC",
+        ];
+        for (result, name) in startup_results.iter().zip(names.iter()) {
+            if let Err(e) = result {
+                m.push_log(format!("Startup: failed to set {}: {}", name, e));
+            }
+        }
+    }
+    Ok(initial)
+}
 
 /// The far ends of the sample feeds, for [`run`] to hand to the workers.
 pub struct Feeds {

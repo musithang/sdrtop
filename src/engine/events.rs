@@ -16,9 +16,7 @@
 
 use std::sync::Mutex;
 
-#[cfg(test)]
-use crossbeam_channel::Receiver;
-use crossbeam_channel::{Sender, TrySendError};
+use crossbeam_channel::{Receiver, Sender, TrySendError};
 use serde::Serialize;
 
 use super::command::{Command, Reply};
@@ -69,7 +67,6 @@ pub struct Bus {
 
 impl Bus {
     /// A new client, with room for `capacity` events it has not read yet.
-    #[cfg(test)]
     pub fn subscribe(&self, capacity: usize) -> Subscription {
         let (tx, rx) = crossbeam_channel::bounded(capacity.max(1));
         self.lock().push(Subscriber { tx, pending: 0 });
@@ -111,16 +108,20 @@ impl Bus {
 }
 
 /// One client's end of the bus. Dropping it unsubscribes.
-#[cfg(test)]
 pub struct Subscription {
     rx: Receiver<Delivered>,
 }
 
-#[cfg(test)]
 impl Subscription {
     /// The next event, if one is waiting.
+    #[cfg(test)]
     pub fn try_next(&self) -> Option<Delivered> {
         self.rx.try_recv().ok()
+    }
+
+    /// The next event, waiting for it; `None` once the engine is gone.
+    pub fn next_blocking(&self) -> Option<Delivered> {
+        self.rx.recv().ok()
     }
 }
 

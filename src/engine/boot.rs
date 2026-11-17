@@ -35,7 +35,7 @@ use crate::state::{
 /// One struct so the clamp's five outputs travel together: the programmed
 /// hardware state and the displayed state are the same numbers by construction,
 /// rather than by two call sites remembering to agree.
-pub(super) struct Tuning {
+pub(crate) struct Tuning {
     pub frequency_hz: u64,
     pub sample_rate: f64,
     pub bb_filter_hz: u32,
@@ -55,7 +55,7 @@ pub(super) struct Tuning {
 
 /// Who the device says it is. `new_observer` fills this from the USB scan, with
 /// placeholders for what only an opened device can report.
-pub(super) struct Identity {
+pub(crate) struct Identity {
     pub board_name: String,
     pub serial: String,
     pub fw_version: String,
@@ -71,7 +71,7 @@ pub(super) struct Identity {
 /// Adding a field here is the honest way to add a difference: it has to be given
 /// a value in both [`Boot::normal`] and [`Boot::observer`], so a new divergence
 /// cannot be introduced in one boot path and forgotten in the other.
-pub(super) struct Boot {
+pub(crate) struct Boot {
     pub caps: Arc<DeviceCapabilities>,
     pub tuning: Tuning,
     pub identity: Identity,
@@ -89,7 +89,7 @@ pub(super) struct Boot {
 impl Boot {
     /// A radio we opened: capabilities read from the device, config clamped into
     /// them, identity as the device reports it.
-    pub(super) fn normal(
+    pub(crate) fn normal(
         cfg: &AppConfig,
         caps: Arc<DeviceCapabilities>,
         tuning: Tuning,
@@ -126,7 +126,7 @@ impl Boot {
     /// capability profiles are placeholders - `rtlsdr::observer_caps()` carries
     /// an empty gain table, so snapping against it would report every RTL gain as
     /// 0 dB. A config value the operator recognises beats a fabricated legal one.
-    pub(super) fn observer(
+    pub(crate) fn observer(
         cfg: &AppConfig,
         sysinfo: &hardware::usb::UsbDeviceInfo,
         profile: hardware::discovery::ObserverProfile,
@@ -199,7 +199,7 @@ impl Boot {
 /// `bb_filter_hz` here is the computed baseband width for the clamped rate; the
 /// caller overwrites it with what the device actually reported once
 /// `set_sample_rate` has answered.
-pub(super) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> Tuning {
+pub(crate) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> Tuning {
     let frequency_hz = if caps.tunes(radio.frequency_hz) {
         radio.frequency_hz
     } else {
@@ -345,7 +345,7 @@ pub fn resolve_gains(
 /// Everything not reached through `boot` is the same on both startups by
 /// definition: history ring buffers sized but empty, every measurement at its
 /// no-measurement value.
-pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<SdrMetrics> {
+pub(crate) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<SdrMetrics> {
     let Boot {
         caps,
         tuning,
@@ -495,6 +495,39 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         m.push_log(line);
     }
     Ok(m)
+}
+
+/// The `[radio]` block for the state as it stands: the frequency, the rate
+/// and the gains the radio is set to, the gains by name (and only that: the
+/// pre-0.5.0 positional pair is still read on load and no longer written, so
+/// a saved file names the stages the radio actually has), the vendor curve
+/// by name where the radio has curves, and the open radio's boost beside
+/// every other radio's as `loaded` had them. The recall slots are the
+/// terminal's and are kept as loaded; the terminal writes its own over them.
+pub fn radio_block(m: &SdrMetrics, loaded: &RadioConfig) -> RadioConfig {
+    let mut boost = loaded.boost.clone();
+    if m.caps.gain.has_boost() {
+        boost.insert(m.system.board_name.to_string(), m.radio.amp_enabled);
+    }
+    RadioConfig {
+        frequency_hz: m.radio.frequency,
+        sample_rate: m.radio.config_sample_rate,
+        gain: Some(crate::hardware::gain::format_named(
+            &m.caps.gain.stages(),
+            &m.radio.gains,
+        )),
+        lna_gain: None,
+        vga_gain: None,
+        gain_mode: (!m.caps.gain.curves().is_empty()).then(|| {
+            m.radio
+                .gain_curve
+                .and_then(|c| m.caps.gain.curves().get(c))
+                .map_or("manual", |c| c.name)
+                .to_string()
+        }),
+        boost,
+        recall_hz: loaded.recall_hz,
+    }
 }
 
 #[cfg(test)]
@@ -946,32 +979,20 @@ mod tests {
     /// read `hackrf fw`. The value is a dash, in the state and not only on
     /// screen: which library the holder drives it through is not something
     /// sdrtop can see, so nothing that reads the state may say `librtlsdr`.
+    /// What the header draws from it is held by the app's own test.
     #[test]
     fn an_observed_radio_is_introduced_as_its_own_backend() {
         let cfg = AppConfig::default();
-        let observed =
-            |kind| initial_metrics(&cfg, Boot::observer(&cfg, &sysinfo(), profile(kind))).unwrap();
-        let header = |kind| {
-            crate::state::fixture::draw(
-                crate::ui::panels::core::header::HeaderPanel,
-                120,
-                8,
-                &observed(kind),
-            )
-            .join("\n")
-        };
-        let stack = observed(hardware::DeviceKind::RtlSdr).system.stack.unwrap();
+        let stack = initial_metrics(
+            &cfg,
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::RtlSdr)),
+        )
+        .unwrap()
+        .system
+        .stack
+        .unwrap();
         assert_eq!(stack.label, "rtl-sdr   ");
         assert_eq!(&*stack.value, "—");
-        let rtl = header(hardware::DeviceKind::RtlSdr);
-        assert!(rtl.contains("rtl-sdr"), "{rtl}");
-        assert!(!rtl.contains("hackrf fw"), "not a HackRF:\n{rtl}");
-        assert!(
-            !rtl.contains("librtlsdr"),
-            "the holder's library is not seen:\n{rtl}"
-        );
-        let hackrf = header(hardware::DeviceKind::HackRf);
-        assert!(hackrf.contains("hackrf fw"), "{hackrf}");
     }
 
     // ── The config's gain, and its migration ────────────────────────────────
@@ -1134,5 +1155,35 @@ mod tests {
         let hackrf = crate::hardware::native::hackrf::caps();
         cfg.radio.gain_mode = Some("Linearity".into());
         assert_eq!(resolve_tuning(&cfg.radio, &hackrf).gain_curve, None);
+    }
+
+    /// **The radio block is what the radio is set to.** Saved by name, so
+    /// it lands on legal values on another radio; the open radio's boost
+    /// beside every other radio's as loaded; and the recall slots, which are
+    /// the terminal's, as they were.
+    #[test]
+    fn the_radio_block_is_what_the_radio_is_set_to() {
+        let mut m = crate::state::SdrMetrics::fixture();
+        m.radio.frequency = 433_920_000;
+        m.radio.config_sample_rate = 2_000_000.0;
+        m.radio.gains = vec![16.0, 20.0];
+        m.radio.amp_enabled = true;
+        let mut loaded = RadioConfig::default();
+        loaded.boost.insert("Another radio".into(), true);
+        loaded.recall_hz = [7_074_000, 0, 0];
+        loaded.lna_gain = Some(8);
+
+        let saved = radio_block(&m, &loaded);
+        assert_eq!(saved.frequency_hz, 433_920_000);
+        assert_eq!(saved.sample_rate, 2_000_000.0);
+        assert_eq!(saved.gain.as_deref(), Some("LNA=16,VGA=20"));
+        assert_eq!(
+            (saved.lna_gain, saved.vga_gain),
+            (None, None),
+            "named, only"
+        );
+        assert_eq!(saved.boost.get("Another radio"), Some(&true));
+        assert_eq!(saved.boost.get(&*m.system.board_name), Some(&true));
+        assert_eq!(saved.recall_hz, [7_074_000, 0, 0]);
     }
 }

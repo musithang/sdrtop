@@ -70,6 +70,8 @@ pub struct App {
     /// The `[sdrplay]` block, likewise.
     pub(super) sdrplay_config: crate::config::SdrplaySettings,
     pub(super) plutosky_config: crate::config::PlutoSkySettings,
+    /// The `[headless]` block as loaded: the terminal never changes it.
+    pub(super) headless_config: crate::config::HeadlessSettings,
     /// `[radio.boost]` as loaded: every other radio's entry is carried
     /// forward, and the open radio's is written from the live state.
     pub(super) boost_config: std::collections::BTreeMap<String, bool>,
@@ -597,46 +599,12 @@ impl App {
         Ok(refresh())
     }
 
-    /// Put the tuner back before the app goes away.
-    ///
-    /// The same problem as `restore_noise_sweep`, one field along. A frequency
-    /// sweep parks the radio at each position in turn and writes each one to
-    /// `radio.frequency`, because that is the field the FFT worker stamps its
-    /// frames with. The `sweep_task` restores the interrupted tuning when it
-    /// notices `sweep.active` has gone false, but quitting never gives it
-    /// another iteration: the process ends first, and `save_config` writes out
-    /// whichever position the scan was parked on. Quitting from `lab_sweep` or
-    /// `micro_sweep` therefore reopened the app somewhere in the middle of the
-    /// swept band, one band-width further along each time.
-    ///
-    /// The NET survey does the same thing for the same reason, so it gives the
-    /// tuner back here too. Harmless on a state that did neither, so it is not
-    /// conditional.
+    /// Put the tuner back before the app goes away: see
+    /// [`crate::engine::Engine::hand_back_the_tuner`].
     fn restore_sweep_tuning(&self) {
-        let moved = {
-            let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            let was = m.radio.frequency;
-            m.radio.frequency = m.sweep.end(was).tune_hz;
-            // The NET survey parks the radio at each position in turn for
-            // exactly the same reason and with exactly the same consequence on
-            // quit, so it gives the tuner back through the same path. Harmless
-            // on a state that never surveyed, and it runs second because either
-            // may have moved the radio but never both: the two live in different
-            // sections and only one section is on screen.
-            let after_sweep = m.radio.frequency;
-            m.radio.frequency = m.net.end(after_sweep).tune_hz;
-            // Measured against where the radio actually was when quitting, not
-            // against whatever the first of the two handed on.
-            (m.radio.frequency != was).then_some(m.radio.frequency)
-        };
-        // Only when the sweep had actually moved the radio: every quit comes
-        // through here, and a retune to the frequency the radio is already on is
-        // one more device call during teardown for nothing.
-        let (Some(hz), Some(device)) = (moved, self.device.as_ref()) else {
-            return;
-        };
-        // Device call with no lock held, as everywhere else.
-        let _ = device.set_frequency(hz);
+        if let Some(core) = &self.core {
+            core.hand_back_the_tuner();
+        }
     }
 
     fn save_config(&self) -> anyhow::Result<()> {
@@ -647,47 +615,34 @@ impl App {
             return Ok(());
         };
         let (
-            freq,
-            rate,
-            gains,
-            gain_mode,
-            amp,
+            radio,
             wf_rows,
             wf_palette,
             spec_style,
             markers,
             sweep_cfg,
-            recall,
             night,
             display,
             station,
             ft8,
         ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let loaded = RadioConfig {
+                boost: self.boost_config.clone(),
+                ..RadioConfig::default()
+            };
+            let radio = RadioConfig {
+                // The recall slots are the terminal's own.
+                recall_hz: crate::state::recall_to_hz(&m.ui.recall),
+                ..crate::engine::boot::radio_block(&m, &loaded)
+            };
             (
-                m.radio.frequency,
-                m.radio.config_sample_rate,
-                crate::hardware::gain::format_named(&m.caps.gain.stages(), &m.radio.gains),
-                // By name, like the stages; only on a radio that has curves.
-                (!m.caps.gain.curves().is_empty()).then(|| {
-                    m.radio
-                        .gain_curve
-                        .and_then(|c| m.caps.gain.curves().get(c))
-                        .map_or("manual", |c| c.name)
-                        .to_string()
-                }),
-                // The open radio's own entry, and only for a radio that has a
-                // boost.
-                m.caps
-                    .gain
-                    .has_boost()
-                    .then(|| (m.system.board_name.to_string(), m.radio.amp_enabled)),
+                radio,
                 m.waterfall.buffer.max_rows,
                 m.waterfall.palette,
                 m.spectrum.style,
                 m.spectrum.markers.clone(),
                 m.sweep.config.clone(),
-                crate::state::recall_to_hz(&m.ui.recall),
                 m.pager.view.night,
                 m.pager.view.display.clone(),
                 m.home.settings(),
@@ -695,23 +650,7 @@ impl App {
             )
         };
         let cfg = AppConfig {
-            radio: RadioConfig {
-                frequency_hz: freq,
-                sample_rate: rate,
-                // The named form, and only that: the pre-0.5.0 positional pair
-                // is still read on load and is no longer written, so a saved
-                // file names the stages the device actually has.
-                gain: Some(gains),
-                lna_gain: None,
-                vga_gain: None,
-                gain_mode,
-                boost: {
-                    let mut boost = self.boost_config.clone();
-                    boost.extend(amp);
-                    boost
-                },
-                recall_hz: recall,
-            },
+            radio,
             display: DisplayConfig {
                 active_preset: self.engine.saved_active_preset().to_string(),
                 waterfall_max_rows: wf_rows,
@@ -736,6 +675,7 @@ impl App {
             airspyhf: self.airspyhf_config.clone(),
             sdrplay: self.sdrplay_config.clone(),
             plutosky: self.plutosky_config.clone(),
+            headless: self.headless_config.clone(),
             net: self.net_config.clone(),
             record: self.record_config.clone(),
             pager: crate::config::PagerSettings { night, display },
@@ -1601,34 +1541,6 @@ mod tests {
             assert!(
                 !snapshot_side.contains(late),
                 "`{late}` after the clone reaches only the snapshot, never the engine"
-            );
-        }
-    }
-
-    /// **Every scanner that parks the radio gives the tuner back on quit.**
-    ///
-    /// Two now do: the frequency sweep and the NET survey. Both write their
-    /// current position into `radio.frequency` because that is the field the FFT
-    /// worker stamps frames with, and `save_config` persists that field, so a
-    /// scanner missing from this function reopens the app somewhere in the
-    /// middle of its band - one position further along each time.
-    ///
-    /// Read as source text, like the test above and for the same reason: adding
-    /// a third scanner and forgetting this line compiles perfectly, and the
-    /// symptom shows up a week later as "the app forgot where I was tuned".
-    #[test]
-    fn every_scanner_gives_the_tuner_back_on_quit() {
-        let body = include_str!("mod.rs")
-            .split_once("fn restore_sweep_tuning(&self) {")
-            .expect("restore_sweep_tuning has been renamed")
-            .1
-            .split_once("\n    fn ")
-            .expect("restore_sweep_tuning no longer ends")
-            .0;
-        for scanner in ["m.sweep.end(", "m.net.end("] {
-            assert!(
-                body.contains(scanner),
-                "{scanner} is missing: quitting mid-scan will save the scan position"
             );
         }
     }

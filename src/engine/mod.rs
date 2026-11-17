@@ -17,8 +17,10 @@
 //! the key handling. While that test holds, moving this module into a crate
 //! of its own is a mechanical change, whenever there is a reason for one.
 
+pub mod boot;
 pub mod command;
 pub mod events;
+pub mod headless;
 pub mod mode;
 pub mod start;
 pub mod testimony;
@@ -42,7 +44,6 @@ impl Engine {
     }
 
     /// Everything the engine knows, as of now: the copy a frame is drawn from.
-    #[cfg(test)]
     pub fn snapshot(&self) -> SdrMetrics {
         self.lock().clone()
     }
@@ -54,7 +55,6 @@ impl Engine {
     }
 
     /// A new client of the engine's events, with room for `capacity` unread.
-    #[cfg(test)]
     pub fn subscribe(&self, capacity: usize) -> events::Subscription {
         self.lock().events.subscribe(capacity)
     }
@@ -66,9 +66,72 @@ impl Engine {
         &self.device
     }
 
+    /// Put the tuner back where a scanner found it, before the session ends.
+    ///
+    /// A frequency sweep parks the radio at each position in turn and writes
+    /// each one to `radio.frequency`, because that is the field the FFT worker
+    /// stamps its frames with. The sweep task restores the interrupted tuning
+    /// when it notices `sweep.active` has gone false, but ending the session
+    /// never gives it another iteration, and the save then writes out
+    /// whichever position the scan was parked on: the next start opened
+    /// somewhere in the middle of the swept band, one band-width further along
+    /// each time. The NET survey does the same for the same reason, so it
+    /// gives the tuner back here too. Harmless on a state that did neither.
+    pub fn hand_back_the_tuner(&self) {
+        let moved = {
+            let mut m = self.lock();
+            let was = m.radio.frequency;
+            m.radio.frequency = m.sweep.end(was).tune_hz;
+            // Second, because either may have moved the radio but never both:
+            // they belong to different views and only one is computed.
+            let after_sweep = m.radio.frequency;
+            m.radio.frequency = m.net.end(after_sweep).tune_hz;
+            // Against where the radio actually was, not against whatever the
+            // first of the two handed on.
+            (m.radio.frequency != was).then_some(m.radio.frequency)
+        };
+        // Only when a scanner had moved the radio: a retune to where it
+        // already is would be one more device call during teardown for
+        // nothing. With no lock held, as everywhere else.
+        if let Some(hz) = moved {
+            let _ = self.device.set_frequency(hz);
+        }
+    }
+
     /// The state, locked. A poisoned lock is recovered, never propagated: a
     /// panic on one thread must not take every reader down with it.
     fn lock(&self) -> MutexGuard<'_, SdrMetrics> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// **Every scanner that parks the radio gives the tuner back on quit.**
+    ///
+    /// Two now do: the frequency sweep and the NET survey. Both write their
+    /// current position into `radio.frequency` because that is the field the FFT
+    /// worker stamps frames with, and `save_config` persists that field, so a
+    /// scanner missing from this function reopens the app somewhere in the
+    /// middle of its band - one position further along each time.
+    ///
+    /// Read as source text, as the structural tests elsewhere are: adding
+    /// a third scanner and forgetting this line compiles perfectly, and the
+    /// symptom shows up a week later as "the app forgot where I was tuned".
+    #[test]
+    fn every_scanner_gives_the_tuner_back_on_quit() {
+        let body = include_str!("mod.rs")
+            .split_once("pub fn hand_back_the_tuner(&self) {")
+            .expect("hand_back_the_tuner has been renamed")
+            .1
+            .split_once("\n    fn ")
+            .expect("hand_back_the_tuner no longer ends")
+            .0;
+        for scanner in ["m.sweep.end(", "m.net.end("] {
+            assert!(
+                body.contains(scanner),
+                "{scanner} is missing: quitting mid-scan will save the scan position"
+            );
+        }
     }
 }

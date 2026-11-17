@@ -155,6 +155,27 @@ async fn main() -> Result<()> {
         app_cfg.theme.base = t;
     }
 
+    // Decided before any radio is looked for: a headless run that could not
+    // run as asked says so at once.
+    let headless = if cli.headless {
+        let mut layouts = config::LayoutConfig::default_config();
+        layouts.presets.extend(app_cfg.presets.clone());
+        match engine::headless::plan(
+            cli.listen.as_deref(),
+            cli.mode.as_deref(),
+            &app_cfg.headless,
+            &layouts,
+        ) {
+            Ok(plan) => Some(plan),
+            Err(why) => {
+                eprintln!("sdrtop: {why}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     let themes_dir = config_path
         .as_deref()
         .and_then(config::AppConfig::themes_dir);
@@ -197,6 +218,20 @@ async fn main() -> Result<()> {
             )
         );
         std::process::exit(1);
+    }
+
+    if let Some(plan) = headless {
+        let labels: Vec<String> = devices.iter().map(|d| d.label.clone()).collect();
+        let chosen = match engine::headless::pick(&labels) {
+            Ok(i) => i,
+            Err(why) => {
+                eprintln!("sdrtop: {why}");
+                std::process::exit(1);
+            }
+        };
+        return engine::headless::run(app_cfg, config_path, &devices[chosen], plan)
+            .await
+            .context("Headless error");
     }
 
     enable_raw_mode()?;
@@ -365,6 +400,28 @@ mod cli_tests {
                         .all(|c| c.is_ascii_hexdigit())),
             "--version suffix {suffix:?} is not a parenthesised short commit"
         );
+    }
+
+    /// `--listen` and `--mode` say how a headless run runs, so they mean
+    /// nothing without `--headless`, and saying one alone is an error rather
+    /// than a flag quietly ignored.
+    #[test]
+    fn the_headless_flags_need_headless() {
+        use clap::Parser;
+        assert!(Cli::try_parse_from(["sdrtop", "--listen", "127.0.0.1:7373"]).is_err());
+        assert!(Cli::try_parse_from(["sdrtop", "--mode", "net_survey"]).is_err());
+        let cli = Cli::try_parse_from([
+            "sdrtop",
+            "--headless",
+            "--listen",
+            "0.0.0.0:7373",
+            "--mode",
+            "net_survey",
+        ])
+        .unwrap();
+        assert!(cli.headless);
+        assert_eq!(cli.listen.as_deref(), Some("0.0.0.0:7373"));
+        assert_eq!(cli.mode.as_deref(), Some("net_survey"));
     }
 
     /// The man page describes exactly the flags the binary has - no more, no less.

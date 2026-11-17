@@ -316,6 +316,31 @@ impl Ft8Settings {
 
 /// `[record]`: how long an IQ recording may run, whichever limit comes first.
 ///
+/// `[headless]`: how sdrtop runs with no terminal. Every field optional; a
+/// command-line flag wins over the file.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]
+pub struct HeadlessSettings {
+    /// The address the API listens on, `host:port`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen: Option<String>,
+    /// What a client off this machine must present. Required to listen
+    /// anywhere but loopback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// The view to compute for, by its layout name, e.g. `net_survey`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Where recordings and logs go; the export directory when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recordings_dir: Option<PathBuf>,
+}
+
+impl HeadlessSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// No in-app control changes these, so `App` holds the loaded block and
 /// writes it back as it was, the way it holds `[net]`.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
@@ -562,6 +587,9 @@ pub struct AppConfig {
     /// Written only once it differs from the default, as `[airspyhf]` is.
     #[serde(default, skip_serializing_if = "PlutoSkySettings::is_default")]
     pub plutosky: PlutoSkySettings,
+    /// How `sdrtop --headless` runs. Written only once something is set.
+    #[serde(default, skip_serializing_if = "HeadlessSettings::is_default")]
+    pub headless: HeadlessSettings,
     /// User-defined layout presets, merged into the built-in set at startup.
     /// A preset here with the same name as a built-in overrides it. Preserved
     /// verbatim across save so hand-written presets survive a quit.
@@ -701,7 +729,7 @@ impl AppConfig {
 /// everything it measures with. See [`AppConfig::save_blocks`].
 pub const ENGINE_BLOCKS: &[&str] = &[
     "radio", "sweep", "net", "record", "pager", "station", "ft8", "tinysa", "airspy", "airspyhf",
-    "sdrplay", "plutosky",
+    "sdrplay", "plutosky", "headless",
 ];
 
 /// The blocks the terminal writes: how it shows what is measured.
