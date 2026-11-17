@@ -19,6 +19,7 @@
 
 pub mod command;
 pub mod mode;
+pub mod start;
 pub mod testimony;
 
 use std::sync::{Arc, Mutex, MutexGuard};

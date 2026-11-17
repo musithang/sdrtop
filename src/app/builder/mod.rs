@@ -25,9 +25,7 @@ use std::time::Duration;
 use crate::config::AppConfig;
 use crate::event::EventStream;
 use crate::hardware;
-use crate::signal::{DemodWorker, FftWorker, NetWorker, PowerWorker};
 use crate::state::SdrMetrics;
-use crate::tasks;
 
 use boot::{initial_metrics, resolve_tuning, Boot};
 
@@ -161,49 +159,11 @@ impl App {
             }
         }
 
-        let (sample_tx, sample_rx) = crossbeam_channel::bounded::<Vec<u8>>(4);
-        // The demod queue is deliberately shallow: it duty-cycles to one update
-        // per 250 ms, so anything deeper would only hold blocks it will discard.
-        let (demod_tx, demod_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(2);
-        // The NET queue is deeper than the demod's and for the opposite reason.
-        // The demod duty-cycles to four updates a second, so anything deeper
-        // than two would only hold blocks it will discard. This worker is meant
-        // to see every block, and four is the same depth the FFT feed uses: a
-        // burst that spans several driver blocks survives a hiccup on the UI
-        // thread, and anything deeper starts hiding the losses rather than
-        // absorbing them.
-        let (net_tx, net_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
-        // The pager queue is the NET queue's depth for the NET queue's
-        // reason: every block is wanted, and a deeper queue would hide losses.
-        let (pager_tx, pager_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
-        // The FT8 queue is deep, for its own reason: nothing there needs a
-        // block soon, and a stall of the machine must not cost a cycle.
-        let (ft8_tx, ft8_rx) = crossbeam_channel::bounded::<crate::hardware::TimedBlock>(
-            crate::signal::ft8::worker::FEED_BLOCKS,
-        );
         // Read out before `cfg` is moved into `Self::assemble` below - a
         // plain `usize`, not worth threading the whole config through the
         // worker for.
         let bt_channels = cfg.net.bt_channels;
-        let (power_tx, power_rx) = crossbeam_channel::bounded::<hardware::PowerTrace>(4);
-        let rx_ctx = Arc::new(hardware::RxContext {
-            metrics: Arc::clone(&state),
-            sample_tx,
-            fft_feed: hardware::FeedHealth::default(),
-            demod_tx,
-            net_tx,
-            net_feed: hardware::FeedHealth::default(),
-            pager_tx,
-            pager_feed: hardware::FeedHealth::default(),
-            ft8_tx,
-            ft8_feed: hardware::FeedHealth::default(),
-            power_tx,
-            geometry,
-            stream_pairs: std::sync::atomic::AtomicU64::new(0),
-            streams_begun: std::sync::atomic::AtomicU64::new(0),
-            record: Default::default(),
-            intake: Default::default(),
-        });
+        let (rx_ctx, feeds) = crate::engine::start::feeds(&state, geometry);
 
         let app = Self::assemble(
             cfg,
@@ -214,63 +174,7 @@ impl App {
             None,
         )?;
 
-        match caps.acquisition {
-            hardware::AcquisitionKind::IqSamples => {
-                // Before any stream can start: from the first block, the
-                // driver's thread only stamps and hands over.
-                hardware::intake::spawn(&rx_ctx);
-                let fft_state = Arc::clone(&state);
-                spawn_worker("fft-worker", move || {
-                    FftWorker::new(sample_rx, fft_state, geometry).run()
-                });
-
-                let demod_state = Arc::clone(&state);
-                spawn_worker("demod-worker", move || {
-                    DemodWorker::new(demod_rx, demod_state, geometry).run()
-                });
-
-                // Spawned whether or not the gate admitted the section: with no section
-                // on screen nothing is forwarded, so the thread costs one blocked
-                // `recv`. Deciding here would mean two places that know what admits the
-                // feature, and the one that already knows is `net::gate`.
-                let net_state = Arc::clone(&state);
-                spawn_worker("net-worker", move || {
-                    NetWorker::new(net_rx, net_state, geometry, bt_channels).run()
-                });
-
-                // Spawned always, as the NET worker is: with no pager view on
-                // screen nothing is forwarded, and the thread waits on `recv`.
-                let pager_state = Arc::clone(&state);
-                spawn_worker("pager-worker", move || {
-                    crate::signal::pocsag::worker::PagerWorker::new(pager_rx, pager_state, geometry)
-                        .run()
-                });
-
-                // Spawned always, as the pager's: with no FT8 view on screen
-                // nothing is forwarded, and the thread waits on `recv`.
-                let ft8_state = Arc::clone(&state);
-                spawn_worker("ft8-worker", move || {
-                    crate::signal::ft8::worker::Ft8Worker::new(ft8_rx, ft8_state, geometry).run()
-                });
-
-                tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));
-                tasks::spawn_net_survey_task(Arc::clone(&state), Arc::clone(&device));
-            }
-            hardware::AcquisitionKind::PowerTrace => {
-                let power_state = Arc::clone(&state);
-                spawn_worker("power-worker", move || {
-                    PowerWorker::new(power_rx, power_state).run()
-                });
-                tasks::spawn_power_rx_task(
-                    Arc::clone(&state),
-                    Arc::clone(&device),
-                    Arc::clone(&rx_ctx),
-                );
-            }
-        }
-
-        tasks::spawn_sweep_task(Arc::clone(&state), Arc::clone(&device));
-        tasks::spawn_sys_resource_task(Arc::clone(&state));
+        crate::engine::start::run(&state, &device, &rx_ctx, feeds, bt_channels);
 
         Ok(app)
     }
@@ -304,8 +208,7 @@ impl App {
             None,
             Some("observer"),
         )?;
-        tasks::spawn_observer_task(Arc::clone(&state), profile);
-        tasks::spawn_sys_resource_task(Arc::clone(&state));
+        crate::engine::start::observe(&state, profile);
         Ok(app)
     }
 
@@ -416,18 +319,6 @@ impl App {
             user_presets: cfg.presets,
         })
     }
-}
-
-/// Spawns one of the long-lived DSP workers under a name, so `top -H` and btop
-/// can say which of them is spending the CPU. Linux keeps the first 15 bytes.
-/// An unnamed thread shows only the process name, and then the NET, FFT and
-/// demod workers cannot be told apart from each other or from the driver's own
-/// USB thread. Failing to spawn is as fatal here as in `std::thread::spawn`.
-fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) {
-    std::thread::Builder::new()
-        .name(name.to_string())
-        .spawn(run)
-        .unwrap_or_else(|e| panic!("cannot start the {name} thread: {e}"));
 }
 
 /// The menu in front of the first screen, if any.
