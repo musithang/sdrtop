@@ -11,6 +11,7 @@ mod cli;
 mod config;
 mod theme;
 pub use theme::Theme;
+mod engine;
 mod event;
 mod export;
 mod geo;
@@ -520,6 +521,72 @@ mod source_tests {
         assert!(
             found.is_empty(),
             "comments pointing at plans:\n{}",
+            found.join("\n")
+        );
+    }
+
+    /// What the engine may not reach for: the drawing libraries and the
+    /// modules that draw or take keys.
+    const SCREEN_PATHS: [&str; 6] = [
+        "ratatui",
+        "crossterm",
+        "crate::ui",
+        "crate::app",
+        "crate::theme",
+        "crate::palette",
+    ];
+
+    /// The lines of the code (not of its comments) under `dirs` that name a
+    /// screen path, as `file:line: text`.
+    fn screen_references(dirs: &[&str]) -> Vec<String> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        for dir in dirs {
+            walk(&root.join(dir), &mut files);
+        }
+        let mut found = Vec::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if SCREEN_PATHS.iter().any(|path| code.contains(path)) {
+                    let at = file.strip_prefix(root).unwrap_or(&file).display();
+                    found.push(format!("{at}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+        found
+    }
+
+    /// **The engine never sees the screen.** Everything that measures runs
+    /// with no terminal behind it, so a headless instance and any client
+    /// other than the TUI get exactly what the TUI gets. One crate keeps
+    /// the screen in reach of every module; this is what keeps it out of
+    /// the engine's.
+    #[test]
+    fn the_engine_never_imports_the_ui() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            root.join("src/engine/mod.rs").is_file(),
+            "the engine module was not found"
+        );
+        let found = screen_references(&["src/engine", "src/server"]);
+        assert!(
+            found.is_empty(),
+            "the engine reaches for the screen:\n{}",
             found.join("\n")
         );
     }
