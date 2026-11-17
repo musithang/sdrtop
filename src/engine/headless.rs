@@ -1,22 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! sdrtop with no terminal: the engine, a radio, and nothing drawing.
+//! What a headless run will be, decided before it starts.
 //!
 //! [`plan`] decides, on plain data, what a headless run will be (where it
 //! listens, whether that needs a token, what it computes) and refuses with the
 //! reason anything it cannot do, before a radio is touched.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
-use super::command::{Command, Reply};
-use super::events::Event;
 use super::mode::Mode;
-use super::{start, Engine};
-use crate::config::{AppConfig, HeadlessSettings, LayoutConfig, ENGINE_BLOCKS};
-use crate::hardware;
+use crate::config::{HeadlessSettings, LayoutConfig};
 
 /// The port the API listens on when none is named.
 pub const DEFAULT_PORT: u16 = 7373;
@@ -88,105 +82,6 @@ pub fn pick(labels: &[String]) -> Result<usize, String> {
             labels.len(),
             labels.join(", ")
         )),
-    }
-}
-
-/// Run headless on the radio `listing` names, as `plan` says, until SIGTERM
-/// or Ctrl-C; then stop the stream and save the engine's blocks.
-///
-/// The log goes to stderr, a line per line, where a terminal, a pipe or the
-/// journal takes it.
-pub async fn run(
-    mut cfg: AppConfig,
-    config_path: Option<PathBuf>,
-    listing: &hardware::DeviceListing,
-    plan: HeadlessPlan,
-) -> anyhow::Result<()> {
-    let device = hardware::open_device(listing, &cfg)?;
-    let observable = listing.kind.observer_profile().is_some();
-    let geometry = device.capabilities().sample_geometry;
-    let state = Arc::new(Mutex::new(start::open(&cfg, &device, observable)?));
-    let engine = Engine::new(Arc::clone(&state), Arc::clone(&device));
-
-    // What was said while the radio opened, then everything said after.
-    let log = engine.subscribe(1024);
-    for entry in engine.snapshot().log {
-        eprintln!("{}", entry.text);
-    }
-    std::thread::Builder::new()
-        .name("headless-log".into())
-        .spawn(move || {
-            while let Some(delivered) = log.next_blocking() {
-                if delivered.lost_before > 0 {
-                    eprintln!("({} log lines lost)", delivered.lost_before);
-                }
-                if let Event::Log { text, .. } = delivered.event {
-                    eprintln!("{text}");
-                }
-            }
-        })?;
-
-    let reply = engine.apply(Command::SetMode {
-        section: plan.mode.section.clone(),
-        view: plan.mode.view.clone(),
-    });
-    if let Reply::Refused { reason } = reply {
-        anyhow::bail!("{reason}");
-    }
-    // What the terminal sets from the panels on screen, set here from the
-    // plan: nothing reads the demodulator or the sweep headless yet.
-    engine.with_state(|m| {
-        m.spectrum.wanted = plan.spectrum;
-        m.demod.enabled = false;
-        m.sweep.active = false;
-        m.radio.rx_enabled = true;
-    });
-    let (rx_ctx, feeds) = start::feeds(&state, geometry);
-    start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
-    engine.with_state(|m| {
-        m.push_log(format!(
-            "Headless: computing for {}; the API will listen on {}",
-            plan.mode.view, plan.listen
-        ))
-    });
-
-    until_asked_to_stop().await;
-
-    engine.hand_back_the_tuner();
-    engine.with_state(|m| {
-        m.radio.rx_enabled = false;
-        m.push_log("Headless: stopping")
-    });
-    if let Err(e) = engine.device().stop_rx() {
-        eprintln!("stopping the stream: {e}");
-    }
-    if let Some(path) = config_path {
-        cfg.radio = super::boot::radio_block(&engine.snapshot(), &cfg.radio);
-        cfg.save_blocks(&path, ENGINE_BLOCKS)?;
-    }
-    Ok(())
-}
-
-/// Until SIGTERM (a service manager stopping it) or Ctrl-C.
-async fn until_asked_to_stop() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        match signal(SignalKind::terminate()) {
-            Ok(mut term) => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = term.recv() => {}
-                }
-            }
-            Err(_) => {
-                let _ = tokio::signal::ctrl_c().await;
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

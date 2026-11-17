@@ -365,69 +365,9 @@ fn on_off(on: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::Engine;
-    use crate::hardware::{DeviceCapabilities, DeviceInfo, RateSet, RxContext, SdrDevice};
+    use crate::engine::testing::{engine_on, Bench};
     use crate::state::SdrMetrics;
-    use std::sync::{Arc, Mutex};
-
-    /// A radio on the bench of this file: a HackRF's capabilities, every call
-    /// written down, and a gain setter that can be told to refuse.
-    struct Bench {
-        caps: DeviceCapabilities,
-        tuned: Mutex<Vec<u64>>,
-        refuse_gain: bool,
-    }
-
-    impl Bench {
-        fn new() -> Self {
-            Self {
-                caps: crate::hardware::native::hackrf::caps(),
-                tuned: Mutex::new(Vec::new()),
-                refuse_gain: false,
-            }
-        }
-    }
-
-    impl SdrDevice for Bench {
-        fn capabilities(&self) -> &DeviceCapabilities {
-            &self.caps
-        }
-        fn info(&self) -> DeviceInfo {
-            DeviceInfo::default()
-        }
-        fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn stop_rx(&self) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn is_streaming(&self) -> bool {
-            false
-        }
-        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
-            self.tuned.lock().unwrap().push(hz);
-            Ok(hz)
-        }
-        fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
-            Ok(RateSet::new(hz, None, 0))
-        }
-        fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn set_stage_gain(&self, _index: usize, _name: &str, _db: f64) -> anyhow::Result<()> {
-            if self.refuse_gain {
-                anyhow::bail!("the radio said no")
-            }
-            Ok(())
-        }
-    }
-
-    fn engine_on(bench: Bench) -> (Engine, Arc<Bench>) {
-        let device = Arc::new(bench);
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
-        let engine = Engine::new(state, Arc::clone(&device) as Arc<dyn SdrDevice>);
-        (engine, device)
-    }
+    use std::sync::Arc;
 
     /// A value off the stage's grid lands on the nearest legal one, and the
     /// answer names both: a client that asked for one figure and got another

@@ -123,6 +123,24 @@ impl Subscription {
     pub fn next_blocking(&self) -> Option<Delivered> {
         self.rx.recv().ok()
     }
+
+    /// The next event, waiting at most `at_most` for it.
+    pub fn wait(&self, at_most: std::time::Duration) -> Waited {
+        match self.rx.recv_timeout(at_most) {
+            Ok(delivered) => Waited::Event(delivered),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => Waited::Quiet,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => Waited::Gone,
+        }
+    }
+}
+
+/// What waiting for an event came to.
+pub enum Waited {
+    Event(Delivered),
+    /// Nothing happened in the time allowed.
+    Quiet,
+    /// The engine is gone; nothing more will.
+    Gone,
 }
 
 #[cfg(test)]

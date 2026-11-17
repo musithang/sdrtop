@@ -16,8 +16,10 @@ mod event;
 mod export;
 mod geo;
 mod hardware;
+mod headless;
 mod host;
 mod palette;
+mod server;
 mod signal;
 mod state;
 mod tasks;
@@ -229,7 +231,7 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         };
-        return engine::headless::run(app_cfg, config_path, &devices[chosen], plan)
+        return headless::run(app_cfg, config_path, &devices[chosen], plan)
             .await
             .context("Headless error");
     }
@@ -597,6 +599,10 @@ mod source_tests {
     /// screen path, as `file:line: text`.
     fn screen_references(dirs: &[&str]) -> Vec<String> {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            if dir.is_file() {
+                out.push(dir.to_path_buf());
+                return;
+            }
             let Ok(entries) = std::fs::read_dir(dir) else {
                 return;
             };
@@ -640,7 +646,7 @@ mod source_tests {
             root.join("src/engine/mod.rs").is_file(),
             "the engine module was not found"
         );
-        let found = screen_references(&["src/engine", "src/server"]);
+        let found = screen_references(&["src/engine", "src/server", "src/headless.rs"]);
         assert!(
             found.is_empty(),
             "the engine reaches for the screen:\n{}",

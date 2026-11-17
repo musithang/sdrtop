@@ -24,6 +24,8 @@ pub mod headless;
 pub mod mode;
 pub mod start;
 pub mod testimony;
+#[cfg(test)]
+pub(crate) mod testing;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 

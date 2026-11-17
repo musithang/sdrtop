@@ -55,6 +55,13 @@ num-complex = "0.4"
 # HackRF, RTL-SDR and SoapySDR runtimes are optional
 libloading = "0.9"
 serialport = { version = "4", default-features = false }
+# The headless API: HTTP and a WebSocket, pure Rust, on the tokio runtime
+# already here. Only the pieces used.
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json", "query", "ws"] }
+
+[dev-dependencies]
+# The API's tests drive the router in memory, with no socket.
+tower = { version = "0.5", features = ["util"] }
 
 [build-dependencies]
 # The man page is generated from the same `Parser` derive `main.rs` parses with,
