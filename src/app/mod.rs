@@ -54,8 +54,9 @@ pub struct App {
     pub(super) user_presets: HashMap<String, crate::config::PresetConfig>,
     /// The `[theme]` block exactly as it was loaded.
     ///
-    /// Kept for the same reason as `user_presets`: `save_config` rewrites the
-    /// whole file, so anything it does not carry forward is deleted. This block
+    /// Kept for the same reason as `user_presets`: `save_config` rewrites every
+    /// block it owns whole, so anything in one it does not carry forward is
+    /// deleted. This block
     /// holds the per-field colour overrides, which the app reads once at startup
     /// and never touches again - so without a copy of them there is nothing left
     /// to write back.
@@ -744,10 +745,14 @@ impl App {
         };
         let mut candidate = cfg.clone();
         let hook_error = device.update_config(&mut candidate).err();
+        // Both halves' blocks: this process runs the engine and the screen.
+        // Anything else in the file (a block a newer or older sdrtop wrote, a
+        // key added by hand) is left where it is.
+        let owned = [crate::config::ENGINE_BLOCKS, crate::config::TUI_BLOCKS].concat();
         let save_result = if hook_error.is_some() {
-            cfg.save(path)
+            cfg.save_blocks(path, &owned)
         } else {
-            candidate.save(path)
+            candidate.save_blocks(path, &owned)
         };
         match (hook_error, save_result) {
             (None, result) => result,

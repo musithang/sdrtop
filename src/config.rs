@@ -656,13 +656,38 @@ impl AppConfig {
     /// failed write never leaves half a file. A failure names the file it
     /// could not create, write or replace: "Permission denied" alone sends
     /// the reader looking in the wrong place.
-    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+    /// Write the blocks named in `owned` into the file at `path`, and keep
+    /// every other block exactly as the file has it.
+    ///
+    /// **One file, two owners.** The engine owns the radio and what it
+    /// measures with; the terminal owns how it is shown. Each writes only
+    /// its own, so a headless instance's save cannot reset the layout and
+    /// the theme, and neither half can delete the other's by not carrying it
+    /// forward. A block of `owned` that serialises to nothing (back at its
+    /// default) is removed, as a whole-file save would leave it out. A file
+    /// that is not TOML has nothing to keep and is written fresh.
+    pub fn save_blocks(&self, path: &Path, owned: &[&str]) -> anyhow::Result<()> {
         use anyhow::Context;
+        let mine: toml::Table = toml::Table::try_from(self)?;
+        let mut merged: toml::Table = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or_default();
+        for block in owned {
+            match mine.get(*block) {
+                Some(value) => {
+                    merged.insert((*block).to_string(), value.clone());
+                }
+                None => {
+                    merged.remove(*block);
+                }
+            }
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("could not create {}", parent.display()))?;
         }
-        let content = toml::to_string_pretty(self)?;
+        let content = toml::to_string_pretty(&merged)?;
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, content)
             .with_context(|| format!("could not write {}", tmp.display()))?;
@@ -671,6 +696,16 @@ impl AppConfig {
         Ok(())
     }
 }
+
+/// The blocks of the config file the engine writes: the radio and
+/// everything it measures with. See [`AppConfig::save_blocks`].
+pub const ENGINE_BLOCKS: &[&str] = &[
+    "radio", "sweep", "net", "record", "pager", "station", "ft8", "tinysa", "airspy", "airspyhf",
+    "sdrplay", "plutosky",
+];
+
+/// The blocks the terminal writes: how it shows what is measured.
+pub const TUI_BLOCKS: &[&str] = &["display", "theme", "presets"];
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -1198,7 +1233,7 @@ panels = [
         let err = format!(
             "{:#}",
             AppConfig::default()
-                .save(&blocker.join("config.toml"))
+                .save_blocks(&blocker.join("config.toml"), ENGINE_BLOCKS)
                 .unwrap_err()
         );
         assert!(err.contains(&blocker.display().to_string()), "{err}");
@@ -1209,7 +1244,7 @@ panels = [
         let err = format!(
             "{:#}",
             AppConfig::default()
-                .save(&dir.join("config.toml"))
+                .save_blocks(&dir.join("config.toml"), ENGINE_BLOCKS)
                 .unwrap_err()
         );
         assert!(err.contains("config.tmp"), "{err}");
@@ -1687,7 +1722,9 @@ panels = [
         };
         let path =
             std::env::temp_dir().join(format!("sdrtop-station-save-{}.toml", std::process::id()));
-        written.save(&path).unwrap();
+        written
+            .save_blocks(&path, &[ENGINE_BLOCKS, TUI_BLOCKS].concat())
+            .unwrap();
         let back = AppConfig::load_or_default(&path);
         let text = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -1733,7 +1770,9 @@ panels = [
         };
         let path =
             std::env::temp_dir().join(format!("sdrtop-theme-save-{}.toml", std::process::id()));
-        written.save(&path).unwrap();
+        written
+            .save_blocks(&path, &[ENGINE_BLOCKS, TUI_BLOCKS].concat())
+            .unwrap();
         let back = AppConfig::load_or_default(&path);
         let _ = std::fs::remove_file(&path);
 
@@ -1937,7 +1976,7 @@ panels = [
     }
 
     /// And a preset that carries no menu fields serialises without inventing
-    /// them. `save_config` rewrites the whole file, so without the
+    /// them. `save_config` rewrites the `[presets]` block whole, so without the
     /// `skip_serializing_if` every round-tripped `[presets.*]` block in a user's
     /// config would grow four empty keys on the next quit.
     #[test]
@@ -1955,5 +1994,143 @@ panels = [
         for key in ["section", "slot", "title", "blurb"] {
             assert!(!out.contains(key), "'{key}' should not appear in:\n{out}");
         }
+    }
+
+    /// A file of its own for one test, gone when the test is.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str, text: &str) -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("sdrtop-owners-{tag}-{}.toml", std::process::id()));
+            std::fs::write(&path, text).unwrap();
+            Self(path)
+        }
+
+        fn read(&self) -> toml::Table {
+            std::fs::read_to_string(&self.0).unwrap().parse().unwrap()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    const ON_DISK: &str = r#"
+[radio]
+frequency_hz = 100000000
+sample_rate = 10000000.0
+
+[display]
+active_preset = "net_survey"
+
+[presets.mine]
+panels = [{ name = "spectrum", position = "body" }]
+"#;
+
+    /// **The engine writes only its own blocks.** A headless instance has no
+    /// layout and no theme of its own, and saving must not replace the ones
+    /// the person at the terminal left there with its defaults.
+    #[test]
+    fn the_engine_save_keeps_the_tui_blocks() {
+        let file = Scratch::new("engine", ON_DISK);
+        let mut cfg = AppConfig::default();
+        cfg.radio.frequency_hz = 433_920_000;
+        cfg.display.active_preset = "spectrum".into();
+        cfg.save_blocks(&file.0, ENGINE_BLOCKS).unwrap();
+
+        let on_disk = file.read();
+        assert_eq!(
+            on_disk["radio"]["frequency_hz"].as_integer(),
+            Some(433_920_000),
+            "the engine's block is written"
+        );
+        assert_eq!(
+            on_disk["display"]["active_preset"].as_str(),
+            Some("net_survey"),
+            "the screen's block is the screen's"
+        );
+    }
+
+    /// A hand-written layout is a block the engine does not own, so it
+    /// survives the engine's save untouched.
+    #[test]
+    fn a_hand_edited_preset_survives_an_engine_save() {
+        let file = Scratch::new("preset", ON_DISK);
+        AppConfig::default()
+            .save_blocks(&file.0, ENGINE_BLOCKS)
+            .unwrap();
+        assert!(file.read()["presets"].get("mine").is_some());
+    }
+
+    /// And the other way round.
+    #[test]
+    fn the_tui_save_keeps_the_engine_blocks() {
+        let file = Scratch::new("tui", ON_DISK);
+        let mut cfg = AppConfig::default();
+        cfg.display.active_preset = "spectrum".into();
+        cfg.radio.frequency_hz = 1;
+        cfg.save_blocks(&file.0, TUI_BLOCKS).unwrap();
+
+        let on_disk = file.read();
+        assert_eq!(
+            on_disk["display"]["active_preset"].as_str(),
+            Some("spectrum")
+        );
+        assert_eq!(
+            on_disk["radio"]["frequency_hz"].as_integer(),
+            Some(100_000_000)
+        );
+    }
+
+    /// A block back at its default is written as absent, as a whole-file
+    /// save writes it: the owner's word on its block is the whole word.
+    #[test]
+    fn a_block_back_at_its_default_leaves_the_file() {
+        let file = Scratch::new("default", "[pager]\nnight = true\n");
+        AppConfig::default()
+            .save_blocks(&file.0, ENGINE_BLOCKS)
+            .unwrap();
+        assert!(file.read().get("pager").is_none());
+    }
+
+    /// A file that is not TOML has no blocks to keep: it is written fresh,
+    /// as a whole-file save always did, rather than refused.
+    #[test]
+    fn a_broken_file_is_written_fresh() {
+        let file = Scratch::new("broken", "this is [not toml");
+        AppConfig::default()
+            .save_blocks(&file.0, ENGINE_BLOCKS)
+            .unwrap();
+        assert!(file.read().get("radio").is_some());
+    }
+
+    /// **Every block has exactly one owner.** A block in neither list would
+    /// be written by nobody and lost from the running app's point of view; a
+    /// block in both would have two writers again. Read off the struct's
+    /// source, so a block added there and to neither list fails here.
+    #[test]
+    fn every_block_has_one_owner() {
+        let src = include_str!("config.rs");
+        let body = src
+            .split_once("pub struct AppConfig {")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        let blocks: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split_once(':').map(|(name, _)| name))
+            .collect();
+        assert!(blocks.len() > 10, "{blocks:?}");
+        for block in &blocks {
+            let owners = ENGINE_BLOCKS.contains(block) as u8 + TUI_BLOCKS.contains(block) as u8;
+            assert_eq!(owners, 1, "{block} has {owners} owners");
+        }
+        assert_eq!(blocks.len(), ENGINE_BLOCKS.len() + TUI_BLOCKS.len());
     }
 }
