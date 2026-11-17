@@ -18,6 +18,7 @@
 //! of its own is a mechanical change, whenever there is a reason for one.
 
 pub mod command;
+pub mod events;
 pub mod mode;
 pub mod start;
 pub mod testimony;
@@ -50,6 +51,12 @@ impl Engine {
     /// use is one the commands have still to absorb.
     pub fn with_state<R>(&self, f: impl FnOnce(&mut SdrMetrics) -> R) -> R {
         f(&mut self.lock())
+    }
+
+    /// A new client of the engine's events, with room for `capacity` unread.
+    #[cfg(test)]
+    pub fn subscribe(&self, capacity: usize) -> events::Subscription {
+        self.lock().events.subscribe(capacity)
     }
 
     /// The radio itself. Only for what measures the radio's own calls (the

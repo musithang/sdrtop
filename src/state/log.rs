@@ -16,7 +16,8 @@ pub const LOG_MAX_ENTRIES: usize = 100;
 /// Severity of a log line, used by the log panel to pick a status lamp + colour.
 /// Derived from the message text (see [`LogLevel::infer`]) so the ~86 existing
 /// `push_log` call sites keep working unchanged.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LogLevel {
     Info,
     Ok,
@@ -52,7 +53,8 @@ pub struct LogEntry {
 }
 
 /// Append a line, stamped now, dropping the oldest past [`LOG_MAX_ENTRIES`].
-pub fn push(log: &mut std::collections::VecDeque<LogEntry>, msg: impl Into<String>) {
+/// The line as appended.
+pub fn push(log: &mut std::collections::VecDeque<LogEntry>, msg: impl Into<String>) -> LogEntry {
     let text = msg.into();
     let level = LogLevel::infer(&text);
     let at_epoch_secs = std::time::SystemTime::now()
@@ -62,11 +64,13 @@ pub fn push(log: &mut std::collections::VecDeque<LogEntry>, msg: impl Into<Strin
     if log.len() >= LOG_MAX_ENTRIES {
         log.pop_front();
     }
-    log.push_back(LogEntry {
+    let entry = LogEntry {
         at_epoch_secs,
         level,
         text: Arc::from(text),
-    });
+    };
+    log.push_back(entry.clone());
+    entry
 }
 
 #[cfg(test)]
@@ -124,6 +128,22 @@ mod tests {
             "RX streaming stopped",
         ] {
             assert_eq!(LogLevel::infer(msg), LogLevel::Info, "{msg:?}");
+        }
+    }
+
+    /// Every log line is also an event, so a client with no log panel hears
+    /// what the log says, as it says it.
+    #[test]
+    fn a_log_line_is_an_event() {
+        let mut m = crate::state::SdrMetrics::fixture();
+        let watching = m.events.subscribe(4);
+        m.push_log("Tune error: nope");
+        match watching.try_next().expect("published").event {
+            crate::engine::events::Event::Log { level, text, .. } => {
+                assert_eq!(level, LogLevel::Error);
+                assert_eq!(text, "Tune error: nope");
+            }
+            other => panic!("{other:?}"),
         }
     }
 }

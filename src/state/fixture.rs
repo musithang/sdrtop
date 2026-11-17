@@ -122,6 +122,7 @@ impl SdrMetrics {
             sweep: SweepState::default(),
             ui: UiState::default(),
             log: std::collections::VecDeque::new(),
+            events: Arc::default(),
             mode: crate::engine::mode::Mode::idle(),
             lab: LabState::default(),
             demod: DemodState::default(),

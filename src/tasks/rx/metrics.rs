@@ -465,7 +465,7 @@ impl LossLog {
     /// Fold in a window's session totals; the line to log, when one is due.
     /// Totals that went down were cleared (`[C]`, a new session): they start
     /// the account again rather than reading as a loss.
-    pub(super) fn window(&mut self, totals: (u64, u64), now: std::time::Instant) -> Option<String> {
+    pub(super) fn window(&mut self, totals: (u64, u64), now: std::time::Instant) -> Option<Lost> {
         if let Some(seen) = self.seen {
             if totals.0 >= seen.0 && totals.1 >= seen.1 {
                 self.pending.0 += totals.0 - seen.0;
@@ -481,10 +481,36 @@ impl LossLog {
         }
         let (all, driver) = std::mem::take(&mut self.pending);
         self.said_at = Some(now);
-        Some(format!(
-            "Lost {all} samples: driver {driver} \u{00b7} sdrtop {}",
-            all.saturating_sub(driver)
-        ))
+        Some(Lost { all, driver })
+    }
+}
+
+/// Samples lost since the last account, and the driver's part of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Lost {
+    all: u64,
+    driver: u64,
+}
+
+impl Lost {
+    /// The log's line for it.
+    pub(super) fn line(self) -> String {
+        format!(
+            "Lost {} samples: driver {} \u{00b7} sdrtop {}",
+            self.all,
+            self.driver,
+            self.all.saturating_sub(self.driver)
+        )
+    }
+
+    /// The event for it, stamped `at_unix_ms`.
+    pub(super) fn event(self, at_unix_ms: u64) -> crate::engine::events::Event {
+        crate::engine::events::Event::Gap {
+            at_unix_ms,
+            samples: self.all,
+            driver: self.driver,
+            sdrtop: self.all.saturating_sub(self.driver),
+        }
     }
 }
 
@@ -589,19 +615,23 @@ mod tests {
         let mut log = LossLog::default();
         assert_eq!(log.window((0, 0), at(0)), None, "nothing to say");
         assert_eq!(
-            log.window((1000, 400), at(200)).as_deref(),
+            log.window((1000, 400), at(200))
+                .map(|l| l.line())
+                .as_deref(),
             Some("Lost 1000 samples: driver 400 \u{00b7} sdrtop 600")
         );
         assert_eq!(log.window((1500, 400), at(400)), None, "within the second");
         assert_eq!(log.window((1700, 450), at(800)), None);
         assert_eq!(
-            log.window((1700, 450), at(1200)).as_deref(),
+            log.window((1700, 450), at(1200))
+                .map(|l| l.line())
+                .as_deref(),
             Some("Lost 700 samples: driver 50 \u{00b7} sdrtop 650"),
             "what came between, gathered"
         );
         assert_eq!(log.window((0, 0), at(3000)), None, "cleared, not lost");
         assert_eq!(
-            log.window((10, 0), at(3200)).as_deref(),
+            log.window((10, 0), at(3200)).map(|l| l.line()).as_deref(),
             Some("Lost 10 samples: driver 0 \u{00b7} sdrtop 10")
         );
     }
@@ -1304,6 +1334,26 @@ mod tests {
         assert!(
             baseline_restarts((768e3, 0), (f64::NAN, 0)),
             "the first poll"
+        );
+    }
+
+    /// A loss is also an event, with the same split the line gives.
+    #[test]
+    fn a_loss_is_an_event_with_whose_it_was() {
+        let t0 = std::time::Instant::now();
+        let mut log = LossLog::default();
+        log.window((0, 0), t0);
+        let lost = log
+            .window((1000, 400), t0 + std::time::Duration::from_millis(200))
+            .unwrap();
+        assert_eq!(
+            lost.event(7),
+            crate::engine::events::Event::Gap {
+                at_unix_ms: 7,
+                samples: 1000,
+                driver: 400,
+                sdrtop: 600,
+            }
         );
     }
 }

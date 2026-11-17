@@ -68,6 +68,13 @@ pub(super) fn drain(
     let bytes = m.radio.bytes_since_last_poll;
     m.radio.bytes_since_last_poll = 0;
     m.radio.last_poll_time = now;
+    if m.radio.hw_streaming != hw_streaming {
+        // On the edge only: a client is told once that the readings stopped
+        // being live, and once that they are live again.
+        m.events.publish(crate::engine::events::Event::Stale {
+            stale: !hw_streaming,
+        });
+    }
     m.radio.hw_streaming = hw_streaming;
 
     // The live throughput figure stays per window: the MB/s readout and the flow
@@ -319,6 +326,27 @@ mod tests {
             state.lock().unwrap().net.health.last_loss,
             Some(when),
             "a clean window leaves the last loss where it was"
+        );
+    }
+
+    /// The radio going quiet and coming back are events, once each, on the
+    /// edge: a client is told when the readings stop being live without
+    /// polling for it.
+    #[test]
+    fn the_stream_stopping_and_starting_are_each_one_event() {
+        let (state, ctx, _fft_rx, _demod_rx, _net_rx) = ctx_and_state();
+        let watching = state.lock().unwrap().events.subscribe(8);
+        drain(&state, &ctx, Instant::now(), true);
+        drain(&state, &ctx, Instant::now(), true);
+        drain(&state, &ctx, Instant::now(), false);
+        drain(&state, &ctx, Instant::now(), false);
+        let seen: Vec<_> = std::iter::from_fn(|| watching.try_next())
+            .map(|d| d.event)
+            .collect();
+        use crate::engine::events::Event;
+        assert_eq!(
+            seen,
+            vec![Event::Stale { stale: false }, Event::Stale { stale: true }]
         );
     }
 }

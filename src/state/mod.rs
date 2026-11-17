@@ -135,6 +135,9 @@ pub struct SdrMetrics {
     pub ui: UiState,
     /// What happened, in words. See [`log`].
     pub log: std::collections::VecDeque<LogEntry>,
+    /// Where what happens is announced to every client. Shared, so every copy
+    /// of the state publishes to the same clients.
+    pub events: std::sync::Arc<crate::engine::events::Bus>,
     /// What the engine computes and so what it feeds, which the screen's
     /// section and layout only ask for. See [`crate::engine::mode`].
     pub mode: crate::engine::mode::Mode,
@@ -436,7 +439,12 @@ impl SdrMetrics {
     }
 
     pub fn push_log(&mut self, msg: impl Into<String>) {
-        log::push(&mut self.log, msg);
+        let entry = log::push(&mut self.log, msg);
+        self.events.publish(crate::engine::events::Event::Log {
+            at_epoch_secs: entry.at_epoch_secs,
+            level: entry.level,
+            text: entry.text.to_string(),
+        });
     }
 }
 

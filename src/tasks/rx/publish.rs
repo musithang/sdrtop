@@ -75,7 +75,7 @@ pub(super) struct Computed {
     /// `None` for any other stream, and until a stretch has been seen.
     pub relay_hold_us: Option<u64>,
     /// A loss to log, dated by the log line it becomes (`LossLog`).
-    pub loss_note: Option<String>,
+    pub loss_note: Option<super::metrics::Lost>,
     /// The baseline started again this window (the rate changed): the last
     /// figure measured belongs to the old rate and is no longer one.
     pub rate_restarted: bool,
@@ -221,8 +221,12 @@ pub(super) fn write_back(
     m.timing.jitter_session_max_us = prev_peak.max(m.timing.jitter_max_us);
     m.timing.wire_bytes_per_pair = wire_bytes_per_pair;
     m.timing.relay_hold_us = c.relay_hold_us;
-    if let Some(note) = &c.loss_note {
-        m.push_log(note.clone());
+    if let Some(lost) = c.loss_note {
+        m.push_log(lost.line());
+        let at_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        m.events.publish(lost.event(at_unix_ms));
     }
     m.radio.lo_offset_hz = device.lo_offset_hz();
     m.radio.converter_bits = device.converter_bits();

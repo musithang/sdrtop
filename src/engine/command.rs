@@ -23,7 +23,7 @@ use super::Engine;
 use crate::state::SdrMetrics;
 
 /// What can be asked of the radio. See the module comment.
-#[derive(Clone, PartialEq, Debug, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
     /// Tune to this frequency.
@@ -167,7 +167,19 @@ impl Engine {
     /// Decide, apply and answer one command. The device call is made with no
     /// lock held; the state is written only with what the radio answered.
     pub fn apply(&self, command: Command) -> Reply {
-        let planned = match plan(&self.lock(), &command) {
+        let reply = self.decide_and_apply(&command);
+        // Announced outside the state's lock: publishing never waits, but it
+        // need not do its copying while every reader of the state waits.
+        let events = std::sync::Arc::clone(&self.lock().events);
+        events.publish(super::events::Event::Applied {
+            command,
+            reply: reply.clone(),
+        });
+        reply
+    }
+
+    fn decide_and_apply(&self, command: &Command) -> Reply {
+        let planned = match plan(&self.lock(), command) {
             Ok(planned) => planned,
             Err(reason) => return Reply::Refused { reason },
         };
@@ -576,5 +588,22 @@ mod tests {
         let m = engine.snapshot();
         assert_eq!(m.radio.stage_gain(1), stage.max_db);
         assert!(!m.lab.rf_autotrack);
+    }
+
+    /// Every command is announced to every client, whoever sent it: the
+    /// person at the keys sees what a script did, and the other way round.
+    #[test]
+    fn a_command_is_announced_to_every_subscriber() {
+        let (engine, _) = engine_on(Bench::new());
+        let watching = engine.subscribe(8);
+        let reply = engine.apply(Command::Tune { hz: 100_000_000 });
+        let got = watching.try_next().expect("announced");
+        assert_eq!(
+            got.event,
+            crate::engine::events::Event::Applied {
+                command: Command::Tune { hz: 100_000_000 },
+                reply,
+            }
+        );
     }
 }
