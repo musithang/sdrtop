@@ -24,6 +24,7 @@
 pub mod chrome;
 pub mod device_selector;
 pub mod engine;
+mod golden;
 pub mod menu;
 pub mod overlay;
 pub mod panel;

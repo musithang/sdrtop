@@ -2002,4 +2002,77 @@ pub(crate) mod tests {
         let v: i64 = 0;
         assert_eq!(((v.unsigned_abs() / 4) as usize).min(31), 0);
     }
+
+    /// **What the hot path costs, measured.** Not a check: run it by hand, in
+    /// release (`cargo test --release measure_the_hot_path -- --ignored
+    /// --nocapture`), before and after a change that should cost nothing.
+    /// It prints, for each sample format, how many million I/Q pairs a second
+    /// `process_block` digests with nothing fed and with the spectrum fed,
+    /// and how many the FFT worker takes in, best of five runs each, so a
+    /// slower run of a busy machine does not read as a slower build. The NET
+    /// worker's own figure is `measure_the_receive_chain`.
+    #[test]
+    #[ignore]
+    fn measure_the_hot_path() {
+        use crate::signal::dsp::testkit::Rng;
+        const BLOCK_PAIRS: usize = 131_072;
+        const BLOCKS: usize = 300;
+        const RUNS: usize = 5;
+        let noise = Rng::new(7).noise(BLOCK_PAIRS, 0.02);
+        let geometry = |format, full_scale| SampleGeometry {
+            format,
+            full_scale,
+            converter_bits: None,
+        };
+        let cases = [
+            ("int8", geometry(SampleFormat::Int8, 128.0)),
+            ("uint8", geometry(SampleFormat::Uint8, 127.5)),
+            ("int16", geometry(SampleFormat::Int16, 32768.0)),
+        ];
+        let best = |run: &mut dyn FnMut() -> f64| (0..RUNS).map(|_| run()).fold(0.0_f64, f64::max);
+        for (name, g) in cases {
+            let block: Vec<u8> = noise
+                .iter()
+                .flat_map(|z| {
+                    let (i, q) = (z.re * g.full_scale, z.im * g.full_scale);
+                    match g.format {
+                        SampleFormat::Int8 => vec![i as i8 as u8, q as i8 as u8],
+                        SampleFormat::Uint8 => vec![(i + 127.5) as u8, (q + 127.5) as u8],
+                        _ => {
+                            let mut v = (i as i16).to_le_bytes().to_vec();
+                            v.extend((q as i16).to_le_bytes());
+                            v
+                        }
+                    }
+                })
+                .collect();
+            let pairs = (BLOCK_PAIRS * BLOCKS) as f64;
+            let digest_with = |spectrum: bool| {
+                let (ctx, sample_rx, _demod_rx, _net_rx) = rx_ctx_of(g);
+                ctx.metrics.lock().unwrap().spectrum.wanted = spectrum;
+                let start = Instant::now();
+                for _ in 0..BLOCKS {
+                    super::process_block(&block, g, 0, &ctx, Instant::now());
+                    while sample_rx.try_recv().is_ok() {}
+                }
+                pairs / start.elapsed().as_secs_f64() / 1e6
+            };
+            let bare = best(&mut || digest_with(false));
+            let fed = best(&mut || digest_with(true));
+            let fft = best(&mut || {
+                let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+                let (tx, rx) = crossbeam_channel::unbounded();
+                for _ in 0..BLOCKS {
+                    tx.send(block.clone()).unwrap();
+                }
+                drop(tx);
+                let start = Instant::now();
+                crate::signal::FftWorker::new(rx, state, g).run();
+                pairs / start.elapsed().as_secs_f64() / 1e6
+            });
+            eprintln!(
+                "{name:<6} digest {bare:>8.1} Msps   digest+spectrum {fed:>8.1} Msps   fft worker {fft:>8.1} Msps"
+            );
+        }
+    }
 }
