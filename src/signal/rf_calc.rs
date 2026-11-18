@@ -2,8 +2,10 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Shared RF-chain calculations: cascade noise figure, minimum detectable
-//! signal, gain-staging advice, and ADC utilisation. Used by both the `rf_chain`
-//! lab panel and the `micro_gain` field view so the numbers stay identical.
+//! signal, gain-staging advice, and ADC utilisation. One place for all of
+//! them, so the numbers stay identical wherever they appear: the `rf_chain`
+//! lab panel and the `micro_gain` field view draw them, the auto-gain tracker
+//! in the rx task steers by them, and the state's headroom figure is one.
 
 use crate::hardware::StageSpec;
 

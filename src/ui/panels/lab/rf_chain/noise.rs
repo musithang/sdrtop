@@ -12,9 +12,9 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::signal::rf_calc::{estimate_mds_dbm, Stage};
 use crate::state::SdrMetrics;
 use crate::ui::chrome::section;
-use crate::ui::rf_calc::{estimate_mds_dbm, Stage};
 use crate::ui::widgets::micro_common::spark_minmax;
 
 use super::super::rf_bench::{bar_row, bar_width, row, Bar, Row};

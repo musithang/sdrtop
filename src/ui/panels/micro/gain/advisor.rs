@@ -14,8 +14,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::rf_calc::gain_advice;
 use crate::state::SdrMetrics;
-use crate::ui::rf_calc::gain_advice;
 
 use super::super::field::Field;
 

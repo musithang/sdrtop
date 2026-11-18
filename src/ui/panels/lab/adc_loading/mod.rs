@@ -28,9 +28,9 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::rf_calc::{adc_loading, staging_verdict_for};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
-use crate::ui::rf_calc::{adc_loading, staging_verdict_for};
 
 use super::rf_bench::severity_color;
 

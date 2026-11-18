@@ -201,7 +201,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             // From a peak at the ceiling the level is unknown, and the chain
             // goes to its least gain instead; the log says so.
             let (targets, known) =
-                crate::ui::rf_calc::auto_gain_target(peak, &gm, curve, &current, hz);
+                crate::signal::rf_calc::auto_gain_target(peak, &gm, curve, &current, hz);
             // Judged on the **total**, not on the arrangement. Auto-gain is
             // about where the converter sits; how that total is spread is the
             // knob's business. Comparing per stage would make a hand-set chain
@@ -243,7 +243,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                             // The target as the radio's own: 8 dB under its
                             // ceiling, -11 dBFS on an R2 whose tuner clips at
                             // -3.
-                            let target = m.ceiling_dbfs() + crate::ui::rf_calc::OPT_PEAK_DBFS;
+                            let target = m.ceiling_dbfs() + crate::signal::rf_calc::OPT_PEAK_DBFS;
                             if known {
                                 m.push_log(format!(
                                     "Auto-gain \u{2192} {step}{} dB (signal \u{2192} \u{2212}{:.0} dBFS)",

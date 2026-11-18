@@ -16,8 +16,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::rf_calc::{estimate_mds_dbm, estimate_nf_db};
 use crate::state::SdrMetrics;
-use crate::ui::rf_calc::{estimate_mds_dbm, estimate_nf_db};
 
 use super::super::field::Field;
 use super::READOUT_W;

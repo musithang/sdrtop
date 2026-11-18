@@ -13,8 +13,8 @@ use ratatui::{
 };
 
 use crate::hardware::{StageReading, StageSpec};
+use crate::signal::rf_calc::{Stage, StageLevel};
 use crate::ui::chrome::section;
-use crate::ui::rf_calc::{Stage, StageLevel};
 
 use super::super::rf_bench::{bar_row, bar_width, row, Bar, Row};
 use super::{LABEL_W, VALW};

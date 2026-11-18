@@ -12,8 +12,8 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::signal::rf_calc::{linearity, AdcLoading};
 use crate::ui::chrome::section;
-use crate::ui::rf_calc::{linearity, AdcLoading};
 
 use super::super::rf_bench::{row, Row};
 
@@ -104,7 +104,7 @@ pub(super) fn loading(
     // Between the two figures as shown, rounded as `{:.0}` rounds them, so
     // -3 and a peak printed as -10 are 7 dB apart on screen as well, never 8.
     // `+ 0.0` turns a peak exactly at the ceiling into 0 dB, not -0 dB.
-    let headroom = crate::ui::rf_calc::shown_headroom_db(ceiling, load.peak_dbfs);
+    let headroom = crate::signal::rf_calc::shown_headroom_db(ceiling, load.peak_dbfs);
     let whose = match part {
         Some(c) => format!("the {}'s {}", c.part, c.kind.noun()),
         None => "full scale".to_string(),

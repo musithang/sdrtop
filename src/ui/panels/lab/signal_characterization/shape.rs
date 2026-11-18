@@ -75,7 +75,7 @@ pub(super) fn lines(
     // for a constant envelope, more for anything peaky. Not a PAPR, which is
     // the complex envelope's and reads 0 dB for the same carrier.
     let n: u64 = state.iq.adc_band_hist.iter().sum();
-    let load = crate::ui::rf_calc::adc_loading(
+    let load = crate::signal::rf_calc::adc_loading(
         sig.adc_peak_dbfs as f64,
         sig.adc_rms_dbfs as f64,
         sig.adc_clip_events,

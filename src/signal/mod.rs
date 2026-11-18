@@ -29,6 +29,7 @@ pub mod rds;
 pub mod rds_demod;
 pub mod reference;
 pub mod retune;
+pub mod rf_calc;
 mod stats;
 pub mod stream;
 pub mod wifi;

@@ -30,10 +30,10 @@
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::say;
+use crate::signal::rf_calc::staging_verdict_for;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::{put, signed};
-use crate::ui::rf_calc::staging_verdict_for;
 
 pub struct Ft8RadioPanel;
 

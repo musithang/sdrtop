@@ -197,7 +197,7 @@ pub(super) fn track_gain(
     // From a peak at the ceiling the level is unknown: the least gain, and
     // the next poll, back under it, tracks from a figure that means something.
     let (targets, _) =
-        crate::ui::rf_calc::auto_gain_target(adc_peak_dbfs as f64, &gm, curve, &current, hz);
+        crate::signal::rf_calc::auto_gain_target(adc_peak_dbfs as f64, &gm, curve, &current, hz);
     // The total, not the arrangement: see the note in `input/bench.rs`.
     let now_total = crate::hardware::gain::total_db(&stages, &current, hz);
     let want_total = crate::hardware::gain::total_db(&stages, &targets, hz);
@@ -431,7 +431,7 @@ mod tests {
         assert!(!AUTOGAIN_COMFORT_DBFS.contains(&-3.9));
         // The window brackets the staging target, or auto-gain would chase its
         // own tail: settle at the target, find it out of window, move again.
-        let opt = crate::ui::rf_calc::OPT_PEAK_DBFS as f32;
+        let opt = crate::signal::rf_calc::OPT_PEAK_DBFS as f32;
         assert!(
             AUTOGAIN_COMFORT_DBFS.contains(&opt),
             "the optimum {opt} dBFS must be inside the comfort window"

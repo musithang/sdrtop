@@ -14,8 +14,9 @@
 //!   compress to any terminal height.
 //! - [`widgets`]: drawing primitives with no opinion about layout.
 //! - [`panels`]: the panels, grouped `core` / `lab` / `micro`.
-//! - [`rf_calc`]: radio maths used by several panels, kept out of every one of
-//!   their `render` bodies.
+//! - The radio maths several panels share (cascade noise figure, staging,
+//!   ADC loading) is `signal::rf_calc`, because the engine's auto-gain tracker
+//!   and the state's headroom figure use it too.
 //! - [`overlay`], [`device_selector`]: full-screen UI that is not a panel.
 //!
 //! Panel structs are re-exported flat below, so `app::builder` registers them by
@@ -30,7 +31,6 @@ pub mod overlay;
 pub mod panel;
 pub mod panels;
 pub mod registry;
-pub mod rf_calc;
 pub mod widgets;
 
 pub use engine::LayoutEngine;

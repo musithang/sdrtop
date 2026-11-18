@@ -217,7 +217,7 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
     let lbl = Style::default().fg(theme.label);
     // As every other panel shows it, so the figure equals the difference of
     // the two levels printed beside it.
-    let headroom = crate::ui::rf_calc::shown_headroom_db(v.ceiling, v.adc_peak);
+    let headroom = crate::signal::rf_calc::shown_headroom_db(v.ceiling, v.adc_peak);
 
     let title_mark = if v.sev == 0 {
         "\u{2713}"
@@ -322,7 +322,7 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::rf_calc::staging_verdict_for;
+    use crate::signal::rf_calc::staging_verdict_for;
 
     #[test]
     fn every_verdict_staging_verdict_can_return_has_its_own_copy() {

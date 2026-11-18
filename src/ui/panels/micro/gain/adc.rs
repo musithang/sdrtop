@@ -15,8 +15,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::rf_calc::adc_utilisation_ratio;
 use crate::state::SdrMetrics;
-use crate::ui::rf_calc::adc_utilisation_ratio;
 use crate::ui::widgets::charts::draw_hbar;
 use crate::ui::widgets::micro_common::sat_color;
 

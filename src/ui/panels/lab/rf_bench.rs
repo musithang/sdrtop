@@ -6,7 +6,7 @@
 //! `adc_loading` and `rf_chain` are one instrument split across two panels - the
 //! same gain staging, read from the ADC's end and from the antenna's end - so
 //! their rows have to line up and grade the same. They already share the maths in
-//! [`rf_calc`](crate::ui::rf_calc); this is the drawing half of that.
+//! [`rf_calc`](crate::signal::rf_calc); this is the drawing half of that.
 //!
 //! Both panels also carried their own private copy of the section nameplate,
 //! character for character identical to [`chrome::section`](crate::ui::chrome::section),
@@ -21,7 +21,7 @@ use ratatui::{
 
 use crate::ui::widgets::charts::gain_bar_colored;
 
-/// Colour for a [`staging_verdict`](crate::ui::rf_calc::staging_verdict) severity.
+/// Colour for a [`staging_verdict`](crate::signal::rf_calc::staging_verdict) severity.
 ///
 /// Both panels print the same verdict from the same measured peak, so they must
 /// grade it the same colour: a peak that reads red on one column and amber on the

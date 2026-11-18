@@ -251,7 +251,10 @@ impl SdrMetrics {
     /// rounded as they are printed, then subtracted, so the figure always
     /// equals the difference of the two figures beside it.
     pub fn shown_headroom_db(&self) -> f64 {
-        crate::ui::rf_calc::shown_headroom_db(self.ceiling_dbfs(), self.signal.adc_peak_dbfs as f64)
+        crate::signal::rf_calc::shown_headroom_db(
+            self.ceiling_dbfs(),
+            self.signal.adc_peak_dbfs as f64,
+        )
     }
 
     /// The part that stops the samples before the converter, when there is

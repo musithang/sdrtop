@@ -22,9 +22,9 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
 use crate::state::{SdrMetrics, SpectrumMarker};
 use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
-use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
 
 /// The banner's name for a lab preset. `None` for any non-lab preset, so the
 /// chrome bars no-op if they ever render outside a lab.

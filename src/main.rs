@@ -661,12 +661,10 @@ mod source_tests {
     /// the crate boundary holds the line instead.
     const MONAS_CODE_NAMES_THE_SCREEN: &[(&str, &str)] = &[
         ("src/signal/fft/worker.rs", "crate::ui"),
-        ("src/state/mod.rs", "crate::ui"),
         ("src/state/net/mod.rs", "crate::ui"),
         ("src/state/pager.rs", "crate::theme"),
         ("src/state/ui.rs", "crate::event"),
         ("src/state/waterfall.rs", "crate::palette"),
-        ("src/tasks/rx/control.rs", "crate::ui"),
     ];
 
     /// The same for test code on the Monas side, which may draw a panel to
@@ -681,7 +679,6 @@ mod source_tests {
         ("src/state/fixture.rs", "crate::ui"),
         ("src/state/fixture.rs", "ratatui"),
         ("src/state/pager.rs", "crate::theme"),
-        ("src/tasks/rx/control.rs", "crate::ui"),
     ];
 
     /// The same for doc links, which would point across the boundary.

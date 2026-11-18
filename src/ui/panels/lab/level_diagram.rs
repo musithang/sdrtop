@@ -32,9 +32,9 @@ use ratatui::{
 };
 
 use crate::hardware::StageReading;
+use crate::signal::rf_calc::{cascade, level_lineup, signal_lineup, Stage};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
-use crate::ui::rf_calc::{cascade, level_lineup, signal_lineup, Stage};
 
 pub struct LevelDiagramPanel;
 
@@ -510,7 +510,7 @@ fn diagram(
             }
         }
     };
-    let headroom = crate::ui::rf_calc::shown_headroom_db(ceiling, c.adc_peak);
+    let headroom = crate::signal::rf_calc::shown_headroom_db(ceiling, c.adc_peak);
     span(
         &mut g,
         ceil_row,
