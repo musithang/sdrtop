@@ -165,7 +165,7 @@ impl Panel for NetBtHopsPanel {
         PanelChrome::new("Classic _Bluetooth Hops")
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .tag_if(
                 true,
                 Tag::TimeWindow {

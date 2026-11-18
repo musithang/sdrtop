@@ -537,7 +537,7 @@ impl Panel for NetBtPiconetsPanel {
             // The TIMING block's clock error is an offset like a BLE one,
             // and worth what the reference makes it.
             .shows_offsets()
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .tag_if(
                 true,
                 Tag::Sorted(state.net.bt_sort.key(), state.net.bt_sort.descending),

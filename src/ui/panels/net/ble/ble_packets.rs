@@ -466,7 +466,7 @@ impl Panel for NetBlePacketsPanel {
             let view = &state.net.coded_view;
             return PanelChrome::new("LE Coded Ad_vertising")
                 .stale_when(Staleness::NotStreaming)
-                .tag_if(true, state.net.mode.tag())
+                .tag_if(true, state.net.mode.into())
                 .tag_if(true, Tag::Listening("LE CODED"))
                 .counts_from_feed(FeedSpan::Session)
                 .shows_offsets()
@@ -476,7 +476,7 @@ impl Panel for NetBlePacketsPanel {
         }
         PanelChrome::new("BLE Ad_vertising")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .tag_if(true, Tag::Phy(state.net.ble_phy))
             // The per-channel packet counts run for the session; a dropped
             // block is packets this feed never saw.

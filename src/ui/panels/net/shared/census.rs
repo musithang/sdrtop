@@ -717,7 +717,7 @@ impl Panel for NetCensusPanel {
             .counts_from_feed(FeedSpan::Session)
             .shows_offsets()
             .shows_addresses()
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .tag_if(
                 true,
                 Tag::Sorted(SORT_KEYS.get(c.sort).copied().unwrap_or("?"), c.descending),

@@ -260,7 +260,7 @@ impl Panel for NetCodedDetailPanel {
         // dropped block is packets this feed never saw.
         let mut chrome = PanelChrome::new("Packet Detail")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .tag_if(true, Tag::Listening("LE CODED"))
             .counts_from_feed(FeedSpan::Session);
         if let Some(Ok(p)) = subject(state) {

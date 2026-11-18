@@ -986,7 +986,7 @@ impl Panel for NetBleDetailPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let mut chrome = PanelChrome::new("Packet Detail")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .tag_if(true, crate::ui::panel::Tag::Phy(state.net.ble_phy));
         // The declarations follow what the view prints: a packet carries a
         // ppm and addresses, the error curve carries neither, except that a

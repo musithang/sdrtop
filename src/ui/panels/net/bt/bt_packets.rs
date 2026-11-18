@@ -516,7 +516,7 @@ impl Panel for NetBtPacketsPanel {
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
             .shows_offsets()
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             // The side counts run for the session.
             .counts_from_feed(FeedSpan::Session);
         let Some(p) = selected(state) else {

@@ -468,7 +468,7 @@ impl Panel for NetWifiFramesPanel {
         let scope = &state.net.wifi.scope;
         let mut chrome = PanelChrome::new("Fram_es")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .counts_from_feed(FeedSpan::Session);
         let Some(c) = capture(state) else {
             return chrome;

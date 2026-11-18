@@ -264,7 +264,7 @@ impl Panel for NetWifiSharePanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Share of the time")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .counts_from_feed(FeedSpan::Session)
     }
 

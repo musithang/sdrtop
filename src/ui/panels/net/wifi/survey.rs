@@ -255,7 +255,7 @@ impl Panel for NetWifiSurveyPanel {
         };
         let mut chrome = PanelChrome::new("S_urvey")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .counts_from_feed(FeedSpan::Session);
         chrome.suffix = Some(format!("{place} · {visits} visits{pass}"));
         chrome

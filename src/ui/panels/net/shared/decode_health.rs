@@ -503,7 +503,7 @@ impl Panel for NetDecodeHealthPanel {
         // panel only declares which rule it lives under.
         PanelChrome::new("Feed Health")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
     }
 
     fn render(

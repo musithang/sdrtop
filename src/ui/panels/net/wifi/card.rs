@@ -669,7 +669,7 @@ impl Panel for NetWifiCardPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let chrome = PanelChrome::new("Frames a second")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .counts_from_feed(FeedSpan::Session);
         let view = &state.net.wifi.frames_view;
         // Only while the selected frame's fields are on it: not in place of

@@ -131,6 +131,24 @@ pub enum Tag {
     Addresses(crate::state::AddressDisplay),
 }
 
+/// The chrome tag every NET panel carries for the mode its numbers were
+/// gathered in.
+///
+/// A panel says *which claim its numbers are*, and the engine spells and
+/// colours it, which is the rule for every tag. The mode is part of the
+/// reading, so this is not optional for a panel there, and
+/// `every_net_panel_says_how_its_numbers_were_gathered` is what makes that
+/// true rather than customary. The mode is the engine's; this spelling of it
+/// is the screen's.
+impl From<crate::state::NetMode> for Tag {
+    fn from(mode: crate::state::NetMode) -> Self {
+        match mode {
+            crate::state::NetMode::Survey => Tag::Survey,
+            crate::state::NetMode::Lock => Tag::Lock,
+        }
+    }
+}
+
 /// The *shape* of a panel's frame. Its colour is [`FrameTone`]; the two are
 /// separate because the same shape appears in several palettes and pairing them
 /// into one enum multiplied out into special cases.
@@ -483,6 +501,15 @@ pub trait Panel: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The NET mode is part of every reading in the section, and the tag that
+    /// says so is the screen's way of spelling the mode.
+    #[test]
+    fn a_net_mode_becomes_its_tag() {
+        use crate::state::NetMode;
+        assert_eq!(Tag::from(NetMode::Survey), Tag::Survey);
+        assert_eq!(Tag::from(NetMode::Lock), Tag::Lock);
+    }
 
     struct DummyPanel;
 

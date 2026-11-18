@@ -805,7 +805,7 @@ impl Panel for NetBtBenchPanel {
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
             .shows_offsets()
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             // The sides' readings and counts run for the session.
             .counts_from_feed(FeedSpan::Session);
         match selected(state) {

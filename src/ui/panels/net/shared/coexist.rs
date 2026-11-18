@@ -221,7 +221,7 @@ impl Panel for NetCoexistPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Coexistence")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             // The canvas holds the band's last HISTORY_COLUMNS moments, one
             // every COLUMN_INTERVAL: a drop inside that stretch thins a moment.
             .counts_from_feed(FeedSpan::Window(

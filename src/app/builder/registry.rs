@@ -487,20 +487,22 @@ mod tests {
                 let chrome = panel.chrome(&m);
                 if chrome.staleness == Staleness::Never {
                     assert!(
-                        !chrome.tags.contains(&mode.tag()),
+                        !chrome.tags.contains(&crate::ui::panel::Tag::from(mode)),
                         "{}: a panel with nothing that ages has no mode to report",
                         panel.name()
                     );
                     continue;
                 }
                 assert!(
-                    chrome.tags.contains(&mode.tag()),
+                    chrome.tags.contains(&crate::ui::panel::Tag::from(mode)),
                     "{} carries readings but does not say it is in {}",
                     panel.name(),
                     mode.label()
                 );
                 assert!(
-                    !chrome.tags.contains(&mode.toggled().tag()),
+                    !chrome
+                        .tags
+                        .contains(&crate::ui::panel::Tag::from(mode.toggled())),
                     "{} claims both modes at once",
                     panel.name()
                 );

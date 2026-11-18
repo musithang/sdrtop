@@ -76,20 +76,6 @@ impl NetMode {
         }
     }
 
-    /// The chrome tag every panel in the section carries.
-    ///
-    /// A panel says *which claim its numbers are*, and the engine spells and
-    /// colours it, which is the rule for every tag. The mode is part of the
-    /// reading, so this is not optional for a panel here and
-    /// `every_net_panel_says_how_its_numbers_were_gathered` is what makes that
-    /// true rather than customary.
-    pub fn tag(self) -> crate::ui::panel::Tag {
-        match self {
-            NetMode::Survey => crate::ui::panel::Tag::Survey,
-            NetMode::Lock => crate::ui::panel::Tag::Lock,
-        }
-    }
-
     pub fn toggled(self) -> Self {
         match self {
             NetMode::Survey => NetMode::Lock,

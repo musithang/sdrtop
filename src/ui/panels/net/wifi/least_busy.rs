@@ -359,7 +359,7 @@ impl Panel for NetWifiLeastBusyPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Least busy")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .counts_from_feed(FeedSpan::Session)
     }
 

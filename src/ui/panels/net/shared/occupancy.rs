@@ -636,7 +636,7 @@ impl Panel for NetOccupancyPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let chrome = PanelChrome::new("Band Occupancy")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag());
+            .tag_if(true, state.net.mode.into());
         // The bars are the latest reading of each cell, so what they span is
         // back to the oldest of those readings: a whole pass while surveying,
         // moments while locked. No measured cell, no numbers, nothing to caveat.

@@ -497,7 +497,7 @@ impl Panel for NetBleConnectionPanel {
         // The events are the session's, counted from the feed.
         let chrome = PanelChrome::new("Connection")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.into())
             .counts_from_feed(FeedSpan::Session);
         let Some(f) = selected(state) else {
             return chrome;
