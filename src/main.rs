@@ -654,6 +654,182 @@ mod source_tests {
         );
     }
 
+    /// Where the Monas side still names the screen in its production code:
+    /// each a file and the screen path it names. **This list only shrinks.**
+    /// An entry goes when its coupling is fixed, and the test fails until it
+    /// does; a coupling not on it fails the test at once. When it is empty
+    /// the crate boundary holds the line instead.
+    const MONAS_CODE_NAMES_THE_SCREEN: &[(&str, &str)] = &[
+        ("src/signal/fft/worker.rs", "crate::ui"),
+        ("src/state/mod.rs", "crate::ui"),
+        ("src/state/net/mod.rs", "crate::ui"),
+        ("src/state/pager.rs", "crate::theme"),
+        ("src/state/ui.rs", "crate::event"),
+        ("src/state/waterfall.rs", "crate::palette"),
+        ("src/tasks/rx/control.rs", "crate::ui"),
+    ];
+
+    /// The same for test code on the Monas side, which may draw a panel to
+    /// check what a state looks like. These move to the terminal's side with
+    /// the panels when the source becomes crates.
+    const MONAS_TESTS_NAME_THE_SCREEN: &[(&str, &str)] = &[
+        ("src/export/census.rs", "crate::ui"),
+        ("src/export/ft8.rs", "crate::ui"),
+        ("src/export/occupancy.rs", "crate::ui"),
+        ("src/state/fixture.rs", "crate::Theme"),
+        ("src/state/fixture.rs", "crate::palette"),
+        ("src/state/fixture.rs", "crate::ui"),
+        ("src/state/fixture.rs", "ratatui"),
+        ("src/state/pager.rs", "crate::theme"),
+        ("src/tasks/rx/control.rs", "crate::ui"),
+    ];
+
+    /// The same for doc links, which would point across the boundary.
+    const MONAS_DOCS_LINK_THE_SCREEN: &[(&str, &str)] = &[
+        ("src/signal/net/occupancy.rs", "ui"),
+        ("src/state/net/classic.rs", "ui"),
+    ];
+
+    /// **The Monas side names the screen only where it is known to.** The
+    /// engine's own modules are held strictly by
+    /// [`the_engine_never_imports_the_ui`]; the rest of what measures (the
+    /// signal chain, the radio, the tasks, the state, the exports, the map)
+    /// is held to the three lists above, which only shrink.
+    #[test]
+    fn the_monas_side_names_the_screen_only_where_listed() {
+        use std::collections::BTreeSet;
+        const SCREEN: [&str; 8] = [
+            "ratatui",
+            "crossterm",
+            "crate::ui",
+            "crate::app",
+            "crate::theme",
+            "crate::palette",
+            "crate::event",
+            "crate::Theme",
+        ];
+        // What a doc link may start with to point at the screen, with or
+        // without `crate::`.
+        const SCREEN_MODULES: [&str; 5] = ["ui", "app", "theme", "palette", "event"];
+        fn walk(path: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            if path.is_file() {
+                out.push(path.to_path_buf());
+                return;
+            }
+            for entry in std::fs::read_dir(path).unwrap() {
+                let p = entry.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|e| e == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        for dir in [
+            "src/signal",
+            "src/hardware",
+            "src/tasks",
+            "src/state",
+            "src/export",
+            "src/geo",
+            "src/host.rs",
+        ] {
+            walk(&root.join(dir), &mut files);
+        }
+        assert!(files.len() > 100, "the source tree was not found");
+        // A file a `mod.rs` declares under `#[cfg(test)]` is test code from
+        // its first line.
+        let mut test_files = BTreeSet::new();
+        for file in &files {
+            let text = std::fs::read_to_string(file).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            for (n, line) in lines.iter().enumerate() {
+                if line.trim() != "#[cfg(test)]" {
+                    continue;
+                }
+                let Some(decl) = lines.get(n + 1).map(|l| l.trim()) else {
+                    continue;
+                };
+                let Some(name) = decl
+                    .strip_suffix(';')
+                    .and_then(|d| d.rsplit_once("mod "))
+                    .map(|(_, name)| name)
+                else {
+                    continue;
+                };
+                let dir = file.parent().unwrap();
+                let here = if file.file_name().is_some_and(|f| f == "mod.rs") {
+                    dir.to_path_buf()
+                } else {
+                    dir.join(file.file_stem().unwrap())
+                };
+                test_files.insert(here.join(format!("{name}.rs")));
+                test_files.insert(here.join(name).join("mod.rs"));
+            }
+        }
+        let (mut code, mut tests, mut docs) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        for file in &files {
+            let at = file.strip_prefix(root).unwrap().display().to_string();
+            let text = std::fs::read_to_string(file).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            let mut in_tests = test_files.contains(file);
+            for (n, line) in lines.iter().enumerate() {
+                if line.trim() == "#[cfg(test)]"
+                    && lines
+                        .get(n + 1)
+                        .is_some_and(|next| next.contains("mod ") && next.ends_with('{'))
+                {
+                    in_tests = true;
+                }
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("///") || trimmed.starts_with("//!") {
+                    for module in SCREEN_MODULES {
+                        for form in [
+                            format!("[`{module}::"),
+                            format!("[`crate::{module}::"),
+                            format!("](crate::{module}::"),
+                            format!("]({module}::"),
+                        ] {
+                            if line.contains(&form) {
+                                docs.insert((at.clone(), module.to_string()));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                let code_part = line.split("//").next().unwrap_or("");
+                for path in SCREEN {
+                    if code_part.contains(path) {
+                        let into = if in_tests { &mut tests } else { &mut code };
+                        into.insert((at.clone(), path.to_string()));
+                    }
+                }
+            }
+        }
+        let mut problems = Vec::new();
+        for (what, found, listed) in [
+            ("code", &code, MONAS_CODE_NAMES_THE_SCREEN),
+            ("tests", &tests, MONAS_TESTS_NAME_THE_SCREEN),
+            ("doc links", &docs, MONAS_DOCS_LINK_THE_SCREEN),
+        ] {
+            let listed: BTreeSet<(String, String)> = listed
+                .iter()
+                .map(|(f, p)| (f.to_string(), p.to_string()))
+                .collect();
+            for (file, path) in found.difference(&listed) {
+                problems.push(format!("{what}: {file} names {path}, and is not listed"));
+            }
+            for (file, path) in listed.difference(found) {
+                problems.push(format!(
+                    "{what}: {file} no longer names {path}: take it off the list"
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
     /// **What the engine computes is the engine's to decide.** The screen's
     /// own state (its section, its layout, its focus) is a mirror the
     /// terminal keeps, and a headless instance has no terminal to keep it,
