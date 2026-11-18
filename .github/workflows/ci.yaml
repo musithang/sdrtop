@@ -76,11 +76,18 @@ jobs:
         # Keep coverage with the native runtime libraries and libSoapySDR installed.
         # The rtl-sdr runtime is `librtlsdr2` on Ubuntu 24.04 and `librtlsdr0`
         # (Debian's name) on 26.04, which `ubuntu-latest` became in November
-        # 2026; whichever this runner's index has, as packaging/install.sh does.
+        # 2026; whichever this runner's index can install.
+        #
+        # Asked by its candidate, not by `apt-cache show`: on 26.04 the index
+        # still knows `librtlsdr2` as the name `librtlsdr0` replaces, and
+        # `show` of a name with no version prints nothing and exits 0, so the
+        # step kept `librtlsdr2` and the install failed on it.
         run: |
           sudo apt-get update
+          candidate() { apt-cache policy "$1" | sed -n 's/^ *Candidate: //p'; }
           rtl=librtlsdr2
-          apt-cache show librtlsdr2 >/dev/null 2>&1 || rtl=librtlsdr0
+          case "$(candidate librtlsdr2)" in ''|'(none)') rtl=librtlsdr0 ;; esac
+          echo "rtl-sdr runtime: $rtl"
           sudo apt-get install -y libhackrf0 "$rtl" libairspy0 libairspyhf1 libsoapysdr0.8 soapysdr0.8-module-rtlsdr soapysdr0.8-module-hackrf
 
       - name: Install Rust
