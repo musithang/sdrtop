@@ -130,8 +130,9 @@ pub const TAIL_LIMIT: f64 = 2.409_420_839_653_209;
 /// and a half times finer than its own uncertainty. Reaching a tenth honestly
 /// needs a quarter of a million windows, which is one and a half seconds of
 /// observation per cell and ten seconds a pass while surveying: too slow to
-/// watch. Nothing said so until [`crate::ui::widgets::reading::Reading`] was
-/// asked to print the number and refused, which is what that widget is for.
+/// watch. Nothing said so until the reading was written down at its own
+/// uncertainty ([`Uncertain::written`](crate::signal::dsp::uncertainty::Uncertain::written))
+/// and the value dashed, which is what that rule is for.
 pub const DUTY_RESOLUTION: f64 = 0.01;
 
 /// So the detector is allowed to be wrong an order of magnitude less often than

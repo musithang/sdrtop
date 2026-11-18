@@ -187,8 +187,8 @@ impl HopView {
 /// PDUs.
 pub const BT_HOP_LIMIT: usize = 500;
 
-/// One classic Bluetooth access-code hit, as [`ui::panels::net::bt_hops::
-/// NetBtHopsPanel`] plots it: which channel found it, the LAP the access
+/// One classic Bluetooth access-code hit, as the hops panel (`net_bt_hops`)
+/// plots it: which channel found it, the LAP the access
 /// code carries (free at detection time - see
 /// `signal::bt::access_code::find_access_code`'s own doc), and when.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -674,10 +674,7 @@ mod source_tests {
     ];
 
     /// The same for doc links, which would point across the boundary.
-    const MONAS_DOCS_LINK_THE_SCREEN: &[(&str, &str)] = &[
-        ("src/signal/net/occupancy.rs", "ui"),
-        ("src/state/net/classic.rs", "ui"),
-    ];
+    const MONAS_DOCS_LINK_THE_SCREEN: &[(&str, &str)] = &[];
 
     /// **The Monas side names the screen only where it is known to.** The
     /// engine's own modules are held strictly by
