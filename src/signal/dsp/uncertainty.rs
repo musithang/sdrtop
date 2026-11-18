@@ -277,6 +277,67 @@ impl Uncertain {
     }
 }
 
+/// A measurement written down: the value and its uncertainty as text, each at
+/// the one number of places the uncertainty gives them. See
+/// [`Uncertain::written`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Written {
+    /// The value, or `None` where it cannot be supported and must dash.
+    pub value: Option<String>,
+    /// The uncertainty without its `±`, or `None` for an exact value, whose
+    /// uncertainty is nothing to write, and an unknown one, whose is nothing
+    /// that can be read ("±inf").
+    pub sigma: Option<String>,
+}
+
+impl Uncertain {
+    /// The value and the uncertainty as text, at the places the uncertainty
+    /// gives them. **The digits follow the uncertainty**: `-3.2183 ±0.4` is
+    /// four digits of noise, so it is written `-3.2 ±0.4`. A value the
+    /// uncertainty cannot support at `resolution` (the smallest difference
+    /// that matters for this reading, see [`Uncertain::is_resolved`]) is
+    /// `None`, and its uncertainty is still written: "I cannot tell you this
+    /// yet, and here is how badly" is POLICY rule 2 as text. An exact value
+    /// is written at `exact_places`.
+    pub fn written(&self, resolution: f64, exact_places: i32) -> Written {
+        let places = self.decimals();
+        let value = self.value();
+        Written {
+            value: (value.is_finite() && self.is_resolved(resolution))
+                .then(|| fmt_at(value, places.unwrap_or(exact_places))),
+            sigma: places.map(|p| fmt_at(self.sigma(), p)),
+        }
+    }
+
+    /// The measurement as one line of text, `-3.2 ±0.4 ppm`, for a log line
+    /// or a file: [`Uncertain::written`] with the house dash `—` for a value
+    /// that cannot be supported, and three places for an exact one.
+    pub fn text(&self, unit: &str, resolution: f64) -> String {
+        let w = self.written(resolution, 3);
+        let mut parts = vec![w.value.unwrap_or_else(|| "—".to_string())];
+        parts.extend(w.sigma.map(|s| format!("±{s}")));
+        if !unit.is_empty() {
+            parts.push(unit.to_string());
+        }
+        parts.join(" ")
+    }
+}
+
+/// A number rounded to `places` decimal places and printed there.
+///
+/// Negative places round to tens or hundreds, which is what an uncertainty of
+/// 30 asks for: `1234 ±30` is `1230 ±30`.
+///
+/// The zero check is not paranoia. `format!("{:.1}", -0.04)` is `-0.0`, and a
+/// measurement that reads minus nothing is the sort of detail that makes a
+/// careful reader stop trusting the rest of the screen.
+pub fn fmt_at(x: f64, places: i32) -> String {
+    let step = 10f64.powi(-places);
+    let rounded = (x / step).round() * step;
+    let rounded = if rounded == 0.0 { 0.0 } else { rounded };
+    format!("{:.*}", places.max(0) as usize, rounded)
+}
+
 /// Cramer-Rao lower bound on the variance of a frequency estimate, in
 /// (cycles per sample) squared.
 ///
@@ -363,6 +424,42 @@ pub fn mean_with_uncertainty(x: &[f32]) -> Uncertain {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The one way a measurement is written down**, for a log line or a
+    /// file: the digits follow the uncertainty, a value the resolution cannot
+    /// support dashes and keeps its uncertainty, an exact value carries no ±.
+    #[test]
+    fn a_measurement_is_written_as_its_uncertainty_allows() {
+        let text = |u: Uncertain, unit, resolution| u.text(unit, resolution);
+        assert_eq!(
+            text(Uncertain::from_sigma(-3.2183, 0.4), "ppm", 1.0),
+            "-3.2 ±0.4 ppm"
+        );
+        assert_eq!(
+            text(Uncertain::from_sigma(-3.2183, 0.15), "ppm", 1.0),
+            "-3.22 ±0.15 ppm"
+        );
+        assert_eq!(
+            text(Uncertain::from_sigma(-3.2183, 1.9), "ppm", 1.0),
+            "— ±1.9 ppm"
+        );
+        assert_eq!(text(Uncertain::exact(2437.0), "MHz", 0.0), "2437.000 MHz");
+        assert_eq!(text(Uncertain::exact(6.0), "", 0.0), "6.000");
+        assert_eq!(
+            text(Uncertain::from_sigma(-0.04, 0.4), "kHz", f64::INFINITY),
+            "0.0 ±0.4 kHz",
+            "never minus nothing"
+        );
+    }
+
+    #[test]
+    fn written_parts_are_the_value_and_the_uncertainty_at_one_place() {
+        let w = Uncertain::from_sigma(-3.2183, 0.15).written(1.0, 3);
+        assert_eq!(w.value.as_deref(), Some("-3.22"));
+        assert_eq!(w.sigma.as_deref(), Some("0.15"));
+        let w = Uncertain::exact(20.0).written(f64::INFINITY, 1);
+        assert_eq!((w.value.as_deref(), w.sigma), (Some("20.0"), None));
+    }
     use crate::signal::dsp::correlate::DelayedAutocorrelator;
     use crate::signal::dsp::estimate::{moose_offset, moose_variance};
     use crate::signal::dsp::nco::Nco;

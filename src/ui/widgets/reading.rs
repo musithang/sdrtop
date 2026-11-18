@@ -131,23 +131,24 @@ impl<'a> Reading<'a> {
         (value.is_finite() && self.value.is_resolved(self.resolution)).then_some(value)
     }
 
+    /// The cell's words and their inks, from the measurement's own
+    /// [`Uncertain::written`]: the log, an export and this cell write a
+    /// number the one way.
     pub(super) fn pieces(&self) -> Vec<(String, Ink)> {
-        let sigma = self.value.sigma();
-        let places = self.value.decimals();
+        let written = self.value.written(self.resolution, self.exact_places);
         let mut out = Vec::with_capacity(3);
 
         // A value that is not a number, or one the uncertainty cannot support,
         // is not printed. The house dash says so in every other panel too.
-        if let Some(value) = self.resolved_value() {
-            out.push((fmt_at(value, self.value_places()), Ink::Value));
-        } else {
-            out.push(("—".to_string(), Ink::Missing));
+        match written.value {
+            Some(value) => out.push((value, Ink::Value)),
+            None => out.push(("—".to_string(), Ink::Missing)),
         }
 
         // An exact value has no uncertainty to show, and an unknown one has none
         // that can be written down: "±inf" is not a thing a person can read.
-        if let Some(places) = places {
-            out.push((format!("±{}", fmt_at(sigma, places)), Ink::Dim));
+        if let Some(sigma) = written.sigma {
+            out.push((format!("±{sigma}"), Ink::Dim));
         }
 
         if !self.unit.is_empty() {
@@ -161,8 +162,7 @@ impl<'a> Reading<'a> {
     /// unit and whose rows have no room for the ±. The digits still follow
     /// the uncertainty, so a cell never claims more than the reading.
     pub(crate) fn value_text(&self) -> Option<String> {
-        self.resolved_value()
-            .map(|v| fmt_at(v, self.value_places()))
+        self.value.written(self.resolution, self.exact_places).value
     }
 
     /// The cell as plain text, for tests, for the log and for export.
@@ -192,20 +192,9 @@ impl<'a> Reading<'a> {
     }
 }
 
-/// A number rounded to `places` decimal places and printed there.
-///
-/// Negative places round to tens or hundreds, which is what an uncertainty of 30
-/// asks for: `1234 ±30` is `1230 ±30`.
-///
-/// The zero check is not paranoia. `format!("{:.1}", -0.04)` is `-0.0`, and a
-/// measurement that reads minus nothing is the sort of detail that makes a
-/// careful reader stop trusting the rest of the screen.
-pub(super) fn fmt_at(x: f64, places: i32) -> String {
-    let step = 10f64.powi(-places);
-    let rounded = (x / step).round() * step;
-    let rounded = if rounded == 0.0 { 0.0 } else { rounded };
-    format!("{:.*}", places.max(0) as usize, rounded)
-}
+/// The number formatting the cell shares with the measurement's own text,
+/// for a widget that writes a figure beside a reading at its places.
+pub(super) use crate::signal::dsp::uncertainty::fmt_at;
 
 #[cfg(test)]
 mod tests {

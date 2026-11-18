@@ -85,10 +85,9 @@ impl FftWorker {
         let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
         match result {
             Ok((ppm, efficiency, standard)) => {
-                let reading = crate::ui::widgets::reading::Reading::new(ppm, "ppm", f64::INFINITY);
                 m.push_log(format!(
                     "Frequency reference: {} against {}",
-                    reading.text(),
+                    ppm.text("ppm", f64::INFINITY),
                     standard.name
                 ));
                 m.radio.reference = Some(crate::state::FrequencyReference {

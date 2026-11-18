@@ -660,7 +660,6 @@ mod source_tests {
     /// does; a coupling not on it fails the test at once. When it is empty
     /// the crate boundary holds the line instead.
     const MONAS_CODE_NAMES_THE_SCREEN: &[(&str, &str)] = &[
-        ("src/signal/fft/worker.rs", "crate::ui"),
         ("src/state/net/mod.rs", "crate::ui"),
         ("src/state/pager.rs", "crate::theme"),
         ("src/state/ui.rs", "crate::event"),
