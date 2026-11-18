@@ -1303,7 +1303,7 @@ mod tests {
             .with_carrier(1_000_000.0, 40.0);
         m.waterfall = WaterfallState::new(
             WATERFALL_MIN_ROWS,
-            crate::palette::WaterfallPalette::default(),
+            crate::state::WaterfallPalette::default(),
             m.caps.level_min_db,
             m.caps.level_max_db,
         );

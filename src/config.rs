@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use crate::palette::WaterfallPalette;
+use crate::state::WaterfallPalette;
 use crate::state::{SpectrumMarker, SpectrumStyle, DEFAULT_FREQUENCY, DEFAULT_SAMPLE_RATE};
 
 fn default_frequency_hz() -> u64 {

@@ -21,7 +21,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::palette::{magnitude_to_color_palette, ColorDepth, WaterfallPalette};
+use crate::palette::{magnitude_to_color_palette, ColorDepth};
+use crate::state::WaterfallPalette;
 use crate::state::{BinAxis, BinWindow};
 
 /// Max dB over the bin range `[start, end)` of one waterfall row, clamped to the

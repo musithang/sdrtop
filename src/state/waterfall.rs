@@ -257,6 +257,49 @@ impl WaterfallBuffer {
     }
 }
 
+/// Selectable waterfall colour gradient. `Classic` follows the active theme's
+/// own palette (so each theme keeps its look); the others are
+/// fixed "cyberdeck" gradients independent of the theme. Cycled live with `P`
+/// while the waterfall is focused, persisted in `[display] waterfall_palette`.
+///
+/// The choice is state; the colours each one draws in are the screen's
+/// (`palette.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaterfallPalette {
+    /// The active theme's gradient - the existing behaviour, and the default.
+    #[default]
+    Classic,
+    /// Warm amber CRT.
+    Amber,
+    /// Cold blue→cyan→white.
+    Ice,
+    /// Retro phosphor green.
+    Phosphor,
+}
+
+impl WaterfallPalette {
+    /// Cycle order for the `P` toggle: Classic → Amber → Ice → Phosphor → Classic.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Classic => Self::Amber,
+            Self::Amber => Self::Ice,
+            Self::Ice => Self::Phosphor,
+            Self::Phosphor => Self::Classic,
+        }
+    }
+
+    /// Lower-case name for log messages (matches the serialized form).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Amber => "amber",
+            Self::Ice => "ice",
+            Self::Phosphor => "phosphor",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WaterfallState {
     pub db_min: f32,
@@ -266,18 +309,13 @@ pub struct WaterfallState {
     pub hz_zoom: u32,
     pub buffer: WaterfallBuffer,
     pub last_fft: Option<FftFrame>,
-    /// Selected colour gradient (DSN-2026-04 §03); cycled live with `P`.
-    pub palette: crate::palette::WaterfallPalette,
+    /// Selected colour gradient; cycled live with `P`.
+    pub palette: WaterfallPalette,
 }
 
 impl WaterfallState {
     /// Initialize the view with finite ordered bounds from validated device capabilities
-    pub fn new(
-        max_rows: usize,
-        palette: crate::palette::WaterfallPalette,
-        db_min: f32,
-        db_max: f32,
-    ) -> Self {
+    pub fn new(max_rows: usize, palette: WaterfallPalette, db_min: f32, db_max: f32) -> Self {
         Self {
             db_min,
             db_max,
@@ -321,6 +359,16 @@ mod min_rows_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_cycle_wraps() {
+        use WaterfallPalette::*;
+        assert_eq!(Classic.next(), Amber);
+        assert_eq!(Amber.next(), Ice);
+        assert_eq!(Ice.next(), Phosphor);
+        assert_eq!(Phosphor.next(), Classic);
+        assert_eq!(WaterfallPalette::default(), Classic);
+    }
 
     #[test]
     fn measured_points_keep_endpoints_across_zoom() {

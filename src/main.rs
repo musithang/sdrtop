@@ -659,10 +659,7 @@ mod source_tests {
     /// An entry goes when its coupling is fixed, and the test fails until it
     /// does; a coupling not on it fails the test at once. When it is empty
     /// the crate boundary holds the line instead.
-    const MONAS_CODE_NAMES_THE_SCREEN: &[(&str, &str)] = &[
-        ("src/state/ui.rs", "crate::event"),
-        ("src/state/waterfall.rs", "crate::palette"),
-    ];
+    const MONAS_CODE_NAMES_THE_SCREEN: &[(&str, &str)] = &[("src/state/ui.rs", "crate::event")];
 
     /// The same for test code on the Monas side, which may draw a panel to
     /// check what a state looks like. These move to the terminal's side with
@@ -672,7 +669,6 @@ mod source_tests {
         ("src/export/ft8.rs", "crate::ui"),
         ("src/export/occupancy.rs", "crate::ui"),
         ("src/state/fixture.rs", "crate::Theme"),
-        ("src/state/fixture.rs", "crate::palette"),
         ("src/state/fixture.rs", "crate::ui"),
         ("src/state/fixture.rs", "ratatui"),
     ];

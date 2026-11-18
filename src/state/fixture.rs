@@ -100,7 +100,7 @@ impl SdrMetrics {
             },
             waterfall: WaterfallState::new(
                 512,
-                crate::palette::WaterfallPalette::default(),
+                crate::state::WaterfallPalette::default(),
                 caps.level_min_db,
                 caps.level_max_db,
             ),

@@ -19,8 +19,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::palette::{magnitude_to_color_palette, ColorDepth, WaterfallPalette};
+use crate::palette::{magnitude_to_color_palette, ColorDepth};
 use crate::state::SdrMetrics;
+use crate::state::WaterfallPalette;
 use crate::ui::panels::core::spectrum::fmt_spectrum_step;
 
 use super::cells::{band_max, Columns};
