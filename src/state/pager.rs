@@ -77,8 +77,8 @@ pub struct PagerView {
     pub mine: Option<u32>,
     /// The night backlight.
     pub night: bool,
-    /// The display's colour by name (`theme::display_names`); `None` is the
-    /// theme's own.
+    /// The display's colour by name, one the screen's themes offer; `None`
+    /// is the theme's own.
     pub display: Option<String>,
     /// Pages read, by number: opened with READ.
     pub read: std::collections::BTreeSet<u64>,
@@ -173,10 +173,10 @@ impl PagerState {
         self.view.screen = 0;
     }
 
-    /// The next display colour: the theme's own, then each of
-    /// `theme::display_names` in turn, and round again.
-    pub fn next_display(&mut self) {
-        let names = crate::theme::display_names();
+    /// The next display colour: the theme's own, then each of `names` in
+    /// turn, and round again. The names are the screen's to give (its
+    /// themes' pager displays): the state only remembers which one is picked.
+    pub fn next_display(&mut self, names: &[&str]) {
         let at = self
             .view
             .display
@@ -309,18 +309,33 @@ mod tests {
         assert_eq!(s.screen_of(3), 0);
     }
 
-    /// The display colours go round, the theme's own first and last.
+    /// The display colours go round, the theme's own first and last, in the
+    /// order the names are given.
     #[test]
     fn the_display_colours_go_round() {
+        let names = ["green", "amber", "blue"];
         let mut s = PagerState::default();
         let mut seen = vec![s.view.display.clone()];
-        for _ in 0..crate::theme::display_names().len() + 1 {
-            s.next_display();
+        for _ in 0..names.len() + 1 {
+            s.next_display(&names);
             seen.push(s.view.display.clone());
         }
-        assert_eq!(seen.first(), Some(&None));
-        assert_eq!(seen.last(), Some(&None), "back to the theme's own");
-        assert_eq!(seen[1].as_deref(), Some("green"));
+        let seen: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+        assert_eq!(
+            seen,
+            [None, Some("green"), Some("amber"), Some("blue"), None],
+            "each in turn, then back to the theme's own"
+        );
+    }
+
+    /// A colour the names no longer hold (a theme file that lost one) starts
+    /// the round again rather than sticking.
+    #[test]
+    fn a_display_no_longer_offered_starts_the_round_again() {
+        let mut s = PagerState::default();
+        s.view.display = Some("violet".to_string());
+        s.next_display(&["green", "amber"]);
+        assert_eq!(s.view.display.as_deref(), Some("green"));
     }
 
     /// Clearing empties the inbox and keeps the session's count.

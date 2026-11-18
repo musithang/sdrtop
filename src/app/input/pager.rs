@@ -43,7 +43,7 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
         }
         KeyCode::Char('b') => p.view.night = !p.view.night,
         KeyCode::Char('l') => {
-            p.next_display();
+            p.next_display(&crate::theme::display_names());
             let name = p
                 .view
                 .display
