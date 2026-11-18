@@ -73,8 +73,15 @@ jobs:
           persist-credentials: false
 
       - name: Install native runtimes
-        # Keep coverage with the native runtime libraries and libSoapySDR installed
-        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2 libairspy0 libairspyhf1 libsoapysdr0.8 soapysdr0.8-module-rtlsdr soapysdr0.8-module-hackrf
+        # Keep coverage with the native runtime libraries and libSoapySDR installed.
+        # The rtl-sdr runtime is `librtlsdr2` on Ubuntu 24.04 and `librtlsdr0`
+        # (Debian's name) on 26.04, which `ubuntu-latest` became in November
+        # 2026; whichever this runner's index has, as packaging/install.sh does.
+        run: |
+          sudo apt-get update
+          rtl=librtlsdr2
+          apt-cache show librtlsdr2 >/dev/null 2>&1 || rtl=librtlsdr0
+          sudo apt-get install -y libhackrf0 "$rtl" libairspy0 libairspyhf1 libsoapysdr0.8 soapysdr0.8-module-rtlsdr soapysdr0.8-module-hackrf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
