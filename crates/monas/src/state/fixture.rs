@@ -1,0 +1,957 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+//! A metrics snapshot to render panels against.
+//!
+//! Nothing in the crate constructed an [`SdrMetrics`] outside `app/builder`
+//! until this module existed, which is why no panel body had ever been unit
+//! tested: every `render` takes one, and building one by hand is forty lines of
+//! sub-state literals. So the panels were checked by driving the real binary in
+//! tmux against a real radio - slow, needs hardware, and the step that produced
+//! two vacuous passes during R4.
+//!
+//! What this gives instead: [`SdrMetrics::fixture`] for an idle radio, and a
+//! handful of chainable methods to make it interesting. The screen's own
+//! fixture draws a panel from one into a fixed-size buffer and reads the
+//! result back as text, so a split can be proved to change nothing on screen
+//! by comparing two strings.
+//!
+//! **Deliberately a real struct literal, not `Default`.** `SdrMetrics` has no
+//! `Default` and should not get one: a snapshot with no `caps` is not a state the
+//! app can ever be in, and the compiler forcing this file to name every new field
+//! is the point - a field added without a decision about what it means at rest
+//! would otherwise silently arrive as zero in every test.
+
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::time::Instant;
+
+use super::*;
+use crate::hardware::DeliveryModel;
+
+impl SdrMetrics {
+    /// An idle radio: a HackRF open at 100 MHz, RX not started, no FFT frame yet.
+    ///
+    /// This is what a panel sees a fraction of a second after launch, which is
+    /// also the state most likely to be got wrong - every "waiting for RX" and
+    /// `[STALE]` path runs through it.
+    pub fn fixture() -> Self {
+        let caps = Arc::new(crate::hardware::native::hackrf::caps());
+        SdrMetrics {
+            radio: RadioState {
+                frequency: 100_000_000,
+                config_sample_rate: 10_000_000.0,
+                actual_sample_rate: 0,
+                bb_filter_hz: 5_000_000,
+                gains: vec![24.0, 30.0],
+                gain_curve: None,
+                amp_enabled: false,
+                rx_enabled: false,
+                hw_streaming: false,
+                rx_start_time: None,
+                bytes_since_last_poll: 0,
+                last_poll_time: Instant::now(),
+                current_throughput_bps: 0,
+                throughput_history: VecDeque::new(),
+                sample_rate_history: VecDeque::new(),
+                // No reference established: the state a radio is in when
+                // it is switched on, and the one every ppm reading has to be
+                // correct in.
+                reference: None,
+                reference_request: false,
+                lo_offset_hz: 0,
+                converter_bits: None,
+                overload: None,
+                auto_db: Vec::new(),
+                upstream_correction: None,
+                filter_in: None,
+                other_tx: None,
+            },
+            signal: SignalState::default(),
+            iq: IqState {
+                iq_imbalance_db: 0.0,
+                dc_offset_i: 0.0,
+                dc_offset_q: 0.0,
+                cb_period_us: 0,
+                cb_jitter_us: 0,
+                jitter_history: VecDeque::new(),
+                iq_amplitude_hist: [0u64; 32],
+                adc_band_hist: [0u64; crate::hardware::ADC_BANDS],
+                buf_fill_pct: 0.0,
+                fft_drops: 0,
+                fft_drops_session: 0,
+                buf_fill_history: VecDeque::new(),
+                phase_imbalance_deg: 0.0,
+                cal: IqCalState::default(),
+                irr_history: VecDeque::new(),
+                constellation: VecDeque::new(),
+                constellation_outer_db: None,
+            },
+            observer: ObserverState::default(),
+            spectrum: SpectrumState {
+                step_hz: 100_000,
+                y_min: caps.level_min_db,
+                y_max: caps.level_max_db,
+                hold: None,
+                cursor_freq: None,
+                markers: vec![],
+                pending_marker: None,
+                style: SpectrumStyle::default(),
+                wanted: true,
+            },
+            waterfall: WaterfallState::new(
+                512,
+                crate::state::WaterfallPalette::default(),
+                caps.level_min_db,
+                caps.level_max_db,
+            ),
+            system: SystemState {
+                // The fixture is a HackRF, which observer mode can watch.
+                observable: true,
+                // The HackRF fixture reports its own firmware, so no stack row.
+                stack: None,
+                board_name: Arc::from("HackRF One"),
+                serial: Arc::from("0000000000000000"),
+                fw_version: Arc::from("2024.02.1"),
+                board_rev: 0x02,
+                usb_api_version: 0x0107,
+                process_cpu_pct: 0.0,
+                process_rss_mb: 0,
+                cpu_history: VecDeque::new(),
+            },
+            timing: TimingState::default(),
+            sweep: SweepState::default(),
+            log: std::collections::VecDeque::new(),
+            events: Arc::default(),
+            mode: crate::engine::mode::Mode::idle(),
+            lab: LabState::default(),
+            demod: DemodState::default(),
+            net: crate::state::NetState::default(),
+            pager: crate::state::PagerState::default(),
+            ft8: crate::state::Ft8State::default(),
+            home: crate::state::Home::default(),
+            record: crate::state::RecordState::default(),
+            caps,
+            device_options: Arc::new(Vec::new()),
+            acc: Accumulators::default(),
+        }
+    }
+
+    /// RX running, with plausible throughput and a comfortable ADC level.
+    ///
+    /// The peak sits inside [`ADC_COMFORT_DBFS`], so a panel that judges gain
+    /// staging reads "optimal" from this and a test does not have to know the
+    /// thresholds to get an uninteresting answer.
+    pub fn streaming(mut self) -> Self {
+        self.radio.rx_enabled = true;
+        self.radio.hw_streaming = true;
+        self.radio.rx_start_time = Some(Instant::now());
+        self.radio.actual_sample_rate = 10_000_000;
+        self.radio.current_throughput_bps = 20_000_000;
+        self.signal.adc_peak_dbfs = -8.0;
+        self.signal.adc_rms_dbfs = -20.0;
+        self
+    }
+
+    /// A fresh FFT frame with a carrier `offset_hz` from centre, standing
+    /// `snr_db` above the noise floor.
+    ///
+    /// `Instant::now()` on purpose: a frame is only as good as its age, and every
+    /// `Staleness::FftAge` panel reads exactly that.
+    pub fn with_carrier(mut self, offset_hz: f64, snr_db: f32) -> Self {
+        const N: usize = 256;
+        let noise_floor = -100.0_f32;
+        let sample_rate = self.radio.config_sample_rate;
+        let mut bins = vec![noise_floor; N];
+        let bin = (N as f64 / 2.0 + offset_hz / (sample_rate / N as f64)).round();
+        if (0.0..N as f64).contains(&bin) {
+            bins[bin as usize] = noise_floor + snr_db;
+        }
+        let bins = Arc::new(bins);
+        self.waterfall.last_fft = Some(FftFrame {
+            bins_dbfs: Arc::clone(&bins),
+            peak_hold: Arc::clone(&bins),
+            noise_floor,
+            center_freq_hz: self.radio.frequency,
+            axis_start_hz: self.radio.frequency as f64 - sample_rate / 2.0,
+            sample_rate,
+            timestamp: Instant::now(),
+            peak_to_nf_db: snr_db,
+            occupied_bw_hz: 150_000,
+            enbw_hz: sample_rate / N as f64,
+            bin_axis: crate::state::BinAxis::FftBins,
+        });
+        self.signal.peak_to_nf_db = snr_db;
+        self.signal.channel_power_dbfs = noise_floor + snr_db;
+        self.signal.s_meter = Some(crate::signal::ballistics::Shown {
+            level: noise_floor + snr_db,
+            peak: noise_floor + snr_db,
+            readout: noise_floor + snr_db,
+        });
+        self.signal.occupied_bw_hz = 150_000;
+        let modulation = crate::state::classify(snr_db, 150_000);
+        self.signal.modulation = modulation;
+        self.signal.modulation_settled = modulation;
+        self.signal.readout = self.waterfall.last_fft.clone();
+        self.signal.carrier = Some(crate::state::Carrier {
+            snr_db,
+            occupied_bw_hz: 150_000,
+            adj_carrier_dbfs: noise_floor,
+            acpr_lower: None,
+            acpr_upper: None,
+            verdict: crate::state::judge(modulation, snr_db, f32::NAN, f32::NAN),
+            modulation,
+            heard: Instant::now(),
+        });
+        self.waterfall
+            .buffer
+            .rows
+            .push_front((Instant::now(), bins));
+        self
+    }
+
+    /// Age the newest FFT frame past the IQ trace limit.
+    pub fn with_stale_fft(mut self) -> Self {
+        if let Some(fr) = self.waterfall.last_fft.as_mut() {
+            fr.timestamp = Instant::now()
+                - std::time::Duration::from_millis(crate::hardware::IQ_TRACE_STALE_MS as u64 + 50);
+        }
+        self
+    }
+}
+
+impl SdrMetrics {
+    /// A completed sweep across `start_hz..stop_hz`, with a bump partway along so
+    /// the plot has a shape rather than a flat line.
+    pub fn with_sweep(mut self, start_hz: u64, stop_hz: u64) -> Self {
+        const N: usize = 64;
+        let span = (stop_hz - start_hz) as f64;
+        let freq_hz: Vec<u64> = (0..N)
+            .map(|i| start_hz + (span * i as f64 / N as f64) as u64)
+            .collect();
+        let peak_dbfs: Vec<f32> = (0..N)
+            .map(|i| if i == N / 3 { -30.0 } else { -95.0 })
+            .collect();
+        let mean_dbfs: Vec<f32> = peak_dbfs.iter().map(|v| v - 8.0).collect();
+        self.sweep.config = SweepConfig {
+            start_hz,
+            stop_hz,
+            step_hz: (span / N as f64) as u64,
+            dwell_ms: 20,
+        };
+        self.sweep.active = true;
+        self.sweep.current_hz = start_hz;
+        self.sweep.positions_total = N;
+        self.sweep.positions_done = N;
+        self.sweep.cycle_count = 3;
+        self.sweep.cycle_duration_ms = 1_400;
+        self.sweep.current_frame = Some(Arc::new(SweepFrame {
+            start_hz,
+            stop_hz,
+            freq_hz,
+            peak_dbfs,
+            mean_dbfs,
+            timestamp: Instant::now(),
+            cycle_count: 3,
+            cycle_duration_ms: 1_400,
+        }));
+        self
+    }
+}
+
+impl SdrMetrics {
+    /// A plausible timing snapshot: callbacks arriving on time, a budget derived
+    /// from the expected period, and a deviation series to plot.
+    ///
+    /// `jitter_ratio` scales the deviations against the deadline budget, so a
+    /// test can ask for "comfortably inside" (0.3) or "well over" (2.5) without
+    /// knowing the thresholds.
+    /// Turn the fixture into a pull backend whose read loop sits at
+    /// `occupancy`, and regrade it.
+    ///
+    /// Chain after [`with_timing`], because the whole point is to take a stream
+    /// whose read intervals are wild and show that a pull backend is not judged
+    /// on them. The regrade is the fixture doing what the poll task does, so a
+    /// test never has to set a quality by hand and get it wrong.
+    pub fn pulling(mut self, occupancy: f32) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.delivery = DeliveryModel::Pull;
+        self.caps = std::sync::Arc::new(caps);
+        self.timing.read_occupancy = Some(occupancy);
+        let v = TimingQuality::classify(
+            self.timing.dev_p99_us,
+            self.timing.cb_period_expected,
+            self.timing.sr_delta_ppm,
+            0,
+            DeliveryModel::Pull,
+            Some(occupancy),
+            None,
+        );
+        self.timing.timing_quality = v.quality;
+        self.timing.timing_cause = v.cause;
+        self
+    }
+
+    /// Turn the fixture into a relayed stream (SDRplay's service) whose
+    /// service held it up to `hold_us`, with its clock `ppm` off, and
+    /// regrade it, as [`pulling`](Self::pulling) does for a pull backend.
+    pub fn relayed(mut self, hold_us: u64, ppm: i64) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.delivery = DeliveryModel::Relayed;
+        self.caps = std::sync::Arc::new(caps);
+        self.timing.relay_hold_us = Some(hold_us);
+        self.timing.sr_delta_ppm = ppm;
+        let v = TimingQuality::classify(
+            self.timing.dev_p99_us,
+            self.timing.cb_period_expected,
+            ppm,
+            0,
+            DeliveryModel::Relayed,
+            None,
+            None,
+        );
+        self.timing.timing_quality = v.quality;
+        self.timing.timing_cause = v.cause;
+        self
+    }
+
+    pub fn with_timing(mut self, jitter_ratio: f64) -> Self {
+        let expected = 4_096u64;
+        let budget = (expected as f64 * 0.15).round() as u64;
+        let peak = (budget as f64 * jitter_ratio).round() as i32;
+        let deviations: Vec<i32> = (0..320)
+            .map(|i| {
+                let phase = (i % 16) as f64 / 16.0 * std::f64::consts::TAU;
+                (peak as f64 * phase.sin()).round() as i32
+            })
+            .collect();
+        let abs: Vec<u64> = deviations.iter().map(|d| d.unsigned_abs() as u64).collect();
+        let mut sorted = abs.clone();
+        sorted.sort_unstable();
+        let pick = |q: f64| sorted[((sorted.len() as f64 * q) as usize).min(sorted.len() - 1)];
+        // One call, both answers. Grading twice would let a fixture hold a
+        // quality and a cause that never came from the same decision, which is
+        // the exact confusion this pair exists to prevent.
+        let verdict =
+            TimingQuality::classify(pick(0.99), expected, 18, 0, DeliveryModel::Push, None, None);
+        self.timing = TimingState {
+            cb_period_us: expected,
+            cb_period_expected: expected,
+            cb_jitter_us: (peak as u64) / 3,
+            jitter_max_us: peak as u64,
+            jitter_session_max_us: peak as u64,
+            sr_delta_ppm: 18,
+            sr_known: true,
+            throughput_mean_mbps: 38.1,
+            throughput_std_mbps: 0.4,
+            // A HackRF's int8 pairs are what its link carries.
+            wire_bytes_per_pair: Some(2.0),
+            timing_quality: verdict.quality,
+            timing_cause: verdict.cause,
+            // The fixture is a push device (an idle HackRF), which has no read
+            // loop to measure.
+            read_occupancy: None,
+            relay_hold_us: None,
+            late_callbacks: abs.iter().filter(|&&d| d > budget).count() as u32,
+            late_window: abs.len() as u32,
+            dev_p95_us: pick(0.95),
+            dev_p99_us: pick(0.99),
+            dev_peak_us: sorted[sorted.len() - 1],
+            cb_deviations_us: deviations,
+            deadline_budget_us: budget,
+        };
+        self.iq.cb_period_us = expected;
+        self.iq.cb_jitter_us = self.timing.cb_jitter_us;
+        self
+    }
+}
+
+impl SdrMetrics {
+    /// Swap in an RTL-SDR-shaped capability profile: one gain stage, a stepped
+    /// tuner table, and no Friis cascade to estimate a noise figure from.
+    ///
+    /// The device-generic panels branch on these three, so a panel tested only
+    /// against the HackRF fixture has half its rows unexercised.
+    pub fn single_stage(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = crate::hardware::native::rtlsdr::gain_model(&[0, 9, 14, 27, 37, 49]);
+        caps.friis_applicable = false;
+        self.radio.set_stage_gain(0, 27.0);
+        self.radio.set_stage_gain(1, 0.0);
+        self.caps = Arc::new(caps);
+        self
+    }
+
+    /// Swap in a SoapySDR-shaped profile: one overall gain, **no second stage**,
+    /// **no front end boost**, a 14-bit converter, and no chain to model.
+    ///
+    /// The shape is real. `SoapySDRUtil --probe="driver=hackrf"` reports
+    /// `Supports AGC: NO` and a single `[0, 116] dB` overall range, so a HackRF
+    /// reached through SoapySDR genuinely has no boost to toggle. The bit depth
+    /// is 14 rather than 8 so a panel that still assumes an 8-bit converter
+    /// shows up here rather than in a stranger's screenshot.
+    ///
+    /// This exists because it is the only way to render every panel for a device
+    /// nobody here owns, which is the whole testing strategy for this backend.
+    /// An RTL-SDR: one tuner stage over the driver's own discrete table, plus
+    /// a tuner AGC. The other shape the gain model has to serve.
+    ///
+    /// The table is the real one an R820T reads out, rounded to whole dB and
+    /// deduplicated the way `rtl_caps` does it.
+    pub fn rtlsdr(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = crate::hardware::native::rtlsdr::gain_model(&[
+            0, 1, 3, 4, 6, 9, 14, 16, 20, 22, 25, 29, 33, 37, 40, 44, 49,
+        ]);
+        caps.friis_applicable = false;
+        caps.has_bb_filter = false;
+        caps.sample_geometry = crate::hardware::SampleGeometry {
+            format: crate::hardware::SampleFormat::Uint8,
+            full_scale: 128.0,
+            converter_bits: None,
+        };
+        self.caps = Arc::new(caps);
+        // One stage, so only position 0 means anything.
+        self.radio.gains = vec![25.0];
+        self.system.board_name = Arc::from("RTL-SDR");
+        self
+    }
+
+    /// A named chain that offers **no** boost at all: no automatic gain mode,
+    /// and no two-position element to stand in for one.
+    ///
+    /// Kept apart from [`Self::named_chain`], whose plain form has a boost. A
+    /// `SoapyHackRF` reports `Supports AGC: NO` and yet has `AMP [0, 14, 14]`,
+    /// which is the same physical switch the native backend drives, so it does
+    /// have one. The panels still need a device that does not, and that is
+    /// this.
+    pub fn named_chain_no_boost(mut self) -> Self {
+        self = self.named_chain();
+        let mut caps = (*self.caps).clone();
+        caps.gain = Self::chain_model(None);
+        self.caps = Arc::new(caps);
+        self
+    }
+
+    /// A chain whose stages were **measured**, and one of them only in a
+    /// band: the Airspy R2's own gain model as the bench measured it, its LNA
+    /// valid from 88 to 170 MHz, tuned to 943.4 MHz where the LNA reads as a
+    /// position. LNA and VGA have keys of their own, the mixer is reached with
+    /// the stage keys.
+    pub fn band_measured_chain(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = crate::hardware::native::airspy::gain_model();
+        caps.friis_applicable = false;
+        self.caps = Arc::new(caps);
+        self.radio.gains = vec![36.02, 12.03, 26.79];
+        self.radio.frequency = 943_400_000;
+        self
+    }
+
+    /// A chain whose front stage is a radio's own setting with its dB per
+    /// band, as the SDRplay RSP1B's LNA is: states 0..9, measured on a cable
+    /// at 14 and 150 MHz (gain re each band's last state), 7 states under
+    /// 50 MHz and 10 from 50 to 420 MHz, nothing measured above. Behind it an
+    /// IF of 0..39 dB. At 150 MHz, LNA state 4 and the IF at 20 dB.
+    pub fn banded_chain(mut self) -> Self {
+        use crate::hardware::{BandTable, GainModel, StageSpec};
+        let mut caps = (*self.caps).clone();
+        caps.gain = GainModel::new(
+            vec![
+                StageSpec::banded(
+                    "LNA",
+                    10,
+                    vec![
+                        BandTable {
+                            band: 0..=49_999_999,
+                            db: vec![61.50, 55.29, 48.94, 42.92, 24.05, 18.87, 0.0],
+                        },
+                        BandTable {
+                            band: 50_000_000..=419_999_999,
+                            db: vec![
+                                67.75, 61.65, 55.33, 49.32, 43.13, 36.50, 29.87, 23.75, 4.89, 0.0,
+                            ],
+                        },
+                    ],
+                ),
+                StageSpec::ranged("IF", 0.0, 39.0, 1.0),
+            ],
+            "LNA",
+            "LNA",
+        )
+        .with_second_stage();
+        caps.friis_applicable = false;
+        self.caps = Arc::new(caps);
+        self.radio.gains = vec![4.0, 20.0];
+        self.radio.gain_curve = None;
+        self.radio.frequency = 150_000_000;
+        self
+    }
+
+    /// An Airspy HF+ Discovery at its own start, on 40 m: the attenuator at
+    /// none and the LNA off, its words carried as `Int32`, and the digital
+    /// AGC's hold as its ceiling.
+    pub fn airspyhf(mut self) -> Self {
+        let rates = [
+            912_000, 768_000, 650_000, 456_000, 384_000, 228_000, 192_000,
+        ];
+        self.caps = Arc::new(crate::hardware::native::airspyhf::caps(&rates, 2048));
+        self.system.board_name = Arc::from("Airspy HF+ Discovery");
+        self.radio.gains = vec![0.0, 0.0];
+        self.radio.gain_curve = None;
+        self.radio.frequency = 7_100_000;
+        self.radio.config_sample_rate = 768_000.0;
+        self
+    }
+
+    /// One decoded FT8 cycle on 20 m with real traces: six standard CQs at
+    /// -18 to +6 dB, one drifting 1.5 Hz, made by the closed-form transmitter
+    /// on unit noise and read by the decoder (once per test run), published
+    /// as the worker publishes a cycle. The listener is placed in Budapest so
+    /// distances can be drawn.
+    pub fn ft8_traced(mut self) -> Self {
+        use crate::signal::dsp::testkit::Rng;
+        use crate::signal::ft8::{conformance, cycle, hash::HashBook};
+        static DECODED: std::sync::OnceLock<(cycle::Report, f64)> = std::sync::OnceLock::new();
+        let (report, seconds) = DECODED
+            .get_or_init(|| {
+                let mut rng = Rng::new(61);
+                let mut sent = conformance::readable(6, 0.0, &mut rng);
+                for (s, snr) in sent.iter_mut().zip([-18.0, -12.0, -6.0, 0.0, 6.0, -9.0]) {
+                    s.snr_db = snr;
+                }
+                sent[5].drift = 1.5;
+                let x = conformance::cycle(&sent, &mut rng);
+                let settings = cycle::Settings {
+                    max_candidates: 40,
+                    ..cycle::Settings::DEFAULT
+                };
+                let t = Instant::now();
+                let report = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+                (report, t.elapsed().as_secs_f64())
+            })
+            .clone();
+        let dial = 14_074_000;
+        self.radio.frequency = dial;
+        self.home.latitude = Some(47.497);
+        self.home.longitude = Some(19.04);
+        let entry = ft8::CycleEntry {
+            start_unix: FT8_EPOCH,
+            dial_hz: dial,
+            outcome: ft8::CycleOutcome::Decoded,
+            decodes: report.decodes.len(),
+            candidates: report.candidates,
+            malformed: report.malformed,
+            seconds,
+            band: report.band,
+            clock: None,
+            funnel: report.funnel,
+            floor_db_hz: report.floor_db_hz,
+            setting: Some(ft8::Setting::of(&self.radio, dial, 192_000.0)),
+            setting_changed: false,
+            held: false,
+            lateness: None,
+        };
+        self.ft8
+            .push_cycle(entry, report.decodes, None, Instant::now(), None);
+        self
+    }
+
+    /// An hour of FT8 on 20 m, generated from a seed rather than typed:
+    /// forty stations with locators anywhere on Earth, each heard on its own
+    /// parity for a run of cycles at its own tone, SNR -22 to +10 dB. The
+    /// hour's history, its cycles (a wandering floor, one in twenty held)
+    /// and the station table: no decode list, no traces.
+    pub fn ft8_hour(mut self) -> Self {
+        use crate::signal::dsp::testkit::Rng;
+        let mut rng = Rng::new(67);
+        let dial = 14_074_000;
+        self.radio.frequency = dial;
+        self.home.latitude = Some(47.497);
+        self.home.longitude = Some(19.04);
+        let cycles = 240u64;
+        let letter = |rng: &mut Rng, n: u64| (b'A' + (rng.next_u64() % n) as u8) as char;
+        let mut rows = Vec::new();
+        for k in 0..40u64 {
+            let call = format!(
+                "K{}{}{}",
+                k % 10,
+                letter(&mut rng, 26),
+                letter(&mut rng, 26)
+            );
+            let locator = format!(
+                "{}{}{}{}",
+                letter(&mut rng, 18),
+                letter(&mut rng, 18),
+                rng.next_u64() % 10,
+                rng.next_u64() % 10
+            );
+            let parity = rng.next_u64() % 2;
+            let first = rng.next_u64() % (cycles - 8);
+            let run = 4 + rng.next_u64() % 40;
+            let f0 = 200.0 + rng.unit() * 2700.0;
+            let call: Arc<str> = Arc::from(call.as_str());
+            let mut station = ft8::Station {
+                call: call.to_string(),
+                locator: Some(locator),
+                last_unix: 0.0,
+                last_at: Instant::now(),
+                dial_hz: dial,
+                heard: 0,
+                snr: VecDeque::new(),
+                called_you: false,
+            };
+            for c in (first..(first + 2 * run).min(cycles)).filter(|c| c % 2 == parity) {
+                let unix = FT8_EPOCH + 15.0 * c as f64;
+                let snr = -22.0 + rng.unit() * 32.0;
+                rows.push(ft8::HistoryRow {
+                    cycle_unix: unix,
+                    dial_hz: dial,
+                    f0: f0 as f32,
+                    snr_db: snr as f32,
+                    dt: (rng.unit() * 0.6 - 0.3) as f32,
+                    call: Some(Arc::clone(&call)),
+                });
+                station.last_unix = unix;
+                station.heard += 1;
+                station.snr.push_back((unix, snr));
+                if station.snr.len() > ft8::SNR_HISTORY {
+                    station.snr.pop_front();
+                }
+            }
+            if station.heard > 0 {
+                self.ft8.stations.insert(station.call.clone(), station);
+            }
+        }
+        rows.sort_by(|a, b| a.cycle_unix.total_cmp(&b.cycle_unix));
+        // Every cycle of the hour: its count from the rows, a floor that
+        // wanders a little, one cycle in twenty past the hold.
+        let marks: VecDeque<ft8::CycleMark> = (0..cycles)
+            .map(|c| {
+                let unix = FT8_EPOCH + 15.0 * c as f64;
+                let held = rng.next_u64().is_multiple_of(20);
+                ft8::CycleMark {
+                    start_unix: unix,
+                    dial_hz: dial,
+                    outcome: ft8::CycleOutcome::Decoded,
+                    decodes: rows.iter().filter(|r| r.cycle_unix == unix).count(),
+                    floor_db_hz: (!held).then(|| (-85.0 + rng.unit() * 2.0) as f32),
+                    held,
+                    segment: 0,
+                }
+            })
+            .collect();
+        self.ft8.cycle_hour = Arc::new(marks);
+        self.ft8.history = Arc::new(rows.into());
+        self
+    }
+
+    /// The knob on one of the gain model's vendor curves, the chain exactly on
+    /// `step` of it.
+    pub fn on_curve(mut self, curve: usize, step: usize) -> Self {
+        let gm = self.caps.gain.clone();
+        self.radio.gain_curve = Some(curve);
+        self.radio.gains = gm.curves()[curve].values(step, &gm.stages(), self.radio.frequency);
+        self
+    }
+
+    /// The gain model behind both chain fixtures.
+    ///
+    /// The numbers are a real probe answer, not an invented shape:
+    /// `SoapySDRUtil --probe="driver=hackrf"` reports `LNA [0, 40, 8]`,
+    /// `AMP [0, 14, 14]` and `VGA [0, 62, 2]`. AMP is a two-position element and
+    /// became the boost, so two stages are left, and the whole-chain 116 dB is
+    /// only the gauge's fallback because those two describe a span of their own.
+    fn chain_model(boost: Option<crate::hardware::Boost>) -> crate::hardware::GainModel {
+        let gm = crate::hardware::GainModel::new(
+            vec![
+                crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
+                crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
+            ],
+            "RF",
+            "RF",
+        )
+        .with_gauge_fallback(116);
+        match boost {
+            Some(b) => gm.with_boost(b),
+            None => gm,
+        }
+    }
+
+    /// A device whose gain chain the **driver named**, rather than one sdrtop
+    /// knows from a datasheet: several stages with their own ranges, driven as
+    /// one figure through a single knob, and a 16-bit sample format.
+    ///
+    /// **Named after the shape, not after a backend.** It is the shape the
+    /// device-generic panels branch on, and any backend could present it; that
+    /// the one real example is a HackRF reached through `SoapyHackRF` is where
+    /// the numbers came from, not what the fixture is for. The identity it
+    /// claims stays SoapySDR, because the panels that print a software stack
+    /// need something true to print.
+    pub fn named_chain(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = Self::chain_model(Some(crate::hardware::Boost::Element(
+            crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
+        )));
+        caps.friis_applicable = false;
+        caps.has_bb_filter = false;
+        caps.sample_geometry = crate::hardware::SampleGeometry {
+            format: crate::hardware::SampleFormat::Int16,
+            full_scale: 8192.0,
+            converter_bits: None,
+        };
+        self.radio.set_stage_gain(0, 40.0);
+        self.radio.set_stage_gain(1, 0.0);
+        self.radio.amp_enabled = false;
+        self.system.stack = Some(crate::hardware::SoftwareStack {
+            label: "soapysdr  ",
+            value: Arc::from("hackrf"),
+        });
+        self.caps = Arc::new(caps);
+        self
+    }
+}
+
+/// The start of the FT8 fixtures' first cycle: an even one, on the minute.
+pub const FT8_EPOCH: f64 = 1_800_000_000.0;
+
+/// The sheet's evening on 20 m, built through the state as the worker
+/// builds it, for the panels' tests.
+pub mod ft8_sample {
+    use crate::signal::ft8::cycle::Decode;
+    use crate::signal::ft8::demod::Physics;
+    use crate::signal::ft8::fields::G15;
+    use crate::signal::ft8::message::{Call, Message};
+    use crate::state::{CycleEntry, CycleOutcome, SdrMetrics};
+    use std::time::Instant;
+
+    /// 2026-10-30 13:15:00 UTC.
+    pub const NOW: f64 = 1_793_366_100.0;
+
+    fn std(call: &str) -> Call {
+        Call::Std {
+            call: call.into(),
+            suffix: None,
+        }
+    }
+
+    fn d(
+        to: Option<&str>,
+        from: &str,
+        word: G15,
+        snr: f64,
+        dt: f64,
+        f0: f64,
+        osd: Option<u8>,
+    ) -> Decode {
+        Decode {
+            message: Message::Standard {
+                to: to.map_or(Call::Cq(None), std),
+                from: std(from),
+                ack: false,
+                word,
+            },
+            payload: 0,
+            dt,
+            physics: Physics {
+                snr_db: snr,
+                start: 0.5 + dt,
+                f0,
+                f0_sigma: 0.01,
+                drift: -0.2,
+                amplitude: 0.1,
+                phase: 0.0,
+                coherence: 1.0,
+            },
+            costas: if osd.is_some() { 15 } else { 21 },
+            block: if osd.is_some() { 3 } else { 1 },
+            unread: None,
+            iterations: if osd.is_some() { 30 } else { 4 },
+            repaired: if osd.is_some() { 16 } else { 2 },
+            osd,
+            distance: 0.0,
+            pass: 1,
+            trace: std::sync::Arc::new(crate::signal::ft8::trace::Trace::empty()),
+        }
+    }
+
+    fn grid(g: &str) -> G15 {
+        G15::Grid(g.into())
+    }
+
+    fn cycle(start: f64, decodes: usize) -> CycleEntry {
+        let mut band = vec![0.0f32; 120];
+        band[79] = 9.0; // energy at 1975-2000 Hz that did not decode
+        CycleEntry {
+            start_unix: start,
+            dial_hz: 14_074_000,
+            outcome: CycleOutcome::Decoded,
+            decodes,
+            candidates: 140,
+            malformed: 0,
+            seconds: 1.8,
+            band,
+            clock: None,
+            funnel: Vec::new(),
+            floor_db_hz: None,
+            setting: None,
+            setting_changed: false,
+            held: false,
+            lateness: None,
+        }
+    }
+
+    pub fn evening() -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.radio.frequency = 14_074_000;
+        m.home.latitude = Some(47.497);
+        m.home.longitude = Some(19.04);
+        m.home.callsign = Some("HA5ZZT".into());
+        let at = Instant::now();
+        let earlier = vec![
+            d(None, "JA1VQD", grid("PM95"), -23.0, 0.50, 2212.0, Some(2)),
+            d(None, "PY2WQS", grid("GG66"), -15.0, 0.38, 1175.0, None),
+        ];
+        m.ft8
+            .push_cycle(cycle(NOW - 15.0, 2), earlier, None, at, Some("HA5ZZT"));
+        let now = vec![
+            d(
+                Some("HA5ZZT"),
+                "JA1VQD",
+                grid("PM95"),
+                -21.0,
+                0.48,
+                2210.6,
+                Some(2),
+            ),
+            d(None, "EA8ZQ", grid("IL18"), -9.0, 0.31, 612.0, None),
+            d(None, "W2XK", grid("FN20"), -17.0, 0.42, 1420.0, None),
+            d(
+                Some("OH2BKM"),
+                "DL7ANR",
+                grid("JO62"),
+                -3.0,
+                0.19,
+                902.0,
+                None,
+            ),
+            d(None, "VK3FTX", grid("QF22"), -22.0, 0.61, 1840.0, Some(1)),
+            d(None, "OK1HZD", grid("JO70"), 2.0, 0.12, 1305.0, None),
+            d(
+                Some("F5RVK"),
+                "YO3GCI",
+                G15::Report(1),
+                -1.0,
+                0.20,
+                340.0,
+                None,
+            ),
+        ];
+        let verdict =
+            crate::state::ft8_verdict(&[0.48, 0.31, 0.42, 0.19, 0.61, 0.12, 0.20, 0.50, 0.38]);
+        m.ft8
+            .push_cycle(cycle(NOW, 7), now, verdict, at, Some("HA5ZZT"));
+        m.ft8.hearing = Some(NOW + 15.0);
+        m.ft8.heard_until = Some(NOW + 15.0 + 9.2);
+        m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fixture has to be a state the app can actually be in, or every test
+    /// written against it is testing a fiction.
+    #[test]
+    fn the_traced_ft8_cycle_carries_real_traces() {
+        let m = SdrMetrics::fixture().ft8_traced();
+        assert!(m.ft8.decodes.len() >= 5, "{}", m.ft8.decodes.len());
+        for d in &m.ft8.decodes {
+            let t = &d.decode.trace;
+            assert_eq!(t.envelope.len(), 158);
+            assert_eq!(t.f0_track.len(), 10);
+            assert!(t.noise > 0.0);
+        }
+        let c = m.ft8.cycles.back().unwrap();
+        assert!(!c.funnel.is_empty());
+        assert!(c.floor_db_hz.is_some());
+        assert_eq!(m.ft8.history.len(), m.ft8.decodes.len());
+    }
+
+    #[test]
+    fn the_ft8_hour_is_an_hour_of_stations_with_locators() {
+        let m = SdrMetrics::fixture().ft8_hour();
+        let h = &m.ft8.history;
+        let span = h.back().unwrap().cycle_unix - h.front().unwrap().cycle_unix;
+        assert!(
+            (3000.0..=crate::state::ft8::HISTORY_SECONDS).contains(&span),
+            "{span}"
+        );
+        assert!(h
+            .iter()
+            .zip(h.iter().skip(1))
+            .all(|(a, b)| a.cycle_unix <= b.cycle_unix));
+        for r in h.iter() {
+            let s = &m.ft8.stations[r.call.as_deref().unwrap()];
+            assert!(s.locator.is_some());
+        }
+        assert!(m.ft8.stations.len() >= 30, "{}", m.ft8.stations.len());
+    }
+
+    #[test]
+    fn the_idle_fixture_is_a_coherent_idle_radio() {
+        let m = SdrMetrics::fixture();
+        assert!(!m.radio.hw_streaming);
+        assert!(m.radio.rx_start_time.is_none());
+        assert_eq!(
+            m.radio.actual_sample_rate, 0,
+            "nothing has been measured yet"
+        );
+        assert!(m.waterfall.last_fft.is_none());
+        // The tuning is legal for the capabilities the fixture claims.
+        assert!((m.caps.freq_min_hz..=m.caps.freq_max_hz).contains(&m.radio.frequency));
+        let (lna, vga) = m
+            .caps
+            .gain
+            .clamp_gains(m.radio.primary_gain(), m.radio.secondary_gain());
+        assert_eq!(
+            (lna, vga),
+            (m.radio.primary_gain(), m.radio.secondary_gain()),
+            "the fixture's gains must be ones this device can be set to"
+        );
+    }
+
+    #[test]
+    fn a_carrier_lands_where_it_was_asked_for() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let fr = m.waterfall.last_fft.as_ref().unwrap();
+        let n = fr.bins_dbfs.len();
+        let peak = fr
+            .bins_dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(peak, n / 2, "a zero offset is the centre bin");
+        assert!((fr.bins_dbfs[peak] - fr.noise_floor - 40.0).abs() < 1e-4);
+
+        // And an offset one moves off centre, in the right direction.
+        let m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(1_000_000.0, 40.0);
+        let fr = m.waterfall.last_fft.as_ref().unwrap();
+        let peak = fr
+            .bins_dbfs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        assert!(
+            peak > fr.bins_dbfs.len() / 2,
+            "a positive offset sits right of centre"
+        );
+    }
+}

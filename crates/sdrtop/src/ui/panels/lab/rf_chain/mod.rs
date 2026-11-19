@@ -1,0 +1,954 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+//! `RfChainPanel` - the RF Diagnostics column of the Lab RF bench (`[6]`).
+//!
+//! Reads the whole receive chain as one story: the per-stage **gain lineup** (level
+//! after each stage), **gain staging** (LNA/VGA vs their optimal targets), the Friis
+//! **noise figure** breakdown, **sensitivity** (MDS + noise-floor trend), and a
+//! plain-language verdict with the action chips. All levels are *modeled / relative*
+//! dBm anchored to the measured ADC level - useful for staging, not a wattmeter.
+//!
+//! - [`staging`]: the gain lineup and the two gain bars.
+//! - [`noise`]: the Friis breakdown and the sensitivity read-out.
+//! - [`verdict`]: the plain-language block, the chips and the foot.
+//! - [`rf_bench`](super::rf_bench): the row vocabulary shared with `adc_loading`,
+//!   the panel this one is the other half of.
+
+mod noise;
+mod reference;
+mod staging;
+mod verdict;
+
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
+    Frame,
+};
+
+use crate::signal::rf_calc::{
+    cascade, level_lineup, signal_lineup, staging_target_on, staging_verdict_for, system_nf_db,
+    Stage,
+};
+use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
+
+use super::rf_bench::severity_color;
+
+pub struct RfChainPanel;
+
+/// Label column for this panel's rows: clears `LNA`, `VGA`, `MDS`, `sys`, `ADC`
+/// and the stage labels. Narrower than the ADC column's, because these names are.
+const LABEL_W: usize = 3;
+
+/// Width reserved for a bar row's right-hand value (`20 / 40 dB`).
+const VALW: usize = 10;
+
+impl Panel for RfChainPanel {
+    fn name(&self) -> &'static str {
+        "rf_chain"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (32, 16)
+    }
+    // `d` (Diagnostics) focuses the RF bench for its own actions; `r`/`f` are taken
+    // globally (reset / frequency), so the panel takes a free mnemonic.
+    fn focus_key(&self) -> Option<char> {
+        Some('d')
+    }
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("\u{2191}\u{2193}", "front gain"),
+            ("[ ]", "second gain"),
+            ("A", "auto-gain"),
+            ("K", "noise sweep"),
+            ("\u{23B5}", "freeze"),
+        ]
+    }
+
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
+        PanelChrome::new("RF _Diagnostics")
+            .stale_when(Staleness::NotStreaming)
+            .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
+    }
+
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &crate::ui::View<'_>,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
+        let iw = inner.width as usize;
+
+        if !state.radio.hw_streaming {
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "\u{2014}\u{2014}\u{2014}",
+                    Style::default().fg(theme.label),
+                )),
+                inner,
+            );
+            return;
+        }
+        // --- model (frozen snapshot when held, else live) ----------------------
+        let fz = state.lab.rf_freeze.as_ref();
+        let amp = fz.map(|f| f.amp_enabled).unwrap_or(state.radio.amp_enabled);
+        let lna = fz.map(|f| f.lna_gain).unwrap_or(state.radio.primary_gain());
+        let vga = fz
+            .map(|f| f.vga_gain)
+            .unwrap_or(state.radio.secondary_gain());
+        let adc_peak = fz
+            .map(|f| f.peak_dbfs)
+            .unwrap_or(state.signal.adc_peak_dbfs) as f64;
+        let snr = fz.map(|f| f.snr_db).unwrap_or(state.signal.peak_to_nf_db) as f64;
+        let adc_rms = fz.map(|f| f.rms_dbfs).unwrap_or(state.signal.adc_rms_dbfs);
+        // **The gate is per block, not per panel.** Only two of the five blocks
+        // below need per-stage noise figures. The level lineup needs gains, the
+        // staging advice needs the ADC peak, and the verdict needs neither, so a
+        // device whose chain is unmodelled loses the noise numbers and keeps
+        // everything else. It used to lose the whole bench: three lines on a
+        // twenty row panel.
+        let modelled = state.caps.friis_applicable;
+        let stages: Vec<Stage> = if modelled {
+            cascade(amp, lna, vga)
+        } else {
+            // The driver's own stages, with the gains it is actually set to,
+            // and no gain at all (NaN) for a stage whose dB was not measured
+            // at this frequency: the lineup stops there rather than adding a
+            // position in as if it were decibels.
+            state
+                .caps
+                .gain
+                .stages()
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    let gain = match state.stage_reading(i) {
+                        Some(crate::hardware::StageReading::Db(db)) => db,
+                        _ => f64::NAN,
+                    };
+                    Stage::unmodelled(&s.name, gain)
+                })
+                .collect()
+        };
+        let nf = system_nf_db(&stages);
+        let levels = if modelled {
+            level_lineup(adc_peak, snr, &stages)
+        } else {
+            signal_lineup(adc_peak, &stages)
+        };
+        // Judged against this radio's ceiling where it is tuned, where its
+        // samples stop.
+        let ceiling = state.ceiling_dbfs();
+        let (verdict_word, sev) =
+            staging_verdict_for(adc_peak - ceiling, state.ceiling().map(|c| c.kind));
+        let stage_specs = state.caps.gain.stages();
+        // A target is a dB figure shared out over the chain, which needs every
+        // stage to be a gain here; where one is not, no target is offered.
+        let targets = state.chain_db_holds().then(|| {
+            // On a vendor curve, a step of it: the target the auto-gain key
+            // would set, not a split the knob could never reach.
+            staging_target_on(
+                adc_peak - ceiling,
+                &state.caps.gain,
+                state.radio.gain_curve,
+                &state.radio.gains,
+                state.radio.frequency,
+            )
+        });
+        let readings: Vec<_> = (0..stage_specs.len())
+            .map(|i| state.stage_reading(i))
+            .collect();
+        let sev_col = severity_color(sev, theme);
+
+        let mut lines: Vec<Line> = Vec::new();
+        staging::lineup(
+            &mut lines,
+            &levels,
+            &stages,
+            adc_peak,
+            state.caps.gain.stages_are_digital(),
+            sev_col,
+            iw,
+            theme,
+        );
+        lines.push(Line::raw(""));
+        staging::staging(
+            &mut lines,
+            &stage_specs,
+            &state.radio.gains,
+            targets.as_deref(),
+            &readings,
+            state.caps.gain.stages_are_digital(),
+            state.radio.frequency,
+            iw,
+            theme,
+        );
+        lines.push(Line::raw(""));
+        if modelled {
+            noise::noise_figure(&mut lines, &stages, nf, iw, theme);
+            lines.push(Line::raw(""));
+            noise::sensitivity(&mut lines, state, nf, iw, theme);
+        } else {
+            noise::not_modelled(
+                &mut lines,
+                state.caps.gain.no_cascade_reason(),
+                state.caps.gain.stages_are_digital(),
+                iw,
+                theme,
+            );
+        }
+        lines.push(Line::raw(""));
+        // Running or finished, never both: the progress block is the same
+        // measurement mid-flight. It sits under SENSITIVITY on a modelled radio
+        // so the measured knee and the Friis number can be read together - they
+        // answer different questions, and seeing them apart is what makes a
+        // disagreement between them findable.
+        if state.lab.noise_sweep.is_some() {
+            noise::sweep_progress(&mut lines, state, iw, theme);
+        } else {
+            noise::sweep_reading(&mut lines, state, iw, theme);
+        }
+        // Between the noise block and the verdict, because it answers the same
+        // kind of question those do - what is this receiver actually like - and
+        // because a user reading the verdict should have just read what the
+        // clock behind every frequency on the deck is doing.
+        lines.push(Line::raw(""));
+        reference::draw(&mut lines, state, iw, theme);
+        verdict::draw(
+            &mut lines,
+            &verdict::Verdict {
+                word: verdict_word,
+                sev,
+                sev_col,
+                adc_peak,
+                ceiling,
+                clipper: state.ceiling(),
+                snr,
+                adc_rms,
+                amp,
+                tracking: state.lab.rf_autotrack,
+                front: state
+                    .caps
+                    .gain
+                    .stages()
+                    .first()
+                    .map_or_else(|| "gain".to_string(), |s| s.name.clone()),
+                second: state
+                    .caps
+                    .gain
+                    .has_second_stage()
+                    .then(|| state.caps.gain.stages().get(1).map(|s| s.name.clone()))
+                    .flatten(),
+                boost: state
+                    .caps
+                    .gain
+                    .has_boost()
+                    .then(|| state.caps.gain.boost_label().to_string()),
+                front_attenuates: state
+                    .caps
+                    .gain
+                    .stages()
+                    .first()
+                    .is_some_and(|s| s.max_db <= 0.0),
+                second_attenuates: state
+                    .caps
+                    .gain
+                    .stages()
+                    .get(1)
+                    .is_some_and(|s| s.max_db <= 0.0),
+                digital: state.caps.gain.stages_are_digital(),
+            },
+            theme,
+        );
+
+        // Self-adjusting density: collapse spacers when short, grow them to fill when
+        // tall (chrome::fit_spacers), so the pane breathes the same at every height -
+        // consistent with the other lab side panels.
+        crate::ui::chrome::fit_spacers(&mut lines, inner.height as usize);
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_name_and_min_size() {
+        let p = RfChainPanel;
+        assert_eq!(p.name(), "rf_chain");
+        let (w, h) = p.min_size();
+        assert!(w >= 16 && h >= 8);
+    }
+
+    use crate::state::SdrMetrics;
+    use crate::ui::fixture::draw;
+
+    /// **At the R2's ceiling the verdict names the tuner**, not the ADC.
+    #[test]
+    fn at_the_r2s_ceiling_the_verdict_names_the_tuner() {
+        let mut m = SdrMetrics::fixture().streaming().band_measured_chain();
+        m.radio.frequency = 92_800_000;
+        m.signal.adc_peak_dbfs = -3.0;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("GAIN CLIPPING"), "{out}");
+        assert!(out.contains("the tuner clipping, before the ADC"), "{out}");
+    }
+
+    /// **At the HF+'s ceiling the verdict says held, not clipping**: its
+    /// digital AGC holds the level there, and past it the level is not the
+    /// antenna's; on VHF the hold is lower, and the same peak is past it.
+    #[test]
+    fn at_the_hf_plus_ceiling_the_verdict_says_held() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        m.signal.adc_peak_dbfs = -11.6;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("LEVEL HELD"), "{out}");
+        assert!(out.contains("the digital AGC holding it there."), "{out}");
+        assert!(
+            out.contains("past it the level is not the antenna's."),
+            "{out}"
+        );
+        assert!(!out.contains("CLIPPING"), "{out}");
+        m.signal.adc_peak_dbfs = -16.0;
+        let hf = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(
+            hf.contains("LEVEL HOT") || hf.contains("LEVEL WELL PLACED"),
+            "{hf}"
+        );
+        m.radio.frequency = 100_000_000;
+        m.signal.adc_peak_dbfs = -13.0;
+        let vhf = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(vhf.contains("LEVEL HELD"), "{vhf}");
+    }
+
+    /// **The HF+'s lineup starts at its converter**: ATT and LNA are digital
+    /// gain after it, so the antenna has no level, the first level is what
+    /// the stages are handed, and the last row is the word, not the ADC.
+    #[test]
+    fn the_hf_plus_lineup_starts_at_the_converter() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        m.radio.gains = vec![-6.0, 6.0];
+        m.signal.adc_peak_dbfs = -20.0;
+        let out = draw(RfChainPanel, 60, 40, &m).join("\n");
+        // Every labelled row of the lineup, the antenna's dash included.
+        let rows: Vec<String> = out
+            .lines()
+            .skip_while(|l| !l.contains("GAIN LINEUP"))
+            .skip(1)
+            .take_while(|l| !l.contains("GAIN STAGING"))
+            .filter(|l| {
+                !l.trim_matches(|c: char| c == '\u{2502}' || c.is_whitespace())
+                    .is_empty()
+            })
+            .map(str::to_string)
+            .collect();
+        let labels: Vec<&str> = rows
+            .iter()
+            .map(|r| {
+                r.trim_start_matches('\u{2502}')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+            })
+            .collect();
+        assert_eq!(labels, ["ANT", "ADC", "ATT", "LNA", "word"], "{rows:?}");
+        let joined = rows.join("\n");
+        assert!(joined.contains("-20 dBFS"), "{joined}");
+        assert!(
+            rows[0].contains('\u{2014}') && !rows[0].contains("dBFS"),
+            "{rows:?}"
+        );
+        assert!(
+            rows[1].contains("-20 dBFS"),
+            "the stages' input: -20 less -6 plus 6: {rows:?}"
+        );
+        assert!(
+            rows[2].contains("-6 dB") && rows[2].contains("-26 dBFS"),
+            "{rows:?}"
+        );
+        assert!(rows[4].contains("-20 dBFS"), "the word, whole: {rows:?}");
+    }
+
+    /// **One headroom on every panel**: the verdict, the ADC bench and the
+    /// strip each subtract the two levels as they print them. A peak of
+    /// -16.4 under a hold from -13.5 reads 2 dB everywhere (-14 and -16
+    /// printed), where the verdict once said 3 beside the bench's 2.
+    #[test]
+    fn the_headroom_is_one_figure_on_every_panel() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        m.signal.adc_peak_dbfs = -16.4;
+        let rf = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(
+            rf.contains("Signal at -16 dBFS \u{2014} 2 dB from the hold."),
+            "{rf}"
+        );
+        let adc = draw(
+            crate::ui::panels::lab::adc_loading::AdcLoadingPanel,
+            61,
+            26,
+            &m,
+        )
+        .join("\n");
+        assert!(adc.contains("2 dB under the digital AGC's hold"), "{adc}");
+        assert_eq!(m.shown_headroom_db(), 2.0);
+    }
+
+    /// **An attenuator is moved in words that say which way**: on the HF+,
+    /// whose front stage is an attenuator, the advice asks for more or less
+    /// ATT, never "increase" or "reduce" it; a gain chain keeps its words.
+    #[test]
+    fn an_attenuator_is_asked_for_more_or_less() {
+        // An attenuator ahead of the converter, then a gain stage: the HF+'s
+        // names, without its digital flag, which has copy of its own.
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::GainModel::new(
+            vec![
+                crate::hardware::StageSpec::tabled(
+                    "ATT",
+                    (0..=8).map(|i| f64::from(i) * 6.0 - 48.0).collect(),
+                ),
+                crate::hardware::StageSpec::tabled("LNA", vec![0.0, 6.0]),
+            ],
+            "ATT",
+            "ATT",
+        )
+        .with_second_stage();
+        m.caps = std::sync::Arc::new(caps);
+        for (peak, want) in [
+            (-0.5, "More ATT or reduce LNA to restore headroom."),
+            (-24.0, "ADC window under-used. Less ATT"),
+            (-40.0, "Less ATT; at 0 dB, check the antenna"),
+        ] {
+            m.signal.adc_peak_dbfs = peak;
+            let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+            assert!(out.contains(want), "{want:?} at {peak} in\n{out}");
+            assert!(
+                !out.contains("Increase ATT") && !out.contains("Reduce ATT"),
+                "{out}"
+            );
+        }
+        let mut hackrf = SdrMetrics::fixture().streaming();
+        hackrf.signal.adc_peak_dbfs = -50.0;
+        let out = draw(RfChainPanel, 70, 60, &hackrf).join("\n");
+        assert!(
+            out.contains("Increase LNA; if maxed, check the antenna"),
+            "{out}"
+        );
+    }
+
+    /// **On digital stages the advice is placement only**: the HF+'s ATT and
+    /// LNA place the level in the word and promise nothing for the SNR, which
+    /// the radio's AGCs set; the words say `LEVEL`, not `GAIN`, and the AGC
+    /// switch says who sets ATT.
+    #[test]
+    fn on_digital_stages_the_advice_is_placement_only() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        for (peak, want) in [
+            (
+                -22.0,
+                [
+                    "LEVEL WELL PLACED",
+                    "well placed. ATT and LNA place it in the",
+                    "word only; the radio's AGCs set the SNR.",
+                ],
+            ),
+            (
+                -36.0,
+                [
+                    "LEVEL LOW IN THE WORD",
+                    "low in the word: less ATT or more LNA lifts it;",
+                    "the radio's AGCs set the SNR, not these.",
+                ],
+            ),
+            (
+                -50.0,
+                [
+                    "LEVEL LOW IN THE WORD",
+                    "less ATT or more LNA lifts it;",
+                    "not these.",
+                ],
+            ),
+            (
+                -15.0,
+                [
+                    "LEVEL HOT",
+                    "Near it the radio cuts its own gain:",
+                    "More ATT or reduce LNA keeps it clear.",
+                ],
+            ),
+        ] {
+            m.signal.adc_peak_dbfs = peak;
+            let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+            for w in want {
+                assert!(out.contains(w), "{w:?} at {peak} in\n{out}");
+            }
+            for never in [
+                "check the antenna",
+                "each stage's own noise figure",
+                "analog-noise",
+                "quantisation limited",
+                "GAIN WELL",
+                "GAIN WEAK",
+                "GAIN HOT",
+                "GAIN UNDER",
+            ] {
+                assert!(!out.contains(never), "{never:?} at {peak} in\n{out}");
+            }
+            assert!(
+                out.contains("SNR set in the radio") && out.contains("ATT by hand"),
+                "{out}"
+            );
+        }
+        m.radio.amp_enabled = true;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("AGC sets ATT"), "{out}");
+    }
+
+    /// **A stage's gain reads as the same figure on every panel**: rounded,
+    /// as the level diagram and the header round it. 16.74 dB truncated to
+    /// +16 here sat beside +17 in the diagram.
+    #[test]
+    fn the_lineup_rounds_a_stage_gain_as_the_diagram_does() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain()
+            .on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        let out = draw(RfChainPanel, 60, 40, &m).join("\n");
+        let rows = lineup_rows(&out).join("\n");
+        assert!(
+            rows.contains("LNA +17 dB") && rows.contains("VGA +34 dB"),
+            "{rows}"
+        );
+    }
+
+    /// **No target, no "at optimum"**: under the AGC (or a stage outside its
+    /// measured band) the staging block offers no target, and says so rather
+    /// than calling the chain optimal against one.
+    #[test]
+    fn with_no_target_the_staging_claims_no_optimum() {
+        let mut m = SdrMetrics::fixture().streaming().band_measured_chain();
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("no target here"), "{out}");
+        assert!(!out.contains("at optimum"), "{out}");
+        assert!(out.contains("AGC"), "{out}");
+    }
+
+    /// **The level lineup stops where a gain stops being known.** With the
+    /// R2 tuned outside the band its LNA was measured in, the levels after
+    /// the LNA still follow back from the measured ADC level, the antenna end
+    /// and the LNA's own output do not, and the staging block gives the LNA's
+    /// position; nothing on the bench reads `NaN`. Inside the band every row
+    /// is a level.
+    #[test]
+    fn the_lineup_stops_where_a_stage_was_not_measured() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(0.0, 40.0)
+            .band_measured_chain();
+        let far = draw(RfChainPanel, 60, 40, &m).join("\n");
+        assert!(!far.contains("NaN"), "{far}");
+        assert!(far.contains("14/14"), "{far}");
+        let ant = far.lines().find(|l| l.contains("ANT")).unwrap_or_default();
+        assert!(
+            ant.contains('\u{2014}') && !ant.contains("dBFS"),
+            "{ant}\n{far}"
+        );
+        let vga = far
+            .lines()
+            .find(|l| l.contains("VGA") && l.contains("dBFS"));
+        assert!(vga.is_some(), "the VGA's output is still a level:\n{far}");
+
+        m.radio.frequency = 92_800_000;
+        let near = draw(RfChainPanel, 60, 40, &m).join("\n");
+        let ant = near.lines().find(|l| l.contains("ANT")).unwrap_or_default();
+        assert!(ant.contains("dBFS"), "{ant}\n{near}");
+        assert!(!near.contains("14/14"), "{near}");
+    }
+
+    /// **The bench names the radio's own controls.** On the R2 the arrows
+    /// move the LNA and `[ ]` the mixer, and there is no amp to bypass; on a
+    /// HackRF they are its LNA, its VGA and its AMP.
+    #[test]
+    fn the_bench_names_the_radios_own_gain_keys() {
+        let r2 = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(0.0, 40.0)
+            .band_measured_chain();
+        let out = draw(RfChainPanel, 60, 44, &r2).join("\n");
+        assert!(out.contains("[ ] MIX"), "{out}");
+        assert!(!out.contains("[ ] VGA") && !out.contains("AMP"), "{out}");
+
+        let hackrf = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let out = draw(RfChainPanel, 60, 44, &hackrf).join("\n");
+        assert!(out.contains("[ ] VGA") && out.contains("AMP"), "{out}");
+    }
+
+    #[test]
+    fn an_idle_bench_spends_no_row_saying_the_sweep_is_idle() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let out = draw(RfChainPanel, 46, 30, &m).join("\n");
+        assert!(!out.contains("NOISE STEP"), "{out}");
+    }
+
+    #[test]
+    fn a_running_sweep_shows_its_stage_and_how_far_along_it_is() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let spec = m.caps.gain.stages().remove(0);
+        let plan = crate::signal::noise_slope::plan_for(&spec);
+        assert!(
+            plan.len() > 2,
+            "the fixture's front stage must be sweepable"
+        );
+        let mut sw = crate::signal::noise_slope::GainSweep::new(0, plan.clone(), 24.0);
+        sw.begin();
+        m.lab.noise_sweep = Some(sw);
+        let out = draw(RfChainPanel, 46, 30, &m).join("\n");
+        assert!(out.contains("NOISE STEP"), "{out}");
+        assert!(out.contains(&spec.name), "{out}");
+        assert!(out.contains(&format!("0/{}", plan.len())), "{out}");
+    }
+
+    /// The panel's prose as a reader sees it: frame columns removed and the line
+    /// breaks closed up, so a sentence that `chrome::wrap` split across two rows
+    /// still reads as one string. Asserting on the raw buffer instead makes a
+    /// test that passes or fails on where the wrap happened to land.
+    fn prose(rows: &[String]) -> String {
+        rows.iter()
+            .map(|r| r.trim_matches(|c| c == '\u{2502}' || c == ' '))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn with_reading(knee: Option<f64>, above: Option<f32>) -> SdrMetrics {
+        use crate::signal::noise_slope::{Point, Reading};
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.lab.noise_reading = Some(crate::state::NoiseReading {
+            at_hz: 92_800_000,
+            reading: Reading {
+                points: vec![
+                    Point {
+                        gain_db: 0.0,
+                        noise_dbfs: -84.0,
+                    },
+                    Point {
+                        gain_db: 8.0,
+                        noise_dbfs: -84.0,
+                    },
+                    Point {
+                        gain_db: 16.0,
+                        noise_dbfs: -83.0,
+                    },
+                    Point {
+                        gain_db: 24.0,
+                        noise_dbfs: -79.0,
+                    },
+                    Point {
+                        gain_db: 32.0,
+                        noise_dbfs: -71.0,
+                    },
+                    Point {
+                        gain_db: 40.0,
+                        noise_dbfs: -63.0,
+                    },
+                ],
+                slope: 0.52,
+                knee_db: knee,
+                slope_above_knee: above,
+            },
+        });
+        m
+    }
+
+    #[test]
+    fn the_reading_leads_with_the_knee_and_never_quotes_the_span_slope() {
+        let m = with_reading(Some(24.0), Some(0.94));
+        let out = draw(RfChainPanel, 50, 34, &m).join("\n");
+        assert!(out.contains("NOISE STEP"), "{out}");
+        assert!(out.contains("LNA 24 dB and up"), "{out}");
+        assert!(out.contains("0.94 dB/dB"), "{out}");
+        // The span average describes neither half of the curve; it must not
+        // appear anywhere on the bench.
+        assert!(!out.contains("0.52"), "{out}");
+    }
+
+    #[test]
+    fn the_reading_names_the_band_it_belongs_to() {
+        // The knee moved from LNA 24 to 32 dB between the FM band and quiet UHF
+        // on the same radio, so a reading with no frequency on it is a number
+        // about somewhere else the moment the user retunes.
+        let m = with_reading(Some(24.0), Some(0.94));
+        let out = prose(&draw(RfChainPanel, 50, 34, &m));
+        assert!(
+            out.contains("NOISE STEP ╶────────── measured at 92.800 MHz"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn the_reading_says_what_it_is_not() {
+        let m = with_reading(Some(24.0), Some(0.94));
+        let out = prose(&draw(RfChainPanel, 50, 34, &m));
+        assert!(
+            out.contains("Not a noise figure: that needs a known source"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn no_knee_is_an_answer_rather_than_a_blank() {
+        let m = with_reading(None, None);
+        let out = prose(&draw(RfChainPanel, 50, 34, &m));
+        assert!(out.contains("none in range"), "{out}");
+        // With one regime in the data the span slope has no two halves to
+        // average, so it is the honest summary here and is shown.
+        assert!(out.contains("0.52 dB/dB"), "{out}");
+        assert!(
+            out.contains(
+                "The floor never followed the gain, so the converter set it at every setting"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_running_sweep_replaces_the_last_reading_rather_than_stacking_on_it() {
+        let mut m = with_reading(Some(24.0), Some(0.94));
+        let spec = m.caps.gain.stages().remove(0);
+        let mut sw = crate::signal::noise_slope::GainSweep::new(
+            0,
+            crate::signal::noise_slope::plan_for(&spec),
+            24.0,
+        );
+        sw.begin();
+        m.lab.noise_sweep = Some(sw);
+        let out = draw(RfChainPanel, 50, 34, &m).join("\n");
+        assert!(out.contains("sweep running"), "{out}");
+        assert!(!out.contains("and up"), "{out}");
+    }
+
+    #[test]
+    fn the_footer_advertises_the_sweep_key() {
+        let b = RfChainPanel.focus_bindings();
+        assert!(b.contains(&("K", "noise sweep")), "{b:?}");
+    }
+
+    const W: u16 = 56;
+    const H: u16 = 22;
+
+    /// The GAIN LINEUP's level rows: those between its heading and the
+    /// next block's that carry a level.
+    fn lineup_rows(out: &str) -> Vec<String> {
+        out.lines()
+            .skip_while(|l| !l.contains("GAIN LINEUP"))
+            .skip(1)
+            .take_while(|l| !l.contains("GAIN STAGING"))
+            .filter(|l| l.contains("dBFS"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn chain() -> SdrMetrics {
+        SdrMetrics::fixture()
+            .streaming()
+            .named_chain()
+            .with_carrier(0.0, 20.0)
+    }
+
+    /// The complaint this checkpoint answers. The bench used to return after
+    /// three lines on any device without a modelled cascade, leaving most of a
+    /// twenty row panel blank.
+    #[test]
+    fn an_unmodelled_device_gets_the_blocks_that_do_not_need_noise_figures() {
+        let out = draw(RfChainPanel, W, H, &chain()).join("\n");
+        assert!(out.contains("GAIN LINEUP"), "no level lineup:\n{out}");
+        assert!(out.contains("GAIN STAGING"), "no staging advice:\n{out}");
+        assert!(out.contains("ANT"), "no antenna node:\n{out}");
+        let ant = out.lines().find(|l| l.contains("ANT")).unwrap_or_default();
+        assert!(ant.contains("dBFS"), "no levels:\n{out}");
+        // Not dBm: nothing here is calibrated to the antenna, so a level is
+        // the converter's dBFS walked back through the gains.
+        assert!(
+            !lineup_rows(&out).iter().any(|l| l.contains("dBm")),
+            "{out}"
+        );
+        // And the verdict, which needs only the ADC peak.
+        assert!(
+            out.contains("STAGED") || out.contains("GAIN"),
+            "no verdict:\n{out}"
+        );
+    }
+
+    /// The two blocks that genuinely cannot work say so, in the space their
+    /// numbers would have filled, with the reason this device gives.
+    #[test]
+    fn the_noise_blocks_name_what_is_missing_rather_than_printing_a_number() {
+        let out = draw(RfChainPanel, W, H, &chain()).join("\n");
+        assert!(out.contains("not modelled"), "{out}");
+        assert!(
+            out.contains("chain not modelled"),
+            "the device's own reason:\n{out}"
+        );
+        // No noise **number** anywhere. The explanation may name MDS and NF, and
+        // does, so this looks for a figure beside them rather than for the words.
+        for word in ["MDS", "NF"] {
+            assert!(
+                !out.lines().any(|l| l.contains(word) && l.contains("dB")),
+                "printed a {word} value it cannot know:\n{out}"
+            );
+        }
+    }
+
+    /// An RTL-SDR is the other unmodelled shape: one stage, and a different
+    /// reason. Both used to print the same sentence.
+    #[test]
+    fn a_single_stage_device_gets_the_same_treatment_and_its_own_reason() {
+        let m = SdrMetrics::fixture()
+            .streaming()
+            .rtlsdr()
+            .with_carrier(0.0, 20.0);
+        let out = draw(RfChainPanel, W, H, &m).join("\n");
+        assert!(out.contains("GAIN LINEUP"), "{out}");
+        assert!(out.contains("Tuner"), "the driver's own stage name:\n{out}");
+        assert!(out.contains("single tuner"), "its own reason:\n{out}");
+    }
+
+    /// The modelled device is untouched: it still gets all five blocks.
+    #[test]
+    fn a_hackrf_still_gets_the_full_bench() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 20.0);
+        let out = draw(RfChainPanel, W, 34, &m).join("\n");
+        assert!(out.contains("GAIN LINEUP"), "{out}");
+        assert!(
+            out.contains("MDS"),
+            "the modelled bench keeps its sensitivity:\n{out}"
+        );
+        assert!(!out.contains("not modelled"), "{out}");
+        assert!(out.contains("MIX"), "and its modelled mixer stage:\n{out}");
+    }
+
+    /// Build a device with `n` stages, each named `name`-ish and set to 10 dB.
+    fn with_stages(n: usize, name: &str) -> SdrMetrics {
+        use crate::hardware::StageSpec;
+        let mut m = chain();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::GainModel::new(
+            (0..n)
+                .map(|i| StageSpec::ranged(&format!("{name}{i}"), 0.0, 30.0, 1.0))
+                .collect(),
+            "RF",
+            "RF",
+        );
+        m.caps = std::sync::Arc::new(caps);
+        m.radio.gains = vec![10.0; n];
+        m
+    }
+
+    /// One stage, two, three, six. The lineup is the device's own chain, so
+    /// there is no count it can assume.
+    #[test]
+    fn the_lineup_draws_however_many_stages_there_are() {
+        for n in [1usize, 2, 3, 6] {
+            let out = draw(RfChainPanel, W, 34, &with_stages(n, "ST")).join("\n");
+            for i in 0..n {
+                assert!(
+                    out.contains(&format!("ST{i}")),
+                    "{n} stages: no ST{i}:\n{out}"
+                );
+            }
+            assert!(out.contains("ANT") && out.contains("ADC"), "{n}:\n{out}");
+        }
+    }
+
+    /// Six stages in forty columns: the case that used to clip `-58 dBm` down
+    /// to `-58 `.
+    #[test]
+    fn six_stages_in_forty_columns_keep_every_reading() {
+        let out = draw(RfChainPanel, 40, 30, &with_stages(6, "STAGE"));
+        for line in &out {
+            assert!(
+                line.chars().count() <= 40,
+                "a row grew past the pane: {line:?}"
+            );
+        }
+        let joined = out.join("\n");
+        assert_eq!(
+            lineup_rows(&joined).len(),
+            8,
+            "the antenna and six stages each keep their level, and the ADC its own:\n{joined}"
+        );
+    }
+
+    /// A driver may name a stage anything. A long name is **cut to the column**
+    /// rather than allowed to push the reading off the right-hand edge: the
+    /// level is the measurement, the label is only its name.
+    #[test]
+    fn a_long_stage_name_is_clipped_rather_than_shoving_the_reading_out() {
+        let out = draw(RfChainPanel, 32, 30, &with_stages(3, "PREAMPLIFIER"));
+        for line in &out {
+            assert!(line.chars().count() <= 32, "{line:?}");
+        }
+        let joined = out.join("\n");
+        assert_eq!(
+            lineup_rows(&joined).len(),
+            5,
+            "antenna plus three stages, and the ADC:\n{joined}"
+        );
+        assert!(
+            joined.contains("PREAMPLI"),
+            "the name is cut, not dropped:\n{joined}"
+        );
+    }
+
+    /// The reading stays flush against the right edge whatever the names are.
+    ///
+    /// The label column grows into the padding rather than pushing the value
+    /// along, so a column of levels stays a column: readable down the panel
+    /// without the eye having to find each number.
+    #[test]
+    fn the_reading_stays_flush_right_whatever_the_names_are() {
+        // Columns, not bytes: an em dash in the middle column is one column and
+        // three bytes, and measuring the wrong one makes aligned rows look ragged.
+        let end_column = |line: &str| -> Option<usize> {
+            let cols: Vec<char> = line.chars().collect();
+            let text: String = cols.iter().collect();
+            text.find("dBFS")
+                .map(|byte| text[..byte].chars().count() + 4)
+        };
+        // The lineup's rows only: the verdict below says "dBFS" too.
+        let edges = |m: &SdrMetrics| -> Vec<usize> {
+            lineup_rows(&draw(RfChainPanel, W, 30, m).join("\n"))
+                .iter()
+                .filter_map(|l| end_column(l))
+                .collect()
+        };
+        let short = edges(&with_stages(2, "A"));
+        let long = edges(&with_stages(2, "PREAMPLIFIER"));
+        assert!(!short.is_empty());
+        assert_eq!(short, long, "the name length must not move the reading");
+        assert!(
+            short.windows(2).all(|w| w[0] == w[1]),
+            "and every row in the column agrees: {short:?}"
+        );
+    }
+
+    /// **The staging bars read a banded stage in its band's dB**, over that
+    /// band's span: the LNA at 43 of the band's 68 dB.
+    #[test]
+    fn the_staging_reads_a_banded_stage_in_its_bands_db() {
+        let m = SdrMetrics::fixture().streaming().banded_chain();
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("43 / 68 dB"), "{out}");
+    }
+}

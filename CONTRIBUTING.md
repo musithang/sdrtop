@@ -118,9 +118,9 @@ Run what CI runs. All four should pass:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all --locked
-cargo +1.88 check --locked --all-targets   # the oldest Rust sdrtop supports
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
+cargo +1.88 check --workspace --locked --all-targets   # the oldest Rust sdrtop supports
 ```
 
 And check these by hand:

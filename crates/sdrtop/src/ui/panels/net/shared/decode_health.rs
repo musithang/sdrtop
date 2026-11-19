@@ -1,0 +1,916 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+//! `NetDecodeHealthPanel` - what the receiver missed.
+//!
+//! **This is not a debug panel, it is testimony.** Without
+//! it, every count in the section is a lower bound presented as a total. A frame
+//! at 6 Mbps carrying 1500 bytes is two milliseconds, which at 20 Msps spans
+//! several driver blocks, and there are three separate ways for one of those
+//! blocks to go missing before anything has had a chance to look at it: the
+//! driver loses samples before the block is stamped, the bounded feed refuses a
+//! whole block under load, and a run broken in the middle takes with it whatever
+//! was being assembled. None of the three is visible from downstream.
+//!
+//! **What was decoded, and what nothing decodes.** Each decoder's funnel is
+//! counted where it happens: every BLE trigger ends as a packet whose CRC
+//! passed, one whose CRC failed, or a capture nothing could be decoded from
+//! (`signal::ble::receive::Funnel`); classic Bluetooth counts access-code hits
+//! and the piconets whose UAP is resolved; LE Coded, once its receiver has run,
+//! counts its funnel as BLE does and its AuxPtrs by how each ended. A decoder
+//! that has not run this session shows `—` and "not decoding", never a zero: a
+//! row reading `0` is a claim that it looked and found none. There is still no
+//! protocol-agnostic burst detector, and its row says so the same way - rule 2
+//! in the small: what cannot be asked is refused, never invented.
+
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
+    Frame,
+};
+
+use crate::state::SdrMetrics;
+use crate::ui::chrome::{collapse_spacers, section};
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
+
+pub struct NetDecodeHealthPanel;
+
+/// Label and value column widths, so the counts line up under each other.
+/// The label column holds the longest label any row has (`not a short
+/// field`, `  another channel`): a longer one pushes its count out of line.
+const LABEL: usize = 17;
+const VALUE: usize = 10;
+
+/// One row: a label, a right-aligned count, and a note that earns its place or
+/// is not drawn.
+///
+/// **The note is dropped rather than truncated.** These notes are the
+/// qualifiers - "a floor", "no detector is running yet" - and half a qualifier
+/// is worse than none: `blocks lost   7   a flo` reads as a number with
+/// something unexplained attached, which is the impression the note exists to
+/// prevent. The panel's minimum width does not fit all of them.
+fn count<'a>(
+    label: &str,
+    value: String,
+    ink: ratatui::style::Color,
+    note: Option<&str>,
+    theme: &crate::Theme,
+    width: usize,
+) -> Line<'a> {
+    let mut spans = vec![
+        Span::styled(
+            format!("{:<LABEL$}", label),
+            Style::default().fg(theme.label),
+        ),
+        Span::styled(format!("{:>VALUE$}", value), Style::default().fg(ink)),
+    ];
+    if let Some(note) = note.filter(|n| LABEL + VALUE + 3 + n.chars().count() <= width) {
+        spans.push(Span::styled(
+            format!("   {note}"),
+            Style::default().fg(theme.label),
+        ));
+    }
+    Line::from(spans)
+}
+
+/// `1 234 567` - grouped, because these run to seven digits inside a minute and
+/// an ungrouped one cannot be read at a glance, which is the only way anybody
+/// reads this panel.
+fn grouped(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `1.63 Gsamp` - the pair count in units a person can hold.
+///
+/// The only figure here not shown in full, and the reason is that it is the only
+/// one where the full figure says nothing: a receiver running for an hour at
+/// 20 Msps has seen seventy-two billion pairs, and no digit past the third is a
+/// fact anybody wants. Grouped, it would also be the one column wide enough to
+/// set the width of every other.
+fn samples(pairs: u64) -> String {
+    const UNITS: [(u64, &str); 3] = [(1_000_000_000, "G"), (1_000_000, "M"), (1_000, "k")];
+    for (scale, suffix) in UNITS {
+        if pairs >= scale {
+            return format!("{:.2} {suffix}samp", pairs as f64 / scale as f64);
+        }
+    }
+    format!("{pairs} samp")
+}
+
+/// Where the decode load's 100 % stands along its bar: past it is room to
+/// show a worker falling behind by up to a quarter before the bar runs out.
+const LOAD_FULL: f64 = 0.8;
+
+/// How the BLE triggers ended, as one bar: good, CRC failed and gave up in
+/// their shares of the ones that have ended, and a key under it with the
+/// percentages. Empty before any has ended.
+///
+/// The counts above say how many; the bar says which way the detector is
+/// leaning at a glance, and a room where half the triggers give up reads
+/// differently from one where half fail their CRC.
+fn funnel_bar(
+    f: &crate::signal::ble::receive::Funnel,
+    width: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let ended = f.decoded + f.crc_failed + f.gave_up;
+    let bw = width.saturating_sub(2);
+    if ended == 0 || bw < 10 {
+        return Vec::new();
+    }
+    let parts = [
+        (f.decoded, theme.status_ok, "good"),
+        (f.crc_failed, theme.status_crit, "CRC failed"),
+        (f.gave_up, theme.border_dim, "gave up"),
+    ];
+    // Each share rounded, a share that is not zero kept visible, and the
+    // last part taking what rounding left so the bar is always whole.
+    let mut cells: Vec<usize> = parts
+        .iter()
+        .map(|(n, _, _)| {
+            let c = (*n as f64 / ended as f64 * bw as f64).round() as usize;
+            if *n > 0 {
+                c.max(1)
+            } else {
+                0
+            }
+        })
+        .collect();
+    let used: usize = cells[..2].iter().sum();
+    cells[2] = if f.gave_up > 0 {
+        bw.saturating_sub(used).max(1)
+    } else {
+        0
+    };
+    let mut bar = vec![Span::raw(" ")];
+    let mut key = vec![Span::raw(" ")];
+    for ((n, colour, name), c) in parts.iter().zip(&cells) {
+        if *c > 0 {
+            bar.push(Span::styled(
+                "\u{2501}".repeat(*c),
+                Style::default().fg(*colour),
+            ));
+        }
+        if key.len() > 1 {
+            key.push(Span::raw("   "));
+        }
+        key.push(Span::styled(
+            format!("\u{25a0} {name} {:.0} %", *n as f64 / ended as f64 * 100.0),
+            Style::default().fg(*colour),
+        ));
+    }
+    vec![Line::from(bar), Line::from(key)]
+}
+
+/// The decode load as a bar against a rule at 100 %, red past it; a load
+/// beyond the bar's end is marked `›` at the end rather than drawn off it.
+fn load_bar(load: f64, width: usize, theme: &crate::Theme) -> Option<Line<'static>> {
+    let bw = width.saturating_sub(2 + " 100 %".len());
+    if bw < 10 {
+        return None;
+    }
+    let rule = (bw as f64 * LOAD_FULL) as usize;
+    let fill = ((load * rule as f64).round() as usize).min(bw);
+    let mut spans = vec![Span::raw(" ")];
+    for c in 0..bw {
+        spans.push(if c == rule {
+            Span::styled(
+                "\u{2503}",
+                Style::default()
+                    .fg(theme.value_hi)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )
+        } else if c < fill {
+            let over = c > rule;
+            let ink = if over { theme.status_crit } else { theme.value };
+            let ch = if c + 1 == bw && load * rule as f64 > bw as f64 {
+                "\u{203a}"
+            } else {
+                "\u{2501}"
+            };
+            Span::styled(ch, Style::default().fg(ink))
+        } else {
+            Span::styled(
+                if c % 2 == 0 { "\u{00b7}" } else { " " },
+                Style::default().fg(theme.stale),
+            )
+        });
+    }
+    spans.push(Span::styled(" 100 %", Style::default().fg(theme.label)));
+    Some(Line::from(spans))
+}
+
+/// The whole panel body, as a function of the state and the width alone, and
+/// which of its lines are drawings that may go on a short panel before any
+/// count does.
+///
+/// Split out because nothing on this panel is a function of anything else: no
+/// device, no clock, no lock. The same split `signal::fft` makes, for the same
+/// reason.
+fn lines(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    width: usize,
+) -> (Vec<Line<'static>>, Vec<usize>) {
+    let mut drawings = Vec::new();
+    let h = &state.net.health;
+    let row = |label, value, note| count(label, value, theme.value, note, theme, width);
+    let dash = |label, note| {
+        count(
+            label,
+            "—".to_string(),
+            theme.stale,
+            Some(note),
+            theme,
+            width,
+        )
+    };
+    let mut out = vec![
+        section("what arrived", "", width, theme),
+        row("blocks", grouped(h.blocks_in), None),
+        row("I/Q pairs", samples(h.pairs_in), None),
+        row(
+            "current run",
+            grouped(h.run_blocks),
+            Some("since the last break"),
+        ),
+        Line::from(""),
+        section("what did not", "", width, theme),
+        row("interruptions", grouped(h.gaps), Some("runs broken")),
+        // The floor is stated on the line it qualifies rather than in a footnote
+        // somewhere else: the driver reports that samples went, never how many,
+        // so one is the smallest number that is certainly not an overstatement.
+        row("blocks lost", grouped(h.blocks_lost), Some("a floor")),
+        row(
+            "feed refused",
+            grouped(h.refused_session),
+            Some("never reached a decoder"),
+        ),
+        row(
+            "queue peak",
+            grouped(h.peak_depth),
+            Some("of 4, last window"),
+        ),
+        Line::from(""),
+        section("what was decoded", "", width, theme),
+    ];
+
+    // BLE: every trigger, and how it ended. Shown once the decoder has run this
+    // session; before that, a dash, because a zero would say it looked.
+    let f = h.ble;
+    if state.net.counting_addresses() {
+        out.push(row(
+            "BLE triggers",
+            grouped(f.triggered),
+            Some("the detector fired"),
+        ));
+        for line in funnel_bar(&f, width, theme) {
+            drawings.push(out.len());
+            out.push(line);
+        }
+        out.push(row("CRC good", grouped(f.decoded), None));
+        out.push(row(
+            "CRC failed",
+            grouped(f.crc_failed),
+            Some("length matches the signal"),
+        ));
+        out.push(row("gave up", grouped(f.gave_up), Some("nothing matched")));
+    } else {
+        out.push(dash("BLE", "not decoding"));
+    }
+
+    // LE Coded, only once its receiver has run: the view that starts it is
+    // its own section, and a dash here would offer a decoder this view does
+    // not start. Its AuxPtrs are heard of those promised in view; one whose
+    // channel the radio cannot see was never listened for, so it is apart.
+    let c = h.coded;
+    if state.net.coded_channel.is_some() || c.triggered > 0 {
+        out.push(row(
+            "Coded triggers",
+            grouped(c.triggered),
+            Some("the detector fired"),
+        ));
+        for line in funnel_bar(&c, width, theme) {
+            drawings.push(out.len());
+            out.push(line);
+        }
+        out.push(row("Coded CRC good", grouped(c.decoded), None));
+        let a = h.aux;
+        out.push(row(
+            "aux heard",
+            format!(
+                "{} of {}",
+                grouped(a.heard),
+                grouped(a.heard + a.missed + a.feed_lost)
+            ),
+            Some("promised in view"),
+        ));
+        out.push(row(
+            "aux elsewhere",
+            grouped(a.not_in_view),
+            Some("outside the view"),
+        ));
+    }
+
+    // Classic: hits, and how many of the piconets they came from have a UAP.
+    if !state.net.bt_channels_watched.is_empty() || h.bt_hits > 0 {
+        let resolved = state.net.bt_uap.values().filter(|c| c.len() == 1).count();
+        out.push(row("BT hits", grouped(h.bt_hits), Some("access codes")));
+        out.push(row(
+            "UAPs resolved",
+            format!("{resolved} of {}", state.net.bt_uap.len()),
+            Some("piconets named"),
+        ));
+    } else {
+        out.push(dash("classic BT", "not decoding"));
+    }
+
+    out.extend(wifi_lines(state, theme, width));
+
+    // What it cost: the same figure the header band shows, red
+    // above the stream's own pace, where the worker is falling behind.
+    out.push(match h.decode_load {
+        Some(load) => count(
+            "decode load",
+            format!("{:.0} %", load * 100.0),
+            if load > 1.0 {
+                theme.status_crit
+            } else {
+                theme.value
+            },
+            (load > 1.0).then_some("falling behind"),
+            theme,
+            width,
+        ),
+        None => dash("decode load", "not measured yet"),
+    });
+    if let Some(bar) = h.decode_load.and_then(|l| load_bar(l, width, theme)) {
+        drawings.push(out.len());
+        out.push(bar);
+    }
+
+    // Not a zero. A zero on this line would say we looked and found nothing,
+    // and nothing looks yet. See the module header.
+    out.push(dash("bursts", "no detector yet"));
+    (out, drawings)
+}
+
+/// Wi-Fi's rows: whether its receiver runs, every repeat found and what
+/// became of it, and the 802.11b SYNCs beside them. Empty until it has run
+/// this session, as LE Coded's are: the views that start it are its own.
+/// The Frames card shows the same rows as its decode account.
+pub(crate) fn wifi_lines(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let h = &state.net.health;
+    let row = |label, value, note| count(label, value, theme.value, note, theme, width);
+    let dash = |label, note| {
+        count(
+            label,
+            "\u{2014}".to_string(),
+            theme.stale,
+            Some(note),
+            theme,
+            width,
+        )
+    };
+    let w = &state.net.wifi;
+    let mut out = Vec::new();
+    if !w.ran {
+        return out;
+    }
+    // What it found is a repeat, and the long training field's answer to
+    // whose it is.
+    out.push(match (w.channel, &w.refused) {
+        (Some(ch), _) => row("Wi-Fi", format!("ch {ch}"), None),
+        (None, Some(why)) => dash("Wi-Fi", why),
+        (None, None) => dash("Wi-Fi", "not running on this view"),
+    });
+    let f = h.wifi;
+    // A repeat, not yet a preamble: a neighbour's frame and other
+    // signals with the same period pass too, and only the long training
+    // field's sequence will say which are this channel's.
+    out.push(row(
+        "repeats",
+        grouped(f.detected),
+        Some("short-training-like, judged below"),
+    ));
+    out.push(row(
+        "this channel",
+        grouped(f.this_channel),
+        Some("long training field matched"),
+    ));
+    // Each of this channel's frames had its L-SIG read, or a greenfield
+    // HT-SIG in its place, or neither.
+    out.push(row(
+        "  L-SIG read",
+        grouped(f.lsig_read),
+        Some("parity, rate and tail good"),
+    ));
+    out.push(row(
+        "  greenfield",
+        grouped(f.greenfield),
+        Some("HT-SIG read, no L-SIG"),
+    ));
+    out.push(row(
+        "  unreadable",
+        grouped(f.unreadable),
+        Some("no L-SIG or HT-SIG passed"),
+    ));
+    out.push(row(
+        "adjacent",
+        grouped(f.adjacent),
+        Some("a channel 5, 10 or 15 MHz away"),
+    ));
+    out.push(row(
+        "not a preamble",
+        grouped(f.not_preamble),
+        Some("matched nothing"),
+    ));
+    out.push(row(
+        "not a short field",
+        grouped(f.not_short_field),
+        Some("repeats at 0.4 us, not 0.8"),
+    ));
+    out.push(row(
+        "cut short",
+        grouped(f.cut),
+        Some("by a break or a retune"),
+    ));
+    // 802.11b beside the OFDM funnel: SYNCs found, and what each turned out to be.
+    out.push(row(
+        "802.11b SYNCs",
+        grouped(f.dsss_found),
+        Some("Barker runs, judged below"),
+    ));
+    out.push(row("  header read", grouped(f.dsss_read), Some("CRC good")));
+    out.push(row(
+        "  header refused",
+        grouped(f.dsss_refused),
+        Some("CRC or rate"),
+    ));
+    out.push(row(
+        "  no SFD",
+        grouped(f.dsss_no_sfd),
+        Some("a SYNC, no frame after"),
+    ));
+    out.push(row(
+        "  SYNC cut",
+        grouped(f.dsss_cut),
+        Some("by a break or a retune"),
+    ));
+    out.push(row(
+        "  inside a frame",
+        grouped(f.dsss_inside),
+        Some("found again after a fade"),
+    ));
+    out.push(row(
+        "  another channel",
+        grouped(f.dsss_adjacent),
+        Some("centred whole MHz away"),
+    ));
+    out
+}
+
+impl Panel for NetDecodeHealthPanel {
+    fn name(&self) -> &'static str {
+        "net_decode_health"
+    }
+
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
+    fn min_size(&self) -> (u16, u16) {
+        (44, 12)
+    }
+
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
+        // Every number here is a count of something that arrived, so it goes out
+        // of date the moment the samples stop. The engine tags and cools it; the
+        // panel only declares which rule it lives under.
+        PanelChrome::new("Feed Health")
+            .stale_when(Staleness::NotStreaming)
+            .tag_if(true, state.net.mode.into())
+    }
+
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &crate::ui::View<'_>,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+        let (mut lines, drawings) = lines(state, theme, inner.width as usize);
+        // Packed at the top with a row between the three accounts, the spare
+        // height left below them: grown spacers used to push the accounts
+        // apart into three islands. On a short panel the bars go first, the
+        // counts they draw are still there, and then the spacers.
+        let avail = inner.height as usize;
+        let over = lines.len().saturating_sub(avail);
+        for &i in drawings.iter().rev().take(over) {
+            lines.remove(i);
+        }
+        collapse_spacers(&mut lines, avail);
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::SdrMetrics;
+    use crate::ui::fixture::draw;
+
+    use super::NetDecodeHealthPanel;
+
+    /// A decoding room: 377 triggers, most given up, a few failed, and a
+    /// worker at 91 %.
+    fn decoding() -> SdrMetrics {
+        let mut m = streaming();
+        m.net.ble_channel = Some(38);
+        m.net.health.ble = crate::signal::ble::receive::Funnel {
+            triggered: 377,
+            decoded: 166,
+            crc_failed: 11,
+            gave_up: 196,
+        };
+        m.net.health.decode_load = Some(0.91);
+        m
+    }
+
+    /// The funnel's ends as one bar with its key, and the load against its
+    /// 100 % rule, drawn under the counts they belong to.
+    #[test]
+    fn the_funnel_and_the_load_are_drawn_under_their_counts() {
+        let out = draw(NetDecodeHealthPanel, 64, 40, &decoding());
+        let text = out.join("\n");
+        assert!(text.contains("\u{25a0} good 45 %"), "{text}");
+        assert!(text.contains("\u{25a0} CRC failed 3 %"), "{text}");
+        assert!(text.contains("\u{25a0} gave up 53 %"), "{text}");
+        let bar = out
+            .iter()
+            .position(|l| l.contains("\u{2501}"))
+            .expect(&text);
+        let triggers = out.iter().position(|l| l.contains("BLE triggers")).unwrap();
+        assert_eq!(bar, triggers + 1, "{text}");
+        let load = out.iter().position(|l| l.contains("decode load")).unwrap();
+        assert!(out[load + 1].contains("100 %"), "{text}");
+        assert!(out[load + 1].contains('\u{2503}'), "{text}");
+    }
+
+    /// The accounts are packed at the top: a tall panel leaves its spare
+    /// height below them rather than prising them apart.
+    #[test]
+    fn a_tall_panel_keeps_its_accounts_together() {
+        let out = draw(NetDecodeHealthPanel, 64, 60, &decoding());
+        let at = |s: &str| out.iter().position(|l| l.contains(s)).unwrap();
+        assert_eq!(at("WHAT DID NOT"), at("current run") + 2, "{out:#?}");
+        assert_eq!(at("WHAT WAS DECODED"), at("queue peak") + 2, "{out:#?}");
+    }
+
+    /// On a short panel the drawings go before any count does.
+    #[test]
+    fn a_short_panel_gives_up_the_bars_first() {
+        let out = draw(NetDecodeHealthPanel, 64, 22, &decoding()).join("\n");
+        assert!(out.contains("decode load"), "{out}");
+        assert!(out.contains("gave up"), "{out}");
+        assert!(!out.contains("\u{2503}"), "{out}");
+    }
+
+    /// **Every count sits in one column.** The Wi-Fi rows' longer labels
+    /// (`not a short field`, `  another channel`) pushed their numbers two
+    /// places right of the others'.
+    #[test]
+    fn every_wifi_count_ends_in_one_column() {
+        let mut m = streaming();
+        m.net.wifi.ran = true;
+        m.net.wifi.channel = Some(6);
+        let f = &mut m.net.health.wifi;
+        (f.detected, f.this_channel, f.lsig_read, f.unreadable) = (1_204, 1_100, 1_042, 50);
+        (f.adjacent, f.not_preamble, f.not_short_field, f.cut) = (60, 27, 1_315, 17);
+        (f.dsss_found, f.dsss_read, f.dsss_refused, f.dsss_no_sfd) = (96, 90, 3, 2);
+        (f.dsss_cut, f.dsss_inside, f.dsss_adjacent) = (1, 7, 11);
+        let out = draw(NetDecodeHealthPanel, 90, 60, &m);
+        let from = out
+            .iter()
+            .position(|l| l.contains("Wi-Fi"))
+            .expect("the Wi-Fi rows");
+        let ends: Vec<(usize, String)> = out[from + 1..]
+            .iter()
+            .filter_map(|l| {
+                // The count: from its first digit after the label, through single spaces
+                // between digit groups (`1 204`); the note starts three
+                // spaces after it.
+                let body: Vec<char> = l.trim_start_matches('│').chars().collect();
+                // Past the label, which may hold digits of its own (802.11b).
+                let mut i = super::LABEL
+                    + body[super::LABEL..]
+                        .iter()
+                        .position(|c| c.is_ascii_digit())?;
+                while i + 1 < body.len()
+                    && (body[i + 1].is_ascii_digit()
+                        || (body[i + 1] == ' '
+                            && body.get(i + 2).is_some_and(|c| c.is_ascii_digit())))
+                {
+                    i += 1;
+                }
+                Some((i, body.iter().collect()))
+            })
+            .take(14)
+            .collect();
+        let first = ends[0].0;
+        for (end, line) in &ends {
+            assert_eq!(*end, first, "{line}");
+        }
+    }
+
+    /// Wi-Fi is named only once its receiver has run this session; then
+    /// it says its channel, the repeats it found, pending what they are,
+    /// and the ones a break or a retune cut short.
+    #[test]
+    fn wifi_is_named_once_it_has_run_with_its_repeats() {
+        let before = draw(NetDecodeHealthPanel, 80, 40, &streaming()).join("\n");
+        assert!(!before.contains("Wi-Fi"), "{before}");
+
+        let mut m = streaming();
+        m.net.wifi.ran = true;
+        m.net.wifi.channel = Some(6);
+        m.net.health.wifi.detected = 1_204;
+        m.net.health.wifi.this_channel = 1_100;
+        m.net.health.wifi.lsig_read = 1_042;
+        m.net.health.wifi.greenfield = 8;
+        m.net.health.wifi.unreadable = 50;
+        m.net.health.wifi.adjacent = 60;
+        m.net.health.wifi.not_preamble = 27;
+        m.net.health.wifi.not_short_field = 1_315;
+        m.net.health.wifi.cut = 17;
+        m.net.health.wifi.dsss_found = 96;
+        m.net.health.wifi.dsss_read = 90;
+        m.net.health.wifi.dsss_refused = 3;
+        m.net.health.wifi.dsss_no_sfd = 2;
+        m.net.health.wifi.dsss_cut = 1;
+        m.net.health.wifi.dsss_inside = 7;
+        m.net.health.wifi.dsss_adjacent = 11;
+        let on = draw(NetDecodeHealthPanel, 80, 50, &m).join("\n");
+        assert!(on.contains("ch 6"), "{on}");
+        let found = on
+            .lines()
+            .find(|l| l.contains("repeats"))
+            .expect("found row");
+        assert!(
+            found.contains("1 204") && found.contains("judged below"),
+            "{found}"
+        );
+        let cut = on
+            .lines()
+            .find(|l| l.contains("cut short"))
+            .expect("cut row");
+        assert!(cut.contains("17"), "{cut}");
+        for (label, n) in [
+            ("this channel", "1 100"),
+            ("L-SIG read", "1 042"),
+            ("greenfield", "8"),
+            ("unreadable", "50"),
+            ("802.11b SYNCs", "96"),
+            ("header read", "90"),
+            ("header refused", "3"),
+            ("no SFD", "2"),
+            ("inside a frame", "7"),
+            ("another channel", "11"),
+            ("adjacent", "60"),
+            ("not a preamble", "27"),
+            ("not a short field", "1 315"),
+        ] {
+            let row = on
+                .lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label}"));
+            assert!(row.contains(n), "{row}");
+        }
+    }
+
+    /// Refused, the Wi-Fi row is a dash with the reason; stood down after
+    /// running, a dash saying it is not running here.
+    #[test]
+    fn wifi_refused_or_stood_down_is_a_dash() {
+        let mut m = streaming();
+        m.net.wifi.ran = true;
+        m.net.wifi.refused = Some("not on a Wi-Fi channel centre (2440.000 MHz)".into());
+        let refused = draw(NetDecodeHealthPanel, 100, 40, &m).join("\n");
+        let row = refused.lines().find(|l| l.contains("Wi-Fi")).unwrap();
+        assert!(row.contains("\u{2014}"), "{row}");
+        assert!(row.contains("not on a Wi-Fi channel centre"), "{row}");
+
+        m.net.wifi.refused = None;
+        let down = draw(NetDecodeHealthPanel, 100, 40, &m).join("\n");
+        let row = down.lines().find(|l| l.contains("Wi-Fi")).unwrap();
+        assert!(row.contains("not running on this view"), "{row}");
+    }
+
+    fn streaming() -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.health.blocks_in = 12_403;
+        m.net.health.pairs_in = 1_626_505_216;
+        m.net.health.run_blocks = 940;
+        m.net.health.gaps = 3;
+        m.net.health.blocks_lost = 7;
+        m.net.health.refused_session = 2;
+        m.net.health.refused = 1;
+        m.net.health.peak_depth = 4;
+        m
+    }
+
+    #[test]
+    fn the_counts_reach_the_screen_grouped_and_labelled() {
+        let out = draw(NetDecodeHealthPanel, 60, 18, &streaming()).join("\n");
+        assert!(out.contains("12 403"), "{out}");
+        assert!(out.contains("interruptions"), "{out}");
+        // The pair count is the one figure shown in units rather than in full,
+        // because past the third digit it stops being a fact anybody wants.
+        assert!(out.contains("1.63 Gsamp"), "{out}");
+        assert!(!out.contains("1 626 505 216"), "{out}");
+        // The floor is stated on the line it qualifies, not in a footnote.
+        assert!(out.contains("a floor"), "{out}");
+    }
+
+    /// The one line here that must never become a zero.
+    ///
+    /// `bursts 0` is a claim that the receiver looked and found nothing, which
+    /// is a different statement from "nothing is looking" and the more
+    /// flattering of the two. Rule 2: what cannot be asked is refused.
+    #[test]
+    fn nothing_is_decoded_and_the_panel_says_so_rather_than_showing_zero() {
+        let out = draw(NetDecodeHealthPanel, 60, 18, &streaming()).join("\n");
+        let bursts = out
+            .lines()
+            .find(|l| l.contains("bursts"))
+            .expect("a bursts line");
+        assert!(bursts.contains('—'), "{bursts}");
+        assert!(!bursts.contains('0'), "{bursts}");
+        assert!(bursts.contains("no detector yet"), "{bursts}");
+    }
+
+    /// **The funnels, once the decoders have run.** BLE: triggers and how
+    /// each ended; classic: hits and the piconets whose UAP is resolved; and
+    /// what it all cost, red above the stream's own pace.
+    #[test]
+    fn the_decode_funnels_reach_the_screen() {
+        let mut m = streaming();
+        m.net.ble_channel = Some(37);
+        m.net.health.ble = crate::signal::ble::receive::Funnel {
+            triggered: 1_204,
+            decoded: 951,
+            crc_failed: 3,
+            gave_up: 250,
+        };
+        m.net.bt_channels_watched = vec![38, 39, 40];
+        m.net.health.bt_hits = 312;
+        m.net.bt_uap.insert(0x5a3c71, vec![0x47]);
+        m.net.bt_uap.insert(0x123456, vec![0x10, 0x90]);
+        m.net.health.decode_load = Some(1.07);
+        let out = draw(NetDecodeHealthPanel, 64, 30, &m).join("\n");
+        let line = |label: &str| {
+            out.lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label}:\n{out}"))
+                .to_string()
+        };
+        assert!(line("BLE triggers").contains("1 204"), "{out}");
+        assert!(line("CRC good").contains("951"), "{out}");
+        assert!(line("nothing matched").contains("250"), "{out}");
+        assert!(line("BT hits").contains("312"), "{out}");
+        assert!(line("UAPs resolved").contains("1 of 2"), "{out}");
+        assert!(line("decode load").contains("107 %"), "{out}");
+        assert!(line("decode load").contains("falling behind"), "{out}");
+        // Still true, still said.
+        assert!(line("bursts").contains("no detector yet"), "{out}");
+    }
+
+    /// **LE Coded, once its receiver has run.** Its funnel as BLE's is, and
+    /// the AuxPtrs: heard of those promised in view, and the ones the radio
+    /// could not see counted apart, since nothing listened for them.
+    #[test]
+    fn health_counts_coded_and_aux() {
+        let mut m = streaming();
+        m.net.coded_channel = Some(37);
+        m.net.health.coded = crate::signal::ble::receive::Funnel {
+            triggered: 61,
+            decoded: 40,
+            crc_failed: 6,
+            gave_up: 15,
+        };
+        let aux = &mut m.net.health.aux;
+        aux.heard = 7;
+        aux.missed = 2;
+        aux.not_in_view = 25;
+        aux.feed_lost = 1;
+        let out = draw(NetDecodeHealthPanel, 64, 40, &m).join("\n");
+        let line = |label: &str| {
+            out.lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label}:\n{out}"))
+                .to_string()
+        };
+        assert!(line("Coded triggers").contains("61"), "{out}");
+        assert!(line("Coded CRC good").contains("40"), "{out}");
+        assert!(line("aux heard").contains("7 of 10"), "{out}");
+        assert!(line("aux elsewhere").contains("25"), "{out}");
+    }
+
+    /// The survey never runs the LE Coded receiver, and its health says
+    /// nothing about one rather than offering a decoder it does not start.
+    #[test]
+    fn a_coded_receiver_that_never_ran_is_not_mentioned() {
+        let out = draw(NetDecodeHealthPanel, 64, 40, &streaming()).join("\n");
+        assert!(!out.contains("Coded"), "{out}");
+        assert!(!out.contains("aux"), "{out}");
+    }
+
+    /// A decoder that has not run this session is a dash, never a zero.
+    #[test]
+    fn a_decoder_that_never_ran_is_a_dash_not_a_zero() {
+        let out = draw(NetDecodeHealthPanel, 64, 30, &streaming()).join("\n");
+        for label in ["BLE", "classic BT", "decode load"] {
+            let row = out
+                .lines()
+                .find(|l| l.trim_start_matches(['│', ' ']).starts_with(label))
+                .unwrap_or_else(|| panic!("{label}:\n{out}"));
+            assert!(row.contains('—'), "{row}");
+            assert!(!row.contains('0'), "{row}");
+        }
+    }
+
+    /// A radio that has delivered nothing says nothing, and the chrome carries
+    /// the reason.
+    #[test]
+    fn a_feed_that_has_delivered_nothing_reads_as_nothing() {
+        let out = draw(NetDecodeHealthPanel, 60, 18, &SdrMetrics::fixture()).join("\n");
+        assert!(out.contains("blocks"), "{out}");
+        assert!(out.contains("0 samp"), "{out}");
+        assert!(out.contains("[STALE]"), "{out}");
+    }
+
+    /// A note is dropped whole or drawn whole, and no row ever runs past the
+    /// frame.
+    ///
+    /// The first version of this checked for `"   " + prefix + "\n"`, which the
+    /// row padding means can never match: every assertion in it passed on a
+    /// panel that was visibly truncating "no detector is running yet" to "no
+    /// detector is r". Anchored to the end of the line's content instead.
+    #[test]
+    fn it_fits_every_size_the_layout_can_hand_it() {
+        const NOTES: [&str; 12] = [
+            "since the last break",
+            "runs broken",
+            "a floor",
+            "never reached a decoder",
+            "no detector yet",
+            "the detector fired",
+            "length matches the signal",
+            "nothing matched",
+            "access codes",
+            "piconets named",
+            "not decoding",
+            "not measured yet",
+        ];
+        for w in 20..90u16 {
+            for h in 4..24u16 {
+                for line in draw(NetDecodeHealthPanel, w, h, &streaming()) {
+                    assert!(
+                        line.chars().count() <= w as usize,
+                        "{w}x{h} overran: {line:?}"
+                    );
+                    let content =
+                        line.trim_matches(|c: char| c == ' ' || c == '│' || "╭╮╰╯─".contains(c));
+                    for note in NOTES {
+                        for cut in 1..note.chars().count() {
+                            // Anchored on the three-space separator, because a
+                            // label ending in "s" is not a truncated "since".
+                            let prefix: String = note.chars().take(cut).collect();
+                            assert!(
+                                !content.ends_with(&format!("   {prefix}")),
+                                "{w}x{h} truncated {note:?}: {line:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

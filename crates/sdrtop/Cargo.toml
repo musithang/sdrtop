@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+[package]
+name = "sdrtop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Terminal monitor for HackRF One, RTL-SDR and any SoapySDR radio: live spectrum, waterfall, and IQ/RF/timing/signal diagnostics"
+homepage = "https://github.com/musithang/sdrtop"
+# The repository's README, which addresses its screenshots by absolute URL:
+# the images are not in the package, so a relative `src` would render broken
+# on the crates.io page.
+readme = "../../README.md"
+keywords = ["sdr", "hackrf", "rtl-sdr", "soapysdr", "tui"]
+categories = ["command-line-utilities", "hardware-support", "science"]
+
+[dependencies]
+monas.workspace = true
+ratatui.workspace = true
+libc.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+toml.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+axum.workspace = true
+
+[dev-dependencies]
+# The engine's test fixtures (a state, a test radio), which no release build
+# carries: resolver 2 keeps a dev-dependency's features out of it.
+monas = { workspace = true, features = ["testing"] }
+tower.workspace = true
+
+[build-dependencies]
+# The man page is generated from the same `Parser` derive `main.rs` parses with,
+# so it cannot describe a flag the binary does not have. See `src/cli.rs`.
+clap.workspace = true
+clap_mangen.workspace = true

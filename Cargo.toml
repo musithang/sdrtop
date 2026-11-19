@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-[package]
-name = "sdrtop"
+# A workspace only: `monas`, the engine, and `sdrtop`, the terminal built on it.
+# Every member takes its version, edition, toolchain floor and licence from
+# here, and its internal dependencies from `[workspace.dependencies]`, so a
+# version bump edits this file and nothing else.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.7.4"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Terminal monitor for HackRF One, RTL-SDR and any SoapySDR radio: live spectrum, waterfall, and IQ/RF/timing/signal diagnostics"
 repository = "https://github.com/musithang/sdrtop"
-homepage = "https://github.com/musithang/sdrtop"
-readme = "README.md"
-keywords = ["sdr", "hackrf", "rtl-sdr", "soapysdr", "tui"]
-categories = ["command-line-utilities", "hardware-support", "science"]
 # Measured, not guessed: `slice::as_chunks` (hot path, `hardware/process.rs` and
 # `signal/demod`) stabilised in 1.88.0 and `u32::is_multiple_of` in 1.87.0. The
 # README claimed 1.78 for years, which is the *lockfile* floor - a toolchain
@@ -19,28 +21,13 @@ categories = ["command-line-utilities", "hardware-support", "science"]
 rust-version = "1.88"
 authors = ["MusiThang <viktor.laszlo92@protonmail.com>"]
 
-# What `cargo publish` must not carry. crates.io caps a crate at 10 MB and
-# `user_docs/pics` alone is 18 MB of it, 15.8 of which is a single demo
-# `video.mp4`: without this the publish is rejected outright, not merely
-# wasteful. The rest is build and release plumbing that a source package has no
-# use for. `user_docs/*.md` deliberately stays, being small and worth having
-# offline beside the binary.
-#
-# Consequence, and the reason README.md addresses its screenshots by absolute
-# URL rather than a relative path: the images are not in the package, so a
-# relative `src` would render broken on the crates.io page.
-exclude = [
-    "user_docs/pics",
-    "packaging",
-    ".github",
-    "dev_docs",
-]
+# The internal crates are pinned exactly, at the workspace's own version:
+# a version of one works with the same version of the others and no other.
+# The test `the_internal_pins_are_the_workspace_version` fails when a bump
+# misses one.
+[workspace.dependencies]
+monas = { path = "crates/monas", version = "=0.7.4" }
 
-[[bin]]
-name = "sdrtop"
-path = "src/main.rs"
-
-[dependencies]
 ratatui = "0.30"
 libc = "0.2"
 tokio = { version = "1", features = ["full"] }
@@ -49,6 +36,7 @@ serde = { version = "1", features = ["derive"] }
 toml  = "1"
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
+clap_mangen = "0.3"
 crossbeam-channel = "0.5"
 rustfft = "6"
 num-complex = "0.4"
@@ -58,16 +46,8 @@ serialport = { version = "4", default-features = false }
 # The headless API: HTTP and a WebSocket, pure Rust, on the tokio runtime
 # already here. Only the pieces used.
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json", "query", "ws"] }
-
-[dev-dependencies]
 # The API's tests drive the router in memory, with no socket.
 tower = { version = "0.5", features = ["util"] }
-
-[build-dependencies]
-# The man page is generated from the same `Parser` derive `main.rs` parses with,
-# so it cannot describe a flag the binary does not have. See `src/cli.rs`.
-clap = { version = "4", features = ["derive"] }
-clap_mangen = "0.3"
 
 [profile.dev.package."*"]
 opt-level = 3

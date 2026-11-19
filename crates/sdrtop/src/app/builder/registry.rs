@@ -1,0 +1,1832 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+//! The panel registry and the layout engine built on it.
+//!
+//! Registration is the one list that makes a panel addressable: a preset names
+//! panels by string and the input dispatch matches them by string, so nothing in
+//! the type system connects either to the code. The tests at the foot of this
+//! file are what stands in for that - they read the presets and the dispatch
+//! table as data and check them against the registry built here.
+
+use std::collections::HashMap;
+
+use crate::config::LayoutConfig;
+use crate::ui;
+
+use crate::app::{App, FocusKeys};
+
+/// What `signal::net::gate` decided on this radio: the band (and with it
+/// Bluetooth), and Wi-Fi, which needs the band and a 20 MHz channel's rate
+/// on top, each with the gate's sentence when it refused. A plain `bool`
+/// means both or neither, which is what every caller but the startup path
+/// and Wi-Fi's own test wants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NetAdmitted {
+    pub band: Result<(), String>,
+    pub wifi: Result<(), String>,
+}
+
+impl From<bool> for NetAdmitted {
+    fn from(both: bool) -> Self {
+        let verdict = if both {
+            Ok(())
+        } else {
+            Err("this radio cannot reach the band".to_string())
+        };
+        Self {
+            band: verdict.clone(),
+            wifi: verdict,
+        }
+    }
+}
+
+impl App {
+    #[cfg(test)]
+    pub(crate) fn build_ui(
+        active_preset: &str,
+        user_presets: &HashMap<String, crate::config::PresetConfig>,
+        presets_dir: Option<&std::path::Path>,
+        net_admitted: impl Into<NetAdmitted>,
+    ) -> (ui::LayoutEngine, FocusKeys) {
+        Self::build_ui_for(
+            active_preset,
+            user_presets,
+            presets_dir,
+            net_admitted,
+            crate::hardware::AcquisitionKind::IqSamples,
+        )
+        .expect("built-in IQ layouts must include a usable preset")
+    }
+
+    /// `net_admitted` comes from `signal::net::gate`: on a radio that cannot
+    /// reach the 2.4 GHz band, or cannot run even the cheapest mode there, the
+    /// presets in those sections are taken out here, so no key, cycle or
+    /// saved config can open a screen this radio cannot fill (rule 2).
+    /// Wi-Fi's go the same way on a radio that reaches the band but not a
+    /// 20 MHz channel's rate, and take the menu's "being built" item with
+    /// them. What was taken out is handed to the engine with the gate's
+    /// sentence, so the menu can list those views as refused and say why.
+    pub(super) fn build_ui_for(
+        active_preset: &str,
+        user_presets: &HashMap<String, crate::config::PresetConfig>,
+        presets_dir: Option<&std::path::Path>,
+        net_admitted: impl Into<NetAdmitted>,
+        acquisition: crate::hardware::AcquisitionKind,
+    ) -> anyhow::Result<(ui::LayoutEngine, FocusKeys)> {
+        let net_admitted = net_admitted.into();
+        let mut registry = ui::PanelRegistry::new();
+        registry.register(ui::HeaderPanel);
+        registry.register(ui::SlimHeaderPanel);
+        registry.register(ui::CommandRailPanel);
+        registry.register(ui::LabBannerPanel);
+        registry.register(ui::LabMarkerPanel);
+        registry.register(ui::SignalStripPanel);
+        registry.register(ui::LogPanel);
+        registry.register(ui::FooterPanel);
+        registry.register(ui::IqConstellationPanel);
+        registry.register(ui::IqDiagnosticsPanel);
+        registry.register(ui::ImageScopePanel);
+        registry.register(ui::SystemResourcesPanel);
+        registry.register(ui::SpectrumPanel);
+        registry.register(ui::WaterfallPanel::new());
+        registry.register(ui::RfChainPanel);
+        registry.register(ui::LevelDiagramPanel);
+        registry.register(ui::AdcLoadingPanel);
+        registry.register(ui::SignalMetricsPanel);
+        registry.register(ui::SignalCharacterizationPanel);
+        registry.register(ui::FmDemodPanel);
+        registry.register(ui::IqHistogramPanel);
+        registry.register(ui::ObserverPanel);
+        registry.register(ui::MicroPanel);
+        registry.register(ui::MicroSignalPanel);
+        registry.register(ui::MicroGainPanel);
+        registry.register(ui::MicroHealthPanel);
+        registry.register(ui::TimingDiagnosticsPanel);
+        registry.register(ui::TimingStripchartPanel);
+        registry.register(ui::TimingVitalsPanel);
+        registry.register(ui::SweepPanel);
+        registry.register(ui::SweepStripPanel);
+        registry.register(ui::MicroSweepPanel);
+        registry.register(ui::NetCapabilityPanel);
+        registry.register(ui::NetBlePacketsPanel::ADVERTISING);
+        registry.register(ui::NetBlePacketsPanel::CODED);
+        registry.register(ui::NetBtHopsPanel);
+        registry.register(ui::NetBtPiconetsPanel);
+        registry.register(ui::NetBtPacketsPanel);
+        registry.register(ui::NetBleConnectionPanel);
+        registry.register(ui::NetBtBenchPanel);
+        registry.register(ui::NetBleDetailPanel);
+        registry.register(ui::NetCodedDetailPanel);
+        registry.register(ui::NetCensusPanel);
+        registry.register(ui::NetCoexistPanel);
+        registry.register(ui::NetDecodeHealthPanel);
+        registry.register(ui::NetOccupancyPanel);
+        registry.register(ui::NetWifiFramesPanel);
+        registry.register(ui::NetWifiCardPanel);
+        registry.register(ui::NetWifiRiverPanel);
+        registry.register(ui::NetWifiAirtimePanel);
+        registry.register(ui::NetWifiLedgerPanel);
+        registry.register(ui::NetWifiSharePanel);
+        registry.register(ui::NetWifiSurveyPanel);
+        registry.register(ui::NetWifiLeastBusyPanel);
+        registry.register(ui::PagerFacePanel);
+        registry.register(ui::PagerInboxPanel);
+        registry.register(ui::PagerCardPanel);
+        registry.register(ui::Ft8MapPanel::new());
+        registry.register(ui::Ft8CyclesPanel);
+        registry.register(ui::Ft8LadderPanel);
+        registry.register(ui::Ft8TrackPanel);
+        registry.register(ui::Ft8PowerPanel);
+        registry.register(ui::Ft8DecodePanel);
+        registry.register(ui::Ft8ReachPanel);
+        registry.register(ui::Ft8SlotsPanel);
+        registry.register(ui::Ft8BearingsPanel);
+        registry.register(ui::Ft8SkipPanel);
+        registry.register(ui::Ft8HourPanel);
+        registry.register(ui::Ft8ClockPanel);
+        registry.register(ui::Ft8SensitivityPanel);
+        registry.register(ui::Ft8DecoderPanel);
+        registry.register(ui::Ft8LoadPanel);
+        registry.register(ui::Ft8RadioPanel);
+        registry.register(ui::Ft8BandPanel);
+        registry.register(ui::Ft8DecodesPanel);
+        registry.register(ui::Ft8CardPanel);
+
+        let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
+        let mut refusals = Vec::new();
+        for (verdict, refuses) in [
+            (
+                &net_admitted.band,
+                crate::signal::net::is_net as fn(&str) -> bool,
+            ),
+            (&net_admitted.wifi, crate::signal::net::is_wifi),
+        ] {
+            let Err(why) = verdict else { continue };
+            let taken: HashMap<String, crate::config::PresetConfig> = layout
+                .presets
+                .extract_if(|_, p| p.section.as_deref().is_some_and(refuses))
+                .collect();
+            refusals.extend(
+                crate::ui::menu::model::build(&taken)
+                    .sections
+                    .into_iter()
+                    .map(|section| crate::ui::menu::tree::Refusal {
+                        section,
+                        why: why.clone(),
+                    }),
+            );
+        }
+        let mut warnings = Self::filter_incompatible_layouts(&mut layout, &registry, acquisition)?;
+        // Harvested against the presets that will actually be offered, user
+        // presets included: a letter two panels share is only a clash where one
+        // layout shows both. The built-in presets are held clear of that by a
+        // test; a user preset that brings two together is told about it here,
+        // and the letter goes to the first of them that is visible.
+        let (focus_keys, collisions) = harvest_focus_keys(&registry, &layout.presets);
+        for c in &collisions {
+            warnings.push(format!(
+                "Preset '{}' shows {} with the same focus key '{}'; it focuses '{}'",
+                c.preset,
+                c.panels.join(" and "),
+                c.key,
+                c.panels[0]
+            ));
+        }
+        let selected = if layout
+            .presets
+            .get(active_preset)
+            .is_some_and(|preset| has_registered_panel(preset, &registry))
+        {
+            active_preset.to_string()
+        } else {
+            ["spectrum_waterfall", "spectrum", "waterfall"]
+                .into_iter()
+                .find(|name| {
+                    layout
+                        .presets
+                        .get(*name)
+                        .is_some_and(|preset| has_registered_panel(preset, &registry))
+                })
+                .map(str::to_string)
+                .or_else(|| {
+                    let mut names: Vec<String> = layout
+                        .presets
+                        .iter()
+                        .filter(|(_, preset)| has_registered_panel(preset, &registry))
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    names.sort();
+                    names.into_iter().next()
+                })
+                .ok_or_else(|| anyhow::anyhow!("No usable presets remain for this device"))?
+        };
+        if selected != active_preset {
+            warnings.push(format!(
+                "Preset '{active_preset}' is unavailable; using '{selected}'"
+            ));
+        }
+        layout.active_preset = selected;
+
+        let mut engine =
+            ui::LayoutEngine::new_with_saved_preset(layout, registry, active_preset.to_string());
+        engine.set_startup_warnings(warnings);
+        engine.set_refusals(refusals);
+        if net_admitted.wifi.is_err() {
+            engine.retire_menu_section(crate::ui::menu::model::WIFI);
+        }
+        Ok((engine, focus_keys))
+    }
+
+    fn filter_incompatible_layouts(
+        config: &mut LayoutConfig,
+        registry: &ui::PanelRegistry,
+        acquisition: crate::hardware::AcquisitionKind,
+    ) -> anyhow::Result<Vec<String>> {
+        let mut warnings = Vec::new();
+        if acquisition == crate::hardware::AcquisitionKind::PowerTrace {
+            if let Some(preset) = config.presets.get_mut("lab_sweep") {
+                preset.panels.retain(|panel| panel.name != "signal_metrics");
+            }
+        }
+        config.presets.retain(|name, preset| {
+            if preset.panels.is_empty() {
+                warnings.push(format!("Preset '{name}' is unavailable because it has no panels"));
+                return false;
+            }
+            for spec in &preset.panels {
+                let Some(panel) = registry.get(&spec.name) else {
+                    warnings.push(format!(
+                        "Preset '{name}' references unknown panel '{}'",
+                        spec.name
+                    ));
+                    continue;
+                };
+                if !panel.supports_acquisition(acquisition) {
+                    warnings.push(format!(
+                        "Preset '{name}' is unavailable because panel '{}' does not support this device",
+                        spec.name
+                    ));
+                    return false;
+                }
+            }
+            true
+        });
+        if !config
+            .presets
+            .values()
+            .any(|preset| has_registered_panel(preset, registry))
+        {
+            anyhow::bail!(
+                "No usable presets remain for this device: {}",
+                warnings.join("; ")
+            );
+        }
+        Ok(warnings)
+    }
+}
+
+fn has_registered_panel(
+    preset: &crate::config::PresetConfig,
+    registry: &ui::PanelRegistry,
+) -> bool {
+    preset
+        .panels
+        .iter()
+        .any(|spec| registry.get(&spec.name).is_some())
+}
+
+/// A preset that shows two panels claiming one focus letter.
+#[derive(Debug, PartialEq)]
+struct Collision {
+    key: char,
+    preset: String,
+    panels: Vec<&'static str>,
+}
+
+/// Collect each panel's focus letter into the lookup the key handler uses, and
+/// report every preset that shows two panels claiming the same letter.
+///
+/// The report is the point of this being split out. A letter two panels on one
+/// screen both claim is the bug that once made `v` and `t` work only on some
+/// launches, when the lookup was a map from a letter to one panel and the
+/// registry's iteration order picked the winner. Sharing is safe exactly where
+/// no screen holds both, so that is what is checked.
+fn harvest_focus_keys(
+    registry: &ui::PanelRegistry,
+    presets: &HashMap<String, crate::config::PresetConfig>,
+) -> (FocusKeys, Vec<Collision>) {
+    let mut keys: FocusKeys = HashMap::new();
+    for panel in registry.panels_iter() {
+        if let Some(key) = panel.focus_key() {
+            keys.entry(key).or_default().push(panel.name());
+        }
+    }
+    for claimants in keys.values_mut() {
+        claimants.sort();
+    }
+    let mut collisions = Vec::new();
+    for (preset, config) in presets {
+        for (key, claimants) in &keys {
+            let shown: Vec<&'static str> = claimants
+                .iter()
+                .copied()
+                .filter(|name| config.panels.iter().any(|spec| spec.name == *name))
+                .collect();
+            if shown.len() > 1 {
+                collisions.push(Collision {
+                    key: *key,
+                    preset: preset.clone(),
+                    panels: shown,
+                });
+            }
+        }
+    }
+    collisions.sort_by(|a, b| (a.key, &a.preset).cmp(&(b.key, &b.preset)));
+    (keys, collisions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every panel that can be focused must have a handler arm in `handle_normal`.
+    ///
+    /// The bug this guards is not hypothetical. The `lab_timing` rebuild replaced
+    /// `hardware_health` and `timing_panel` with `timing_vitals` and
+    /// `timing_diagnostics`, but the dispatch kept naming the old two. Focusing
+    /// either new panel then highlighted its border, printed `[R] Reset drop
+    /// counter · [C] Clear history` in the footer, and dropped every key through
+    /// to `handle_global` - where `[R]` resets the whole radio to defaults.
+    ///
+    /// A panel that offers keys and silently ignores them is worse than one with
+    /// no focus mode at all, so this is checked rather than remembered.
+    #[test]
+    fn every_focusable_panel_has_a_dispatch_arm() {
+        let (_engine, focus_keys) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        // The dispatch table is read as source text: the arms are `&str` matches on
+        // a panel name, so nothing in the type system ties them to the registry.
+        let dispatch = include_str!("../input/mod.rs");
+        assert!(
+            !focus_keys.is_empty(),
+            "no focus keys were harvested at all"
+        );
+        for (key, panels) in &focus_keys {
+            for panel in panels {
+                let arm = format!("Some(\"{panel}\")");
+                assert!(
+                    dispatch.contains(&arm),
+                    "panel '{panel}' claims focus key '{key}' but handle_normal has no \
+                     `{arm}` arm, so its keys fall through to the global handler",
+                );
+            }
+        }
+    }
+
+    /// Every panel a built-in preset names must exist in the registry.
+    ///
+    /// The presets are TOML and the registry is Rust, so nothing in the type
+    /// system connects them: a panel renamed or removed leaves a preset quietly
+    /// asking for a name that resolves to nothing, and the layout engine just
+    /// draws a gap. Cheap to check, invisible otherwise.
+    #[test]
+    fn every_panel_named_by_a_builtin_preset_is_registered() {
+        let (engine, _) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        let known: std::collections::HashSet<&str> = engine.registered_panel_names().collect();
+        assert!(!known.is_empty(), "no panels were registered at all");
+
+        let cfg = crate::config::LayoutConfig::default_config();
+        let mut missing: Vec<String> = Vec::new();
+        for (preset, spec) in &cfg.presets {
+            for panel in &spec.panels {
+                if !known.contains(panel.name.as_str()) {
+                    missing.push(format!("{preset} -> {}", panel.name));
+                }
+            }
+        }
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "presets name panels that are not registered: {missing:?}"
+        );
+    }
+
+    /// **Every NET preset stands in the same frame**: the header band on top,
+    /// the log and the footer at the bottom, at the same heights. Switching
+    /// presets inside the section should change the question on screen, not
+    /// where the log went. Two of six presets had no log before this test
+    /// existed, and nothing noticed, because a preset is TOML and a missing
+    /// strip is a layout that still draws. Bands in between (a Lab-style
+    /// banner or marker line) stay allowed; the frame is the outside edge.
+    #[test]
+    fn every_net_preset_stands_in_the_same_frame() {
+        use crate::config::Position;
+        let cfg = crate::config::LayoutConfig::default_config();
+        let mut net: Vec<_> = cfg
+            .presets
+            .iter()
+            .filter(|(_, p)| p.section.as_deref().is_some_and(crate::signal::net::is_net))
+            .collect();
+        net.sort_by_key(|(name, _)| name.as_str());
+        assert!(net.len() >= 5, "the NET section went missing: {net:?}");
+
+        let shape = |s: &crate::config::PanelSpec| (s.name.clone(), s.position.clone(), s.height);
+        let mut wrong = Vec::new();
+        for (name, preset) in net {
+            let panels: Vec<_> = preset.panels.iter().map(shape).collect();
+            let first = panels.first().cloned();
+            let tail: Vec<_> = panels.iter().rev().take(2).rev().cloned().collect();
+            if first != Some(("header".into(), Position::Top, Some(5)))
+                || tail
+                    != [
+                        ("log".into(), Position::Bottom, Some(5)),
+                        ("footer".into(), Position::Bottom, None),
+                    ]
+            {
+                wrong.push(format!("{name}: {panels:?}"));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "NET presets outside the frame: {wrong:#?}"
+        );
+    }
+
+    /// **Every panel in the NET section says how its numbers were gathered.**
+    ///
+    /// The mode is part of the reading rather than a setting: a
+    /// duty-cycle-sampled census and a complete capture are different claims,
+    /// and a panel that shows one while the other was running is stating the
+    /// wrong one. Asserted here rather than in each panel's own tests, because
+    /// the rule is about the section and a rule enforced panel by panel is a
+    /// rule the next panel will not know about.
+    ///
+    /// **The exemption is checkable rather than a list of names.** A panel may
+    /// skip the tag only if it declares `Staleness::Never` - that is a panel
+    /// saying nothing on it goes out of date, which is a panel saying nothing on
+    /// it is a reading. `net_capability` qualifies: it draws the record built
+    /// when the device was opened, which is the same record hopping or parked.
+    /// A panel that wanted out of this rule by simply not carrying the tag would
+    /// have to claim its numbers never age, which is a much harder thing to
+    /// write by accident.
+    #[test]
+    fn every_net_panel_says_how_its_numbers_were_gathered() {
+        use crate::state::{NetMode, SdrMetrics};
+        use crate::ui::panel::Staleness;
+
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let mut seen = 0;
+        for mode in [NetMode::Survey, NetMode::Lock] {
+            let mut m = SdrMetrics::fixture();
+            m.net.mode = mode;
+            for panel in engine.registered_panels() {
+                if !panel.name().starts_with("net_") {
+                    continue;
+                }
+                seen += 1;
+                let chrome = panel.chrome(&crate::ui::View::of(&m));
+                if chrome.staleness == Staleness::Never {
+                    assert!(
+                        !chrome.tags.contains(&crate::ui::panel::Tag::from(mode)),
+                        "{}: a panel with nothing that ages has no mode to report",
+                        panel.name()
+                    );
+                    continue;
+                }
+                assert!(
+                    chrome.tags.contains(&crate::ui::panel::Tag::from(mode)),
+                    "{} carries readings but does not say it is in {}",
+                    panel.name(),
+                    mode.label()
+                );
+                assert!(
+                    !chrome
+                        .tags
+                        .contains(&crate::ui::panel::Tag::from(mode.toggled())),
+                    "{} claims both modes at once",
+                    panel.name()
+                );
+            }
+        }
+        assert!(seen >= 4, "only {seen} net panels were checked");
+    }
+
+    /// Every NET panel whose numbers are counted from the sample feed says how
+    /// far back they reach, so the engine can caveat them when the feed lost
+    /// something inside that span. A panel that
+    /// forgot would show a lower bound as a total on a lossy link, with
+    /// nothing on screen to say so.
+    ///
+    /// The exemptions are named, each with its reason, so adding a panel
+    /// means deciding which it is rather than falling through silently.
+    #[test]
+    fn every_net_panel_that_counts_from_the_feed_says_over_what_span() {
+        use crate::state::{CellReading, SdrMetrics};
+        use crate::ui::panel::Staleness;
+
+        // Not counts from the feed, for the stated reason.
+        const EXEMPT: &[(&str, &str)] = &[
+            (
+                "net_decode_health",
+                "it is the account of the loss itself; caveating it with its own subject is circular",
+            ),
+            (
+                "net_ble_detail",
+                "one received packet's detail, not a count: a block lost elsewhere does not change it",
+            ),
+        ];
+
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let mut m = SdrMetrics::fixture().streaming();
+        // One measured cell, so the occupancy panel has numbers to span.
+        m.net.band.cells.push(CellReading {
+            measured: Some(std::time::Instant::now()),
+            ..Default::default()
+        });
+        let mut checked = 0;
+        for panel in engine.registered_panels() {
+            let name = panel.name();
+            if !name.starts_with("net_") {
+                continue;
+            }
+            let chrome = panel.chrome(&crate::ui::View::of(&m));
+            if chrome.staleness == Staleness::Never || EXEMPT.iter().any(|(n, _)| *n == name) {
+                assert!(
+                    chrome.feed.is_none(),
+                    "{name} is exempt but declares a feed span anyway"
+                );
+                continue;
+            }
+            checked += 1;
+            assert!(
+                chrome.feed.is_some(),
+                "{name} counts from the feed but does not say over what span"
+            );
+        }
+        assert!(checked >= 5, "only {checked} net panels were checked");
+    }
+
+    /// **Every NET panel that prints a ppm declares that it shows offsets**, so
+    /// the engine can say what they are worth (`Tag::Offsets`: relative,
+    /// traceable, or a reference that has expired). A ppm on screen without
+    /// that tag is an absolute-looking number that may be our own oscillator's
+    /// error in disguise, which is what the tag exists to stop. Checked by
+    /// rendering, against a state where every panel has an offset to show,
+    /// rather than by a list of names the next panel would not be on. And the
+    /// other way round: a panel that declares offsets and prints none carries a
+    /// tag about numbers that are not there.
+    #[test]
+    fn every_net_panel_showing_a_ppm_says_what_it_is_worth() {
+        let rendered = net_panels_with_one_device(crate::state::AddressDisplay::Full);
+        let mut checked = 0;
+        for (name, text, chrome) in &rendered {
+            // A ppm, or an f0 in kHz (the packet list's column, the Classic
+            // view's summary line), or a Wi-Fi frame's offset in kHz with
+            // its 1 sigma: an offset either way, corrected by the reference
+            // where there is one.
+            let prints_ppm = text.contains(" ppm")
+                || text.contains("f0 kHz")
+                || (text.contains("f0 ") && text.contains(" kHz"))
+                || (text.contains('\u{b1}') && text.contains(" kHz"));
+            let declares = chrome.offsets;
+            if prints_ppm || declares {
+                checked += 1;
+            }
+            assert_eq!(
+                prints_ppm, declares,
+                "{name}: prints a ppm {prints_ppm}, declares offsets {declares}"
+            );
+        }
+        assert!(checked >= 2, "only {checked} net panels showed an offset");
+    }
+
+    /// **Every NET panel that prints an address honours the display switch,
+    /// and says so**: one key, every panel. A panel
+    /// printing the full address declares `shows_addresses`, so the engine
+    /// tags it when the mode is not `full`; and with the mode switched, no
+    /// panel anywhere in the section still prints the full address, which is
+    /// what makes a screenshot in a masked mode safe to share.
+    #[test]
+    fn every_net_panel_showing_an_address_follows_the_switch() {
+        use crate::state::AddressDisplay;
+        const FULL: &str = "01:02:03:04:05:06";
+        let mut checked = 0;
+        for (name, text, chrome) in &net_panels_with_one_device(AddressDisplay::Full) {
+            let prints = text.contains(FULL);
+            if prints || chrome.addresses {
+                checked += 1;
+            }
+            assert_eq!(
+                prints, chrome.addresses,
+                "{name}: prints an address {prints}, declares addresses {}",
+                chrome.addresses
+            );
+        }
+        assert!(checked >= 2, "only {checked} net panels showed an address");
+
+        for display in [AddressDisplay::Oui, AddressDisplay::Masked] {
+            for (name, text, chrome) in &net_panels_with_one_device(display) {
+                assert!(
+                    !text.contains(FULL),
+                    "{name} ignores the {display:?} switch"
+                );
+                if display == AddressDisplay::Masked {
+                    assert!(!text.contains("..05:06"), "{name} leaks part of it");
+                    if chrome.addresses {
+                        assert!(text.contains("#1"), "{name} shows no masked number");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every NET panel rendered, as text beside its chrome, against a state in
+    /// which each has something to show: one advertiser, heard once, with an
+    /// offset, in the census and in the packet feed.
+    fn net_panels_with_one_device(
+        display: crate::state::AddressDisplay,
+    ) -> Vec<(String, String, ui::panel::PanelChrome)> {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        use crate::state::{BlePacket, SdrMetrics};
+
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let now = std::time::Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.address_display = display;
+        m.net.address_book.number([1, 2, 3, 4, 5, 6]);
+        m.net.ble_channel = Some(37);
+        // A Wi-Fi frame too, heard where the radio is, for the Frames view.
+        m.net.wifi.push_row(crate::state::WifiRow {
+            seq: 0,
+            start: 0,
+            run: 0,
+            when: now,
+            carrier_hz: m.radio.frequency as f64,
+            kind: crate::state::RowKind::Ofdm(crate::signal::wifi::format::Heard {
+                lsig: Some(Ok(crate::signal::wifi::lsig::LSig {
+                    rate: crate::signal::wifi::signal_field::Rate::R24,
+                    length: 1_500,
+                })),
+                format: Some(crate::signal::wifi::format::Format::NonHt),
+            }),
+            airtime_us: Some(524),
+            gap_us: None,
+            offset_hz: Some(Uncertain::from_sigma(-12_430.0, 1_900.0)),
+            snr_db: Some(14.0),
+            channel: None,
+            clock: None,
+            epoch: 0,
+        });
+        m.net.ble_packets.push_front(BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
+            seq: 0,
+            channel: 37,
+            pdu_type: crate::signal::ble::pdu::PduType::AdvInd,
+            tx_add_random: false,
+            ch_sel: false,
+            rx_add_random: false,
+            payload: Vec::new(),
+            length: 20,
+            adv_addr: Some([1, 2, 3, 4, 5, 6]),
+            crc_ok: true,
+            snr_db: Some(12.0),
+            freq_offset_hz: Some(Uncertain::from_sigma(24_020.0, 500.0)),
+            modulation: None,
+            drift: None,
+            seen: now,
+            coded: None,
+            ext: None,
+        });
+        // The same device heard on LE Coded, for the LE Coded list.
+        let coded = BlePacket {
+            phy: crate::signal::ble::Phy::Coded(crate::signal::ble::coded::Coding::S8),
+            pdu_type: crate::signal::ble::pdu::PduType::Other(0x07),
+            coded: Some(crate::state::CodedFacts {
+                fec_repairs: 0,
+                reading: None,
+            }),
+            ..m.net.ble_packets[0].clone()
+        };
+        m.net.coded_packets.push_front(coded);
+        m.net.coded_heard = 1;
+        crate::signal::net::census::observe(
+            &mut m.net.census.devices,
+            &crate::signal::net::census::Sighting {
+                address: [1, 2, 3, 4, 5, 6],
+                random: false,
+                snr_db: Some(12.0),
+                crystal_offset_ppm: Some(Uncertain::from_sigma(10.0, 0.2)),
+                ble_pdu_code: Some(0x0),
+                modulation_index: None,
+                arrival: None,
+            },
+            now,
+        );
+
+        // A classic piconet with a fitted slot grid, selected, so the roster's
+        // TIMING block shows its clock error, a ppm like the census's.
+        let lap = 0x5a_3c71;
+        crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, lap, 10, now);
+        let times: Vec<f64> = (0..40u32)
+            .map(|k| f64::from(k * 7) * crate::signal::bt::slots::SLOT_US * (1.0 + 4e-6))
+            .collect();
+        m.net.bt_piconets[0].slots = Some(crate::signal::bt::slots::fit(&times));
+        m.net.bt_view.selected = Some(lap);
+        // Its master's carrier, so the bench shows an f0 in kHz.
+        m.net.bt_piconets[0].headers.sides.master.carrier = crate::signal::bt::piconet::Carrier {
+            f0_ppm: crate::signal::dsp::deviation::Sums::of(&[4.0, 6.0]),
+            channel_mhz: crate::signal::dsp::deviation::Sums::of(&[2441.0, 2441.0]),
+            worst_drift_hz: None,
+            worst_rate_hz_per_us: None,
+        };
+        // And one packet of it, so the packet list draws its table: a
+        // slot_offset, whose BD_ADDR (sent little-endian) is the device.
+        crate::signal::bt::piconet::observe_packet(
+            &mut m.net.bt_piconets,
+            lap,
+            crate::signal::bt::piconet::BtPacket {
+                seen: now,
+                at_us: 0.0,
+                stream: 0,
+                channel: 10,
+                header: None,
+                direction: None,
+                deviation: Default::default(),
+                carrier: Default::default(),
+                f0_ppm: None,
+                payload: crate::signal::bt::piconet::PayloadVerdict::Crc(true),
+                content: crate::signal::bt::lmp::parse(&[52 << 1, 0, 0, 6, 5, 4, 3, 2, 1])
+                    .map(crate::signal::bt::piconet::PayloadContent::Lmp),
+            },
+        );
+
+        let theme = crate::Theme::sdr();
+        engine
+            .registered_panels()
+            .filter(|panel| panel.name().starts_with("net_"))
+            .map(|panel| {
+                let backend = ratatui::backend::TestBackend::new(140, 30);
+                let mut terminal = ratatui::Terminal::new(backend).unwrap();
+                terminal
+                    .draw(|f| panel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
+                (
+                    panel.name().to_string(),
+                    text,
+                    panel.chrome(&crate::ui::View::of(&m)),
+                )
+            })
+            .collect()
+    }
+
+    /// Two panels claiming one letter are a clash **where one preset shows
+    /// both**, and only there: the same pair kept on separate screens is the
+    /// sharing that lets a NET panel reuse a Lab letter.
+    ///
+    /// Two stand-in panels prove the detector fires, so the assertion on the real
+    /// presets below means something.
+    #[test]
+    fn a_shared_focus_letter_clashes_only_where_one_preset_shows_both() {
+        struct First;
+        struct Second;
+        impl ui::panel::Panel for First {
+            fn name(&self) -> &'static str {
+                "first"
+            }
+            fn min_size(&self) -> (u16, u16) {
+                (1, 1)
+            }
+            fn focus_key(&self) -> Option<char> {
+                Some('z')
+            }
+            fn render(
+                &self,
+                _: &mut ratatui::Frame,
+                _: ratatui::layout::Rect,
+                _: &crate::ui::View<'_>,
+                _: &crate::Theme,
+                _: bool,
+            ) {
+            }
+        }
+        impl ui::panel::Panel for Second {
+            fn name(&self) -> &'static str {
+                "second"
+            }
+            fn min_size(&self) -> (u16, u16) {
+                (1, 1)
+            }
+            fn focus_key(&self) -> Option<char> {
+                Some('z')
+            }
+            fn render(
+                &self,
+                _: &mut ratatui::Frame,
+                _: ratatui::layout::Rect,
+                _: &crate::ui::View<'_>,
+                _: &crate::Theme,
+                _: bool,
+            ) {
+            }
+        }
+        let mut registry = ui::PanelRegistry::new();
+        registry.register(Second);
+        registry.register(First);
+        let preset = |names: &[&str]| -> crate::config::PresetConfig {
+            let panels: Vec<String> = names
+                .iter()
+                .map(|n| format!("{{ name = \"{n}\", position = \"body\" }}"))
+                .collect();
+            toml::from_str(&format!("panels = [{}]", panels.join(", "))).unwrap()
+        };
+
+        let apart: HashMap<String, _> = [
+            ("one".to_string(), preset(&["first"])),
+            ("two".to_string(), preset(&["second"])),
+        ]
+        .into();
+        let (keys, collisions) = harvest_focus_keys(&registry, &apart);
+        assert!(collisions.is_empty(), "{collisions:?}");
+        assert_eq!(keys[&'z'], ["first", "second"], "in name order");
+
+        let together: HashMap<String, _> =
+            [("both".to_string(), preset(&["first", "second"]))].into();
+        let (_, collisions) = harvest_focus_keys(&registry, &together);
+        assert_eq!(
+            collisions,
+            [Collision {
+                key: 'z',
+                preset: "both".to_string(),
+                panels: vec!["first", "second"],
+            }]
+        );
+    }
+
+    /// The built-in presets, which are what ships: no screen shows two panels
+    /// with one letter, and the startup warnings say nothing about it.
+    #[test]
+    fn no_builtin_preset_shows_two_panels_with_one_focus_letter() {
+        let (engine, keys) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        let registry_panels: usize = keys.values().map(Vec::len).sum();
+        assert!(
+            registry_panels >= 10,
+            "expected the full focus set, got {registry_panels}"
+        );
+        let clash = engine
+            .startup_warnings()
+            .iter()
+            .filter(|w| w.contains("same focus key"))
+            .count();
+        assert_eq!(clash, 0, "{:?}", engine.startup_warnings());
+    }
+
+    /// The preset a config asks for is the one the engine comes up in - and a
+    /// name that resolves to nothing must not leave the engine on it.
+    ///
+    /// `build_ui` is where a saved `active_preset` meets the merged preset table,
+    /// and it is the only place the two are reconciled. A config naming a preset
+    /// that no longer exists (renamed built-in, deleted user file) has to land
+    /// somewhere sensible rather than on an empty layout.
+    #[test]
+    fn the_configured_preset_is_the_one_the_engine_starts_on() {
+        let (engine, _) = App::build_ui("lab_iq", &HashMap::new(), None, true);
+        assert_eq!(engine.active_preset(), "lab_iq");
+
+        let (engine, _) = App::build_ui("no_such_preset", &HashMap::new(), None, true);
+        assert!(
+            engine.has_preset(engine.active_preset()),
+            "fell back to '{}', which is not a preset either",
+            engine.active_preset()
+        );
+    }
+
+    /// A preset defined only in the user's config.toml is selectable at startup.
+    ///
+    /// The merge itself is tested in `config`; what this adds is that the merged
+    /// table is the one `build_ui` hands the engine, so a hand-written preset is
+    /// bootable and not merely loadable.
+    #[test]
+    fn a_user_defined_preset_can_be_the_startup_layout() {
+        let mut user = HashMap::new();
+        user.insert(
+            "my_layout".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![crate::config::PanelSpec {
+                    name: "spectrum".into(),
+                    position: crate::config::Position::Body,
+                    height: None,
+                    width_pct: None,
+                }],
+                ..Default::default()
+            },
+        );
+        let (engine, _) = App::build_ui("my_layout", &user, None, true);
+        assert_eq!(engine.active_preset(), "my_layout");
+        assert!(engine.is_panel_visible("spectrum"));
+    }
+
+    #[test]
+    fn a_power_trace_device_keeps_only_compatible_trace_layouts() {
+        let mut user = HashMap::new();
+        user.insert(
+            "my_trace".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![
+                    crate::config::PanelSpec {
+                        name: "header_slim".into(),
+                        position: crate::config::Position::Top,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "spectrum".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "footer".into(),
+                        position: crate::config::Position::Bottom,
+                        height: None,
+                        width_pct: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        user.insert(
+            "my_iq".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![
+                    crate::config::PanelSpec {
+                        name: "spectrum".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "iq_constellation".into(),
+                        position: crate::config::Position::Right,
+                        height: None,
+                        width_pct: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        user.insert(
+            "my_status".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![
+                    crate::config::PanelSpec {
+                        name: "system_resources".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "log".into(),
+                        position: crate::config::Position::Bottom,
+                        height: None,
+                        width_pct: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        user.insert(
+            "my_sweep".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![
+                    crate::config::PanelSpec {
+                        name: "header_slim".into(),
+                        position: crate::config::Position::Top,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "sweep_panel".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "system_resources".into(),
+                        position: crate::config::Position::Right,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "footer".into(),
+                        position: crate::config::Position::Bottom,
+                        height: None,
+                        width_pct: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        let (mut engine, _) = App::build_ui_for(
+            "my_trace",
+            &user,
+            None,
+            false,
+            crate::hardware::AcquisitionKind::PowerTrace,
+        )
+        .unwrap();
+        for available in [
+            "spectrum",
+            "waterfall",
+            "spectrum_waterfall",
+            "lab_sweep",
+            "micro_sweep",
+            "my_trace",
+            "my_status",
+            "my_sweep",
+        ] {
+            assert!(engine.has_preset(available), "{available} was hidden");
+        }
+        for unavailable in [
+            "command_rail",
+            "lab_iq",
+            "lab_rf",
+            "lab_timing",
+            "lab_signal",
+            "my_iq",
+        ] {
+            assert!(!engine.has_preset(unavailable), "{unavailable} survived");
+        }
+        assert_eq!(engine.active_preset(), "my_trace");
+        engine.set_preset("my_sweep");
+        assert!(engine.is_panel_visible("sweep_panel"));
+        assert!(engine.is_panel_visible("system_resources"));
+        engine.set_preset("lab_sweep");
+        assert!(engine.is_panel_visible("sweep_panel"));
+        assert!(!engine.is_panel_visible("signal_metrics"));
+    }
+
+    #[test]
+    fn an_iq_device_keeps_signal_metrics_in_the_lab_sweep_layout() {
+        let (engine, _) = App::build_ui_for(
+            "lab_sweep",
+            &HashMap::new(),
+            None,
+            false,
+            crate::hardware::AcquisitionKind::IqSamples,
+        )
+        .unwrap();
+        assert_eq!(engine.active_preset(), "lab_sweep");
+        assert!(engine.is_panel_visible("signal_metrics"));
+    }
+
+    #[test]
+    fn automatic_fallback_does_not_replace_the_saved_preference() {
+        let (engine, _) = App::build_ui_for(
+            "command_rail",
+            &HashMap::new(),
+            None,
+            false,
+            crate::hardware::AcquisitionKind::PowerTrace,
+        )
+        .unwrap();
+        assert_eq!(engine.active_preset(), "spectrum_waterfall");
+        assert_eq!(engine.saved_active_preset(), "command_rail");
+    }
+
+    #[test]
+    fn explicitly_selecting_the_fallback_updates_the_saved_preference() {
+        let (mut engine, _) = App::build_ui_for(
+            "command_rail",
+            &HashMap::new(),
+            None,
+            false,
+            crate::hardware::AcquisitionKind::PowerTrace,
+        )
+        .unwrap();
+        engine.set_preset("spectrum_waterfall");
+        assert_eq!(engine.saved_active_preset(), "spectrum_waterfall");
+    }
+
+    #[test]
+    fn a_saved_coexistence_preset_falls_back_like_any_unknown_one() {
+        // `net_coexist` was once its own preset, before it was folded into
+        // the Survey. A config saved on it names a preset that no longer
+        // exists, and must land on a drawable layout and say why, the path
+        // every unknown preset takes, checked rather than assumed.
+        let (engine, _) = App::build_ui("net_coexist", &HashMap::new(), None, true);
+        assert!(!engine.has_preset("net_coexist"));
+        assert_eq!(engine.active_preset(), "spectrum_waterfall");
+        assert!(engine.startup_warnings().iter().any(|w| {
+            w.contains("Preset 'net_coexist' is unavailable")
+                && w.contains("using 'spectrum_waterfall'")
+        }));
+    }
+
+    /// **The Survey is one instrument.** The occupancy profile and the
+    /// coexistence heatmap bond: one frame round both, the seam between them
+    /// is the channel ruler let into the rule, and the heatmap's nameplate is
+    /// on the bottom edge, since its top edge is the ruler.
+    #[test]
+    fn the_survey_draws_the_profile_and_the_history_as_one_instrument() {
+        let (engine, _) = App::build_ui("net_survey", &HashMap::new(), None, true);
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        m.net.band.cells = vec![Default::default(); crate::signal::net::occupancy::CELLS];
+        m.net.band.trusted = true;
+        m.net.band.history = vec![vec![0.1f32; crate::signal::net::occupancy::CELLS]; 8].into();
+        let (w, h) = (140u16, 50u16);
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &crate::Theme::sdr()))
+            .unwrap();
+        let buf = term.backend().buffer();
+        let rows: Vec<String> = (0..h)
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        let all = rows.join("\n");
+        let seam = rows
+            .iter()
+            // A junction on the left and the last channel number: the header
+            // has junctions too, but no channel ruler.
+            .find(|r| r.contains('\u{251c}') && r.contains("13"))
+            .unwrap_or_else(|| panic!("no seam row:\n{all}"));
+        for ch in ["1", "6", "11", "13"] {
+            assert!(seam.contains(ch), "channel {ch} not on the seam: {seam}");
+        }
+        assert!(seam.contains('\u{2500}'), "the seam is a rule: {seam}");
+        // The ruler is drawn once, on the seam, not also inside either half.
+        assert_eq!(
+            all.matches(" 13 ").count() + all.matches("\u{2500}13\u{2500}").count(),
+            1,
+            "{all}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.contains('\u{2570}') && r.contains("Coexistence")),
+            "the heatmap's plate is not on its bottom edge:\n{all}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.contains('\u{256d}') && r.contains("Band Occupancy")),
+            "the profile's plate is not on the top edge:\n{all}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_only_preset_warns_and_uses_a_drawable_fallback() {
+        let mut user = HashMap::new();
+        user.insert(
+            "future_panel".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![crate::config::PanelSpec {
+                    name: "not_registered_yet".into(),
+                    position: crate::config::Position::Body,
+                    height: None,
+                    width_pct: None,
+                }],
+                ..Default::default()
+            },
+        );
+
+        let (engine, _) = App::build_ui("future_panel", &user, None, true);
+        assert!(engine.has_preset("future_panel"));
+        assert_eq!(engine.active_preset(), "spectrum_waterfall");
+        assert!(engine
+            .startup_warnings()
+            .iter()
+            .any(|warning| warning.contains("unknown panel 'not_registered_yet'")));
+        assert!(engine.startup_warnings().iter().any(|warning| {
+            warning.contains("Preset 'future_panel' is unavailable")
+                && warning.contains("using 'spectrum_waterfall'")
+        }));
+    }
+
+    #[test]
+    fn a_mixed_known_and_unknown_preset_remains_selectable() {
+        let mut user = HashMap::new();
+        user.insert(
+            "future_panel".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![
+                    crate::config::PanelSpec {
+                        name: "not_registered_yet".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    },
+                    crate::config::PanelSpec {
+                        name: "spectrum".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        let (engine, _) = App::build_ui("future_panel", &user, None, true);
+        assert_eq!(engine.active_preset(), "future_panel");
+        assert!(engine
+            .startup_warnings()
+            .iter()
+            .any(|warning| warning.contains("unknown panel 'not_registered_yet'")));
+    }
+
+    #[test]
+    fn incompatible_overrides_cannot_leave_a_power_device_without_a_layout() {
+        let mut user = HashMap::new();
+        for name in [
+            "spectrum",
+            "waterfall",
+            "spectrum_waterfall",
+            "lab_sweep",
+            "micro_sweep",
+        ] {
+            user.insert(
+                name.to_string(),
+                crate::config::PresetConfig {
+                    panels: vec![crate::config::PanelSpec {
+                        name: "iq_constellation".into(),
+                        position: crate::config::Position::Body,
+                        height: None,
+                        width_pct: None,
+                    }],
+                    ..Default::default()
+                },
+            );
+        }
+        user.insert(
+            "future_panel".to_string(),
+            crate::config::PresetConfig {
+                panels: vec![crate::config::PanelSpec {
+                    name: "not_registered_yet".into(),
+                    position: crate::config::Position::Body,
+                    height: None,
+                    width_pct: None,
+                }],
+                ..Default::default()
+            },
+        );
+
+        let error = App::build_ui_for(
+            "spectrum_waterfall",
+            &user,
+            None,
+            false,
+            crate::hardware::AcquisitionKind::PowerTrace,
+        )
+        .err()
+        .expect("all compatible layouts were overridden");
+        assert!(error
+            .to_string()
+            .contains("No usable presets remain for this device"));
+        assert!(error.to_string().contains("iq_constellation"));
+        assert!(error.to_string().contains("not_registered_yet"));
+    }
+
+    /// A full-height waterfall must reach its own bottom border.
+    ///
+    /// The `waterfall` preset gives the panel the whole body, and each character
+    /// cell shows two rows of history - so a tall terminal needs more than twice
+    /// its height in buffered rows. With the old 64-row default it ran out and
+    /// left a blank strip above the bottom border that never filled: the plot
+    /// looked cut off short of its own frame.
+    ///
+    /// Rendered through the real layout engine, because the bug was in the
+    /// interaction between the preset's height and the buffer's depth - neither
+    /// the panel nor the buffer is wrong on its own.
+    #[test]
+    fn a_full_height_waterfall_fills_its_panel() {
+        use crate::state::{SdrMetrics, WaterfallState, WATERFALL_MIN_ROWS};
+
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(1_000_000.0, 40.0);
+        m.waterfall = WaterfallState::new(
+            WATERFALL_MIN_ROWS,
+            crate::state::WaterfallPalette::default(),
+            m.caps.level_min_db,
+            m.caps.level_max_db,
+        );
+        for i in 0..WATERFALL_MIN_ROWS {
+            let bins: Vec<f32> = (0..256)
+                .map(|b| if b % 17 == i % 17 { -40.0 } else { -95.0 })
+                .collect();
+            m.waterfall.buffer.push(&bins);
+        }
+        let theme = crate::Theme::sdr();
+
+        for h in [20u16, 30, 45, 60, 90] {
+            let (engine, _) = App::build_ui("waterfall", &HashMap::new(), None, true);
+            let backend = ratatui::backend::TestBackend::new(100, h);
+            let mut term = ratatui::Terminal::new(backend).unwrap();
+            term.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &theme))
+                .unwrap();
+            let buf = term.backend().buffer();
+            let rows: Vec<String> = (0..h)
+                .map(|y| (0..100).map(|x| buf[(x, y)].symbol()).collect())
+                .collect();
+
+            let Some(top) = rows.iter().position(|r| r.contains("WATERFALL")) else {
+                continue; // too short to place the panel at all
+            };
+            let Some(bot) = rows[top + 1..]
+                .iter()
+                .position(|r| r.starts_with('\u{2517}'))
+                .map(|i| top + 1 + i)
+            else {
+                continue;
+            };
+            let blank = rows[top + 1..bot]
+                .iter()
+                .filter(|r| r.chars().all(|c| c == ' ' || c == '\u{2502}'))
+                .count();
+            assert_eq!(
+                blank,
+                0,
+                "height {h}: {blank} blank rows between the waterfall and its border\n{}",
+                rows[top..=bot].join("\n")
+            );
+        }
+    }
+
+    /// The gate at the level it actually acts. A radio that cannot work in the
+    /// band gets no NET view the engine can set: not one showing zeros, and
+    /// not one a number key, the `p` cycle or a saved config can reach.
+    #[test]
+    fn a_refused_radio_can_open_no_net_view() {
+        let (admitted, _) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        assert!(admitted.has_preset("net"));
+        assert!(admitted.menu().section("net").is_some());
+
+        let (refused, _) = App::build_ui("command_rail", &HashMap::new(), None, false);
+        assert!(!refused.has_preset("net"));
+        assert!(
+            refused.menu().section("net").is_none(),
+            "the section must be absent, not empty"
+        );
+        // Every other section is untouched: the gate removes one thing.
+        for other in ["command_rail", "lab", "sweep", "micro"] {
+            assert!(refused.menu().section(other).is_some(), "{other} went too");
+        }
+    }
+
+    /// What the gate refused is listed in the menu's tree, by its real
+    /// titles, with the gate's sentence, the user's own presets included,
+    /// and none of it opens.
+    #[test]
+    fn a_refused_radio_is_shown_the_views_it_cannot_open() {
+        let census = crate::config::LayoutConfig::default_config().presets["net_census"].clone();
+        let mut user = HashMap::new();
+        let mut mine = census.clone();
+        mine.section = Some("le".to_string());
+        mine.slot = Some(9);
+        user.insert("my_le".to_string(), mine);
+        let refused = NetAdmitted {
+            band: Err("this radio tunes 24.000 to 1800.000 MHz".into()),
+            wifi: Err("this radio tunes 24.000 to 1800.000 MHz".into()),
+        };
+        let (engine, _) = App::build_ui("command_rail", &user, None, refused);
+        let tree = engine.menu_tree();
+        for name in ["net", "net_census", "net_bt", "wifi_frames", "my_le"] {
+            assert!(!engine.has_preset(name), "{name} must not be settable");
+            let (tile, path) = tree.locate(name).unwrap_or_else(|| panic!("{name} listed"));
+            let node = tree.node(tile, &path).unwrap();
+            assert!(!node.opens(), "{name}");
+            assert!(
+                node.refused
+                    .as_deref()
+                    .is_some_and(|w| w.contains("1800.000")),
+                "{name}: {:?}",
+                node.refused
+            );
+        }
+        let (tile, census) = tree.locate("net_census").unwrap();
+        assert_eq!(tree.node(tile, &census).unwrap().title, "LE devices");
+    }
+
+    /// Short of Wi-Fi's rate alone, Bluetooth opens and Wi-Fi is refused
+    /// with Wi-Fi's own sentence.
+    #[test]
+    fn a_radio_short_of_wifi_rate_is_refused_wifi_alone() {
+        let short = NetAdmitted {
+            band: Ok(()),
+            wifi: Err("this radio reaches 10.000 Msps".into()),
+        };
+        let (engine, _) = App::build_ui("command_rail", &HashMap::new(), None, short);
+        let tree = engine.menu_tree();
+        let (tile, census) = tree.locate("net_census").unwrap();
+        assert!(tree.node(tile, &census).unwrap().opens());
+        let (tile, frames) = tree.locate("wifi_frames").unwrap();
+        let node = tree.node(tile, &frames).unwrap();
+        assert_eq!(
+            node.refused.as_deref(),
+            Some("this radio reaches 10.000 Msps")
+        );
+        assert!(!engine.has_preset("wifi_frames"));
+    }
+
+    /// An able radio is refused nothing.
+    #[test]
+    fn an_able_radio_is_refused_nothing() {
+        let (engine, _) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        let tree = engine.menu_tree();
+        for name in ["net_census", "wifi_frames"] {
+            let (tile, path) = tree.locate(name).unwrap();
+            assert!(tree.node(tile, &path).unwrap().opens(), "{name}");
+        }
+    }
+
+    /// The gate holds for every section the NET feature files presets under,
+    /// the user's own included: one radio requirement for all of them.
+    #[test]
+    fn the_gate_holds_for_every_net_section() {
+        let census = crate::config::LayoutConfig::default_config().presets["net_census"].clone();
+        let mut user = HashMap::new();
+        for (name, section) in [
+            ("my_net", "net"),
+            ("my_le", "le"),
+            ("my_classic", "classic"),
+        ] {
+            let mut p = census.clone();
+            p.section = Some(section.to_string());
+            p.slot = Some(9);
+            user.insert(name.to_string(), p);
+        }
+        let (admitted, _) = App::build_ui("command_rail", &user, None, true);
+        let (refused, _) = App::build_ui("command_rail", &user, None, false);
+        for name in ["my_net", "my_le", "my_classic"] {
+            assert!(admitted.has_preset(name), "{name} kept on an able radio");
+            assert!(!refused.has_preset(name), "{name} dropped on a refused one");
+        }
+        for section in ["net", "le", "classic", "coded"] {
+            assert!(admitted.menu().section(section).is_some(), "{section}");
+            assert!(refused.menu().section(section).is_none(), "{section}");
+        }
+    }
+
+    /// A radio that reaches the band but not Wi-Fi's 20 MHz channel keeps
+    /// Bluetooth and gets no Wi-Fi at all: no group, and not the empty
+    /// "being built" item either, which would promise a bench this radio
+    /// can never run.
+    #[test]
+    fn a_radio_short_of_wifi_rate_gets_no_wifi_at_all() {
+        let census = crate::config::LayoutConfig::default_config().presets["net_census"].clone();
+        let mut user = HashMap::new();
+        let mut p = census.clone();
+        p.section = Some("wifi_channel".to_string());
+        p.slot = Some(9);
+        user.insert("my_wifi".to_string(), p);
+
+        let both = NetAdmitted {
+            band: Ok(()),
+            wifi: Ok(()),
+        };
+        let (able, _) = App::build_ui("command_rail", &user, None, both);
+        assert!(able.has_preset("my_wifi"));
+        assert!(able.menu().section("wifi_channel").is_some());
+
+        let band_only = NetAdmitted {
+            band: Ok(()),
+            wifi: Err("this radio reaches 10.000 Msps".into()),
+        };
+        let (short, _) = App::build_ui("command_rail", &user, None, band_only);
+        assert!(!short.has_preset("my_wifi"));
+        assert!(short.menu().section("wifi_channel").is_none());
+        assert!(
+            short.menu().section(crate::ui::menu::model::WIFI).is_none(),
+            "no placeholder for a bench this radio cannot run"
+        );
+        assert!(short.menu().section("le").is_some(), "Bluetooth stays");
+    }
+
+    /// A config saved on a HackRF and opened on an RTL-SDR names a layout that
+    /// no longer exists. It must fall back rather than start on a preset the
+    /// menu cannot even show.
+    #[test]
+    fn a_saved_net_layout_does_not_survive_a_radio_that_cannot_run_it() {
+        let (kept, _) = App::build_ui("net", &HashMap::new(), None, true);
+        assert_eq!(kept.active_preset(), "net");
+
+        let (dropped, _) = App::build_ui("net", &HashMap::new(), None, false);
+        assert_ne!(dropped.active_preset(), "net");
+        assert!(dropped.has_preset(dropped.active_preset()));
+    }
+
+    /// The part of a user doc under `heading`, up to the next `## `.
+    fn doc_section<'a>(doc: &'a str, heading: &str) -> &'a str {
+        let start = doc
+            .find(heading)
+            .unwrap_or_else(|| panic!("no '{heading}' in the doc"));
+        let rest = &doc[start + heading.len()..];
+        &rest[..rest.find("\n## ").unwrap_or(rest.len())]
+    }
+
+    /// **The NET key table cannot fall behind the panels** (POLICY rule 7):
+    /// every NET panel that takes focus has a row in `user_docs/keys.md` with
+    /// its letter, its title and every binding its `focus_bindings` declares,
+    /// word for word; and no row names a letter no NET panel takes.
+    /// Hand-written, checked against the source.
+    #[test]
+    fn the_net_key_table_matches_the_panels() {
+        let doc = include_str!("../../../../../user_docs/keys.md");
+        let table = doc_section(doc, "## NET panel focus modes");
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let m = crate::state::SdrMetrics::fixture();
+        let mut keys = Vec::new();
+        for panel in engine.registered_panels() {
+            if !panel.name().starts_with("net_") {
+                continue;
+            }
+            let Some(key) = panel.focus_key() else {
+                continue;
+            };
+            keys.push(key);
+            let title = panel
+                .chrome(&crate::ui::View::of(&m))
+                .title
+                .replace('_', "");
+            let lead = format!("| `{key}` | {title} |");
+            let row = table
+                .lines()
+                .find(|l| l.starts_with(&lead))
+                .unwrap_or_else(|| panic!("no row '{lead}' in keys.md"));
+            for (k, what) in panel.focus_bindings() {
+                assert!(
+                    row.contains(&format!("`{k}` {what}")),
+                    "{}: '{k} {what}' missing from:\n{row}",
+                    panel.name()
+                );
+            }
+        }
+        for line in table.lines().filter(|l| l.starts_with("| `")) {
+            let key = line.chars().nth(3).unwrap();
+            assert!(
+                keys.contains(&key),
+                "a row for a letter no NET panel takes: {line}"
+            );
+        }
+        assert!(keys.len() >= 7, "only {} NET panels take focus", keys.len());
+    }
+
+    /// **A panel that says it reads no spectrum draws the same without one**:
+    /// rendered with an FFT frame and its measurements and with none, the
+    /// two are identical. What the FFT feed is switched off by cannot lie.
+    #[test]
+    fn a_panel_that_reads_no_spectrum_draws_the_same_without_one() {
+        use crate::state::SdrMetrics;
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let theme = crate::Theme::sdr();
+        let bare = SdrMetrics::fixture().streaming();
+        let fed = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(25_000.0, 40.0);
+        let draw = |name: &str, m: &SdrMetrics| {
+            let mut t =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+            t.draw(|f| {
+                engine.registry().render_panel(
+                    name,
+                    f,
+                    f.area(),
+                    &crate::ui::View::of(m),
+                    &theme,
+                    false,
+                )
+            })
+            .unwrap();
+            t.backend().buffer().clone()
+        };
+        let mut checked = 0;
+        for panel in engine.registered_panels() {
+            if panel.reads_spectrum() {
+                continue;
+            }
+            checked += 1;
+            assert_eq!(
+                draw(panel.name(), &bare),
+                draw(panel.name(), &fed),
+                "{} says it reads no spectrum",
+                panel.name()
+            );
+        }
+        assert!(checked >= 20, "only {checked} panels said so");
+    }
+
+    /// **The spectrum is wanted only where a panel on screen reads it**: on
+    /// every NET view nothing does, and the FFT worker can stop; on the Lab
+    /// and the main views something always does.
+    #[test]
+    fn the_spectrum_is_wanted_only_where_a_panel_reads_it() {
+        for (preset, wanted) in [
+            ("wifi_frames", false),
+            ("wifi_survey", false),
+            ("wifi_airtime", false),
+            ("net_ble", false),
+            ("net_bt", false),
+            ("net_piconet", false),
+            ("net_survey", false),
+            // The Radio views draw from their own feeds: the slim header
+            // above them reads the tuning and the converter's clips, not the
+            // spectrum, and FT8 at 912 kS/s spent a tenth of a core on an FFT
+            // nothing showed.
+            ("radio_ft8", false),
+            ("lab_ft8_signal", false),
+            ("lab_ft8_band", false),
+            ("lab_ft8_receiver", true),
+            ("radio_pocsag", false),
+            ("main", true),
+            ("lab_signal", true),
+            ("spectrum", true),
+        ] {
+            let (engine, _) = App::build_ui(preset, &HashMap::new(), None, true);
+            assert_eq!(engine.shows_spectrum_reader(), wanted, "{preset}");
+        }
+    }
+
+    /// **A short terminal places every panel inside itself.** The top and
+    /// bottom panels keep their own heights only while the screen has the
+    /// rows: on a terminal shorter than the header, the log and the footer
+    /// together, a footer drawn below the last row was a crash, on every
+    /// view. Each preset, at short and ordinary heights, is drawn whole.
+    #[test]
+    fn a_short_terminal_places_every_panel_inside_itself() {
+        let (mut engine, _) = App::build_ui("main", &HashMap::new(), None, true);
+        let theme = crate::Theme::sdr();
+        let m = crate::state::SdrMetrics::fixture().streaming();
+        for preset in engine.preset_names() {
+            engine.set_preset(&preset);
+            for (w, h) in [
+                (100u16, 3u16),
+                (100, 8),
+                (100, 11),
+                (40, 12),
+                (191, 14),
+                (191, 41),
+            ] {
+                let size = ratatui::layout::Rect::new(0, 0, w, h);
+                let names: Vec<&str> = engine.registered_panel_names().collect();
+                for name in names {
+                    if let Some(r) = engine.area_of(name, size, &crate::ui::View::of(&m)) {
+                        assert!(
+                            r.right() <= w && r.bottom() <= h,
+                            "{preset} at {w} x {h}: {name} at {r:?}"
+                        );
+                    }
+                }
+                let mut t =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+                t.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &theme))
+                    .unwrap();
+            }
+        }
+    }
+
+    /// Every panel a preset can name is listed in `user_docs/presets.md`'s
+    /// panel names, so a new panel is not a name nobody can find.
+    #[test]
+    fn every_registered_panel_is_a_documented_name() {
+        let doc = include_str!("../../../../../user_docs/presets.md");
+        let names = doc_section(doc, "## Panel names");
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let missing: Vec<&str> = engine
+            .registered_panels()
+            .map(|p| p.name())
+            .filter(|n| !names.contains(&format!("`{n}`")))
+            .collect();
+        assert!(missing.is_empty(), "not in presets.md: {missing:?}");
+    }
+
+    /// The FT8 view through the real engine at three sizes, written as HTML
+    /// to the path in `FT8_VIEW_HTML`, for looking at.
+    #[test]
+    #[ignore]
+    fn render_the_ft8_view() {
+        let Ok(path) = std::env::var("FT8_VIEW_HTML") else {
+            return;
+        };
+        let mut m = crate::ui::panels::radio::ft8::sample::evening();
+        m.ft8.view.selected = Some("JA1VQD".into());
+        render_html("radio_ft8", m, &path);
+    }
+
+    /// The FT8 Lab's Signal view the same way, on real decodes with their
+    /// traces, to the path in `FT8_LAB_HTML` (and the text beside it, `.txt`).
+    #[test]
+    #[ignore]
+    fn render_the_ft8_lab() {
+        let Ok(path) = std::env::var("FT8_LAB_HTML") else {
+            return;
+        };
+        let m = crate::state::SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .ft8_traced();
+        render_html("lab_ft8_signal", m, &path);
+    }
+
+    /// The FT8 Lab's Band view the same way, on a generated hour and one
+    /// real decoded cycle, to the path in `FT8_BAND_HTML`.
+    #[test]
+    #[ignore]
+    fn render_the_ft8_band() {
+        let Ok(path) = std::env::var("FT8_BAND_HTML") else {
+            return;
+        };
+        let m = crate::state::SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .ft8_traced()
+            .ft8_hour();
+        render_html("lab_ft8_band", m, &path);
+    }
+
+    /// The FT8 Lab's Receiver view the same way, to `FT8_RECEIVER_HTML`.
+    #[test]
+    #[ignore]
+    fn render_the_ft8_receiver() {
+        let Ok(path) = std::env::var("FT8_RECEIVER_HTML") else {
+            return;
+        };
+        let mut m = crate::state::SdrMetrics::fixture()
+            .airspyhf()
+            .streaming()
+            .with_carrier(25_000.0, 40.0)
+            .ft8_traced()
+            .ft8_hour();
+        m.show_section(crate::signal::ft8::LAB_SECTION);
+        // The capture centred on the dial, the carrier 25 kHz off it, so the
+        // radio's slice reads as it would on the air.
+        let dial = m.radio.frequency;
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.axis_start_hz += dial as f64 - fr.center_freq_hz as f64;
+            fr.center_freq_hz = dial;
+        }
+        // A full ring for the load's cycles: decode times that wander, one
+        // cycle skipped and one cut, so every mark is on screen.
+        let base = m.ft8.cycles[0].clone();
+        m.ft8.cycles.clear();
+        for k in 0..crate::state::ft8::CYCLES_MAX {
+            let mut c = base.clone();
+            c.start_unix = base.start_unix - 15.0 * (crate::state::ft8::CYCLES_MAX - 1 - k) as f64;
+            c.seconds = 3.0 + 4.0 * ((k as f64) * 0.7).sin().abs() + (k % 5) as f64 * 0.6;
+            c.outcome = match k {
+                17 => crate::state::ft8::CycleOutcome::Skipped,
+                31 => crate::state::ft8::CycleOutcome::Cut,
+                _ => crate::state::ft8::CycleOutcome::Decoded,
+            };
+            m.ft8.cycles.push_back(c);
+        }
+        render_html("lab_ft8_receiver", m, &path);
+    }
+
+    /// `preset` through the real engine at the three reference sizes, as
+    /// HTML with every cell's colours, and as text beside it.
+    fn render_html(preset: &str, m: crate::state::SdrMetrics, path: &str) {
+        use ratatui::style::Color;
+        let (mut engine, _) = App::build_ui(preset, &HashMap::new(), None, true);
+        engine.set_preset(preset);
+        // What the app gives the screen before every frame.
+        let ui = crate::ui::UiState {
+            active_preset: preset.into(),
+            section: engine.scope().map(|s| s.id.clone()).unwrap_or_default(),
+            ..crate::ui::UiState::default()
+        };
+        let theme = crate::Theme::sdr();
+        let mut out = String::new();
+        let mut text = String::new();
+        for (w, h) in [(191u16, 41u16), (152, 32), (100, 30)] {
+            let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            t.draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+                .unwrap();
+            let buf = t.backend().buffer().clone();
+            out.push_str(&format!("<h2>{w} x {h}</h2><div class=g>"));
+            text.push_str(&format!("{w} x {h}\n"));
+            for y in 0..h {
+                out.push_str("<div class=r>");
+                for x in 0..w {
+                    let c = &buf[(x, y)];
+                    let col = |c: Color, d: &str| match c {
+                        Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+                        _ => d.to_string(),
+                    };
+                    let sym = c.symbol().replace('&', "&amp;").replace('<', "&lt;");
+                    out.push_str(&format!(
+                        "<i style=\"color:{};background:{}\">{sym}</i>",
+                        col(c.fg, "#c3d2dc"),
+                        col(c.bg, "#000000")
+                    ));
+                    text.push_str(c.symbol());
+                }
+                out.push_str("</div>");
+                text.push('\n');
+            }
+            out.push_str("</div>");
+        }
+        std::fs::write(path, out).unwrap();
+        std::fs::write(format!("{path}.txt"), text).unwrap();
+    }
+}

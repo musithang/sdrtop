@@ -28,7 +28,7 @@ VERSION=$("$REPO/packaging/version.sh")
 
 # The commit is resolved here, on the host, and handed to build.rs through the
 # environment. The container has no git, and bind-mounting .git into it would
-# trip git's safe.directory check when the uid does not match. See build.rs.
+# trip git's safe.directory check when the uid does not match. See crates/sdrtop/build.rs.
 COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "")
 if [ -n "$COMMIT" ] && ! git -C "$REPO" diff --quiet HEAD 2>/dev/null; then
     COMMIT="$COMMIT-dirty"

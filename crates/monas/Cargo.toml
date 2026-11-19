@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+[package]
+name = "monas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "The engine inside sdrtop and monasd: the radio, its workers and their state. Internal; no stability promise."
+readme = "README.md"
+
+[features]
+# The test fixtures other crates' tests build on: a state to draw panels
+# from, a test radio, the native backends' test support. Switched on only
+# from `[dev-dependencies]`, so no release build carries them.
+testing = []
+
+[dependencies]
+libc.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+toml.workspace = true
+serde_json.workspace = true
+crossbeam-channel.workspace = true
+rustfft.workspace = true
+num-complex.workspace = true
+libloading.workspace = true
+serialport.workspace = true

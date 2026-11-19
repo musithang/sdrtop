@@ -124,7 +124,7 @@ HackRF at 20 Msps, twice the longest stall measured on the callback. Every
 native backend and SoapySDR go through this same door, whether the driver
 calls us (push) or we call the driver (pull). Why it is built this way is
 written at the top of
-[`src/hardware/intake.rs`](../src/hardware/intake.rs).
+[`crates/monas/src/hardware/intake.rs`](../crates/monas/src/hardware/intake.rs).
 
 **The feeds are bounded and lossy, each for its own reason.** The demod's is
 two deep, because it only updates four times a second and anything deeper
@@ -134,7 +134,7 @@ instead of absorbing them. FT8 is 64 deep, because nothing there is in a hurry
 and a stall of the whole machine mustn't cost a 15-second cycle. Blocks carry
 their stream position, so a worker can tell a gap from a pause, and NET
 rebuilds its receivers at every break. The comments in
-[`src/app/builder/mod.rs`](../src/app/builder/mod.rs) say this better than I
+[`crates/sdrtop/src/app/builder/mod.rs`](../crates/sdrtop/src/app/builder/mod.rs) say this better than I
 can here.
 
 **The 200 ms loop is split by when it holds the lock.** The UI thread clones
@@ -149,18 +149,18 @@ publish::write_back  lock      write the results
 control::*           no lock   talk to the radio
 ```
 
-The details live in [`src/tasks/rx/mod.rs`](../src/tasks/rx/mod.rs).
+The details live in [`crates/monas/src/tasks/rx/mod.rs`](../crates/monas/src/tasks/rx/mod.rs).
 
 **The FFT worker is split the same way**: `frame` (per-frame DSP, full rate, no
 lock), `analysis` (the measurements, display rate, no lock, no clock),
 `readout`, then `publish`, the one lock block
-([`src/signal/fft/mod.rs`](../src/signal/fft/mod.rs)).
+([`crates/monas/src/signal/fft/mod.rs`](../crates/monas/src/signal/fft/mod.rs)).
 
 **The NET worker is one thread that owns its state**, and within one block it
 runs the BLE receiver and every classic Bluetooth channel's receiver side by
 side on scoped threads, then puts the answers back in the order one thread
 would have produced them. Same results, bit for bit, in less time
-([`src/signal/net/worker/mod.rs`](../src/signal/net/worker/mod.rs)).
+([`crates/monas/src/signal/net/worker/mod.rs`](../crates/monas/src/signal/net/worker/mod.rs)).
 
 **The demodulator measures, it doesn't play.** There is no audio. It reports
 the physics (deviation, pilot, CTCSS tone, AM depth), with its work capped at
@@ -168,13 +168,13 @@ the physics (deviation, pilot, CTCSS tone, AM depth), with its work capped at
 grow with the sample rate. Narrow-band FM is the exception and pays for every
 block, because its CTCSS tones sit about 2 Hz apart, and telling them apart
 takes half a second of unbroken audio
-([`src/signal/demod/mod.rs`](../src/signal/demod/mod.rs)).
+([`crates/monas/src/signal/demod/mod.rs`](../crates/monas/src/signal/demod/mod.rs)).
 
 **Two rules hold everywhere.** A poisoned mutex never takes the screen down
 with it: every lock recovers the data and carries on. And no panel decides for
 itself whether its data is stale: it declares what its data depends on, and
 the frame code marks it, against the one threshold the radio declares
-([`src/ui/panel.rs`](../src/ui/panel.rs)).
+([`crates/sdrtop/src/ui/panel.rs`](../crates/sdrtop/src/ui/panel.rs)).
 
 If any of this disagrees with the code, the code wins, and I'd like to know.
 Most modules open with a comment that explains why they are split the way they

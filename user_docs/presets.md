@@ -103,7 +103,7 @@ is the preset name.
 
 The twenty-eight built-in presets are written in exactly this format, so the quickest
 way to build on one is to copy it rather than transcribe it from the docs. They
-live in the source tree under `src/config/presets/`.
+live in the source tree under `crates/sdrtop/src/config/presets/`.
 
 Three things worth knowing:
 

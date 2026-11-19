@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+//! Terminal UI: the layout machinery, the shared chrome and widgets, and the
+//! panels themselves.
+//!
+//! The split is by role rather than by feature:
+//!
+//! - [`panel`], [`registry`], [`engine`]: the machinery. What a panel *is*, how
+//!   panels are looked up by name, and how a preset's list of names becomes
+//!   rectangles on screen.
+//! - [`chrome`]: the shared frame vocabulary. Deck blocks, nameplates, section
+//!   headings, fields, and the density helpers that let a line stack breathe or
+//!   compress to any terminal height.
+//! - [`widgets`]: drawing primitives with no opinion about layout.
+//! - [`panels`]: the panels, grouped `core` / `lab` / `micro`.
+//! - The radio maths several panels share (cascade noise figure, staging,
+//!   ADC loading) is `signal::rf_calc`, because the engine's auto-gain tracker
+//!   and the state's headroom figure use it too.
+//! - [`overlay`], [`device_selector`]: full-screen UI that is not a panel.
+//!
+//! Panel structs are re-exported flat below, so `app::builder` registers them by
+//! name without caring where they live.
+
+pub mod chrome;
+pub mod device_selector;
+pub mod engine;
+#[cfg(test)]
+pub(crate) mod fixture;
+mod golden;
+pub mod menu;
+pub mod overlay;
+pub mod panel;
+pub mod panels;
+pub mod registry;
+pub mod screen;
+pub mod widgets;
+
+pub use engine::LayoutEngine;
+pub use registry::PanelRegistry;
+pub use screen::{
+    active_recall_slot, recall_from_hz, recall_to_hz, DeviceOptionUpdate, InputMode, MenuFocus,
+    MenuPath, MenuState, MenuTile, RailMode, Screen, UiState, View, RECALL_SLOTS,
+};
+
+pub use panels::core::command_rail::CommandRailPanel;
+pub use panels::core::footer::FooterPanel;
+pub use panels::core::header::{HeaderPanel, SlimHeaderPanel};
+pub use panels::core::log::LogPanel;
+pub use panels::core::observer::ObserverPanel;
+pub use panels::core::signal_strip::SignalStripPanel;
+pub use panels::core::spectrum::SpectrumPanel;
+pub use panels::core::system_resources::SystemResourcesPanel;
+pub use panels::core::waterfall::WaterfallPanel;
+
+pub use panels::lab::ft8::bearings::Ft8BearingsPanel;
+pub use panels::lab::ft8::clock::Ft8ClockPanel;
+pub use panels::lab::ft8::decode::Ft8DecodePanel;
+pub use panels::lab::ft8::decoder::Ft8DecoderPanel;
+pub use panels::lab::ft8::hour::Ft8HourPanel;
+pub use panels::lab::ft8::ladder::Ft8LadderPanel;
+pub use panels::lab::ft8::load::Ft8LoadPanel;
+pub use panels::lab::ft8::power::Ft8PowerPanel;
+pub use panels::lab::ft8::radio::Ft8RadioPanel;
+pub use panels::lab::ft8::reach::Ft8ReachPanel;
+pub use panels::lab::ft8::sensitivity::Ft8SensitivityPanel;
+pub use panels::lab::ft8::skip::Ft8SkipPanel;
+pub use panels::lab::ft8::slots::Ft8SlotsPanel;
+pub use panels::lab::ft8::track::Ft8TrackPanel;
+pub use panels::radio::ft8::band::Ft8BandPanel;
+pub use panels::radio::ft8::card::Ft8CardPanel;
+pub use panels::radio::ft8::cycles::Ft8CyclesPanel;
+pub use panels::radio::ft8::decodes::Ft8DecodesPanel;
+pub use panels::radio::ft8::map::Ft8MapPanel;
+pub use panels::radio::pager::card::PagerCardPanel;
+pub use panels::radio::pager::face::PagerFacePanel;
+pub use panels::radio::pager::inbox::PagerInboxPanel;
+
+pub use panels::lab::adc_loading::AdcLoadingPanel;
+pub use panels::lab::bars::{LabBannerPanel, LabMarkerPanel};
+pub use panels::lab::fm_demod::FmDemodPanel;
+pub use panels::lab::image_scope::ImageScopePanel;
+pub use panels::lab::iq_constellation::IqConstellationPanel;
+pub use panels::lab::iq_diagnostics::IqDiagnosticsPanel;
+pub use panels::lab::iq_histogram::IqHistogramPanel;
+pub use panels::lab::level_diagram::LevelDiagramPanel;
+pub use panels::lab::rf_chain::RfChainPanel;
+pub use panels::lab::signal_characterization::SignalCharacterizationPanel;
+pub use panels::lab::signal_metrics::SignalMetricsPanel;
+pub use panels::lab::sweep_panel::SweepPanel;
+pub use panels::lab::sweep_strip::SweepStripPanel;
+pub use panels::lab::timing_diagnostics::TimingDiagnosticsPanel;
+pub use panels::lab::timing_stripchart::TimingStripchartPanel;
+pub use panels::lab::timing_vitals::TimingVitalsPanel;
+
+pub use panels::net::ble::ble_connection::NetBleConnectionPanel;
+pub use panels::net::ble::ble_detail::NetBleDetailPanel;
+pub use panels::net::ble::ble_packets::NetBlePacketsPanel;
+pub use panels::net::ble::coded_detail::NetCodedDetailPanel;
+pub use panels::net::bt::bt_bench::NetBtBenchPanel;
+pub use panels::net::bt::bt_hops::NetBtHopsPanel;
+pub use panels::net::bt::bt_packets::NetBtPacketsPanel;
+pub use panels::net::bt::bt_piconets::NetBtPiconetsPanel;
+pub use panels::net::shared::capability::NetCapabilityPanel;
+pub use panels::net::shared::census::NetCensusPanel;
+pub use panels::net::shared::coexist::NetCoexistPanel;
+pub use panels::net::shared::decode_health::NetDecodeHealthPanel;
+pub use panels::net::shared::occupancy::NetOccupancyPanel;
+pub use panels::net::wifi::airtime::NetWifiAirtimePanel;
+pub use panels::net::wifi::card::NetWifiCardPanel;
+pub use panels::net::wifi::frames::NetWifiFramesPanel;
+pub use panels::net::wifi::least_busy::NetWifiLeastBusyPanel;
+pub use panels::net::wifi::ledger::NetWifiLedgerPanel;
+pub use panels::net::wifi::river::NetWifiRiverPanel;
+pub use panels::net::wifi::share::NetWifiSharePanel;
+pub use panels::net::wifi::survey::NetWifiSurveyPanel;
+
+pub use panels::micro::entry::MicroPanel;
+pub use panels::micro::gain::MicroGainPanel;
+pub use panels::micro::health::MicroHealthPanel;
+pub use panels::micro::signal::MicroSignalPanel;
+pub use panels::micro::sweep::MicroSweepPanel;
+
+#[cfg(test)]
+mod gain_rendering {
+    use crate::state::SdrMetrics;
+    use crate::ui::fixture::draw;
+    use crate::ui::panel::Panel;
+
+    /// Every panel that draws a gain, rendered against each device shape, with
+    /// **distinct** values in each stage.
+    ///
+    /// Gain is one vector indexed by position, not two named fields, and the
+    /// failure that invites is an off-by-one: a panel showing the VGA where the
+    /// LNA belongs, or the same number twice. Equal values would hide exactly
+    /// that, so the fixture uses 24 and 30 and every assertion names which one
+    /// it expects.
+    ///
+    /// `draw` renders through `PanelRegistry::render_panel`, so the frame and
+    /// the nameplate are part of what is compared.
+    #[test]
+    fn a_hackrf_shows_each_stage_where_it_belongs() {
+        let m = SdrMetrics::fixture().streaming();
+        assert_eq!(m.radio.primary_gain(), 24, "the fixture's LNA");
+        assert_eq!(m.radio.secondary_gain(), 30, "the fixture's VGA");
+
+        for (name, out) in [
+            ("header", draw(super::HeaderPanel, 120, 5, &m).join("\n")),
+            (
+                "command_rail",
+                draw(super::CommandRailPanel, 60, 30, &m).join("\n"),
+            ),
+            (
+                "micro_gain",
+                draw(super::MicroGainPanel, 44, 14, &m).join("\n"),
+            ),
+        ] {
+            assert!(out.contains("24"), "{name}: no LNA value:\n{out}");
+            assert!(out.contains("30"), "{name}: no VGA value:\n{out}");
+            assert!(
+                out.contains("LNA") && out.contains("VGA"),
+                "{name}: a HackRF has both stages named:\n{out}"
+            );
+        }
+    }
+
+    /// One stage, and nothing must invent a second. The old model kept a `vga`
+    /// number for this device that meant nothing; the vector simply has one
+    /// entry, and the panels have to cope with that rather than read past it.
+    #[test]
+    fn an_rtl_sdr_has_one_stage_and_no_second_is_drawn() {
+        let m = SdrMetrics::fixture().streaming().rtlsdr();
+        assert_eq!(m.radio.primary_gain(), 25);
+        assert_eq!(m.radio.secondary_gain(), 0, "there is no second stage");
+        assert_eq!(m.radio.gains.len(), 1, "and no second value is stored");
+
+        for (name, out) in [
+            ("header", draw(super::HeaderPanel, 120, 5, &m).join("\n")),
+            (
+                "command_rail",
+                draw(super::CommandRailPanel, 60, 30, &m).join("\n"),
+            ),
+            (
+                "micro_gain",
+                draw(super::MicroGainPanel, 44, 14, &m).join("\n"),
+            ),
+        ] {
+            assert!(out.contains("25"), "{name}: no tuner value:\n{out}");
+            // A panel may still name a second stage and dash it, which the micro
+            // gain view does deliberately. What it must not do is print a second
+            // gain figure, which is exactly what an off-by-one would produce.
+            assert!(
+                !out.contains(" 30"),
+                "{name}: drew a second gain the device does not have:\n{out}"
+            );
+        }
+    }
+
+    /// A stage list with more entries than the two the panels were written for
+    /// must not panic or read past the end. This is the shape a SoapySDR device
+    /// with four elements arrives in.
+    #[test]
+    fn more_stages_than_the_panels_know_about_render_without_panicking() {
+        let mut m = SdrMetrics::fixture().streaming().named_chain();
+        m.radio.gains = vec![12.0, 34.0, 56.0, 78.0];
+        for (w, h) in [(120u16, 4u16), (60, 30), (44, 14), (40, 10)] {
+            let _ = draw(super::HeaderPanel, w, 5, &m);
+            let _ = draw(super::CommandRailPanel, w.max(40), h.max(20), &m);
+            let _ = draw(super::MicroGainPanel, w.max(40), h.max(10), &m);
+        }
+    }
+
+    /// And no stages at all, which is what a tuner that named no gains gives.
+    #[test]
+    fn an_empty_stage_list_renders_rather_than_panicking() {
+        let mut m = SdrMetrics::fixture().streaming().rtlsdr();
+        m.radio.gains.clear();
+        assert_eq!(m.radio.primary_gain(), 0);
+        let _ = draw(super::HeaderPanel, 120, 5, &m);
+        let _ = draw(super::CommandRailPanel, 60, 30, &m);
+        let _ = draw(super::MicroGainPanel, 44, 14, &m);
+    }
+
+    /// The knob's readout on a single-knob device is the **whole chain**, not
+    /// the front stage. The SoapySDR knob distributes its figure across several
+    /// stages, so showing position zero would show part of what the user set.
+    #[test]
+    fn a_distributed_knob_reads_as_the_whole_chain() {
+        let mut m = SdrMetrics::fixture().streaming().named_chain();
+        m.radio.gains = vec![16.0, 4.0];
+        assert_eq!(m.radio.primary_gain(), 16, "the front stage on its own");
+        assert_eq!(m.shown_gain(), 20, "but the knob was set to 20");
+
+        for (name, out) in [
+            ("header", draw(super::HeaderPanel, 120, 5, &m).join("\n")),
+            (
+                "command_rail",
+                draw(super::CommandRailPanel, 60, 30, &m).join("\n"),
+            ),
+        ] {
+            assert!(out.contains("20"), "{name}: shows a partial figure:\n{out}");
+        }
+
+        // A HackRF presents its stages separately, so its front stage is still
+        // its own number and nothing here changes.
+        let hack = SdrMetrics::fixture().streaming();
+        assert_eq!(hack.shown_gain(), 24, "not 24 + 30");
+    }
+
+    /// The header's four-column field abbreviates, and it must abbreviate the
+    /// right word. It called every single-knob device a tuner, so a SoapySDR
+    /// chain read `TUN` while every other panel called it `RF`.
+    #[test]
+    fn the_header_abbreviates_the_stage_the_device_actually_has() {
+        let chain = SdrMetrics::fixture().streaming().named_chain();
+        let out = draw(super::HeaderPanel, 120, 5, &chain).join("\n");
+        assert!(out.contains("RF"), "{out}");
+        assert!(!out.contains("TUN"), "called a Soapy chain a tuner:\n{out}");
+
+        let rtl = SdrMetrics::fixture().streaming().rtlsdr();
+        let out = draw(super::HeaderPanel, 120, 5, &rtl).join("\n");
+        assert!(
+            out.contains("TUN"),
+            "an RTL-SDR really does have one:\n{out}"
+        );
+    }
+
+    /// The rail marks the stage the focus mode is pointed at, and marks nothing
+    /// when it is pointed at the whole chain.
+    ///
+    /// The marker replaces a column rather than adding one, so the bars must sit
+    /// at the same offset either way: a block that twitched sideways on every
+    /// selection would be worse than no marker at all.
+    #[test]
+    fn the_rail_marks_the_selected_stage_without_moving_the_bars() {
+        let plain = SdrMetrics::fixture().streaming();
+        let picked = SdrMetrics::fixture().streaming();
+        let picked_ui = crate::ui::UiState {
+            gain_stage: Some(1),
+            ..crate::ui::UiState::default()
+        };
+
+        let a = draw(super::CommandRailPanel, 60, 30, &plain);
+        let b = crate::ui::fixture::draw_view(
+            super::CommandRailPanel,
+            60,
+            30,
+            &crate::ui::View::new(&picked, &picked_ui),
+        );
+        assert_eq!(a.len(), b.len());
+
+        let marked: Vec<usize> = b
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains('\u{25B8}'))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            marked.len(),
+            1,
+            "exactly one stage is pointed at:\n{}",
+            b.join("\n")
+        );
+        assert!(
+            b[marked[0]].contains("VGA"),
+            "the marked row is the selected one: {:?}",
+            b[marked[0]]
+        );
+        assert!(
+            !a.iter().any(|l| l.contains('\u{25B8}')),
+            "nothing is marked when the knob is the whole chain"
+        );
+
+        // Same width either way: every line keeps its length.
+        for (x, y) in a.iter().zip(&b) {
+            assert_eq!(x.chars().count(), y.chars().count(), "{x:?} vs {y:?}");
+        }
+    }
+
+    /// The footer names the mode's keys, which is how anyone finds it. They come
+    /// from `focus_bindings`, so this also pins that the rail declares them.
+    #[test]
+    fn the_rail_focus_footer_names_the_stage_keys() {
+        let m = SdrMetrics::fixture().streaming();
+        let ui = crate::ui::UiState {
+            focused_panel: Some("command_rail".into()),
+            focused_panel_bindings: super::CommandRailPanel.focus_bindings(),
+            ..crate::ui::UiState::default()
+        };
+        let out = crate::ui::fixture::draw_view(
+            super::FooterPanel,
+            150,
+            4,
+            &crate::ui::View::new(&m, &ui),
+        )
+        .join("\n");
+        assert!(out.contains("Stage"), "no stage key hint:\n{out}");
+        assert!(out.contains("Adjust"), "no adjust key hint:\n{out}");
+    }
+}

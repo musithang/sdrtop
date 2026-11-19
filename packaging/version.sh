@@ -19,8 +19,9 @@ set -eu
 MANIFEST="$(cd "$(dirname "$0")/.." && pwd)/Cargo.toml"
 
 # Anchored to the start of the line, so a dependency's own `version = "..."`
-# inside a table cannot match: those are indented or inline. `head -1` then
-# takes [package]'s, which is first because [package] is the first table.
+# cannot match: those are indented or inline, the internal crates' exact pins
+# included. `head -1` then takes [workspace.package]'s, the one version every
+# crate of the workspace inherits, and the first table that has one.
 version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$MANIFEST" | head -1)
 
 [ -n "$version" ] || {

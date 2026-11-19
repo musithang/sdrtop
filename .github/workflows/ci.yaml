@@ -101,14 +101,14 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       # A doc comment that links to the item it talks about goes stale without
       # a sound when that item is renamed, removed or gated behind cfg(test):
       # nothing but rustdoc reads the link as a reference. Eighty-two had piled
       # up before this step existed.
       - name: Doc links resolve
-        run: cargo doc --no-deps --locked
+        run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -116,30 +116,45 @@ jobs:
       # `cargo install sdrtop --locked` rather than whatever resolved this
       # morning.
       - name: Test
-        run: cargo test --all --locked
+        run: cargo test --workspace --locked
 
       - name: Resolve installed native libraries
-        run: cargo test --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact
+        # In the engine's crate, and asserted to have run: with a name that
+        # matches nothing, cargo reports success for zero tests.
+        run: |
+          cargo test -p monas --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact | tee exact.log
+          grep -q 'test result: ok. 1 passed' exact.log
 
       - name: Resolve installed libSoapySDR
-        run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
+        # In the engine's crate, and asserted to have run: with a name that
+        # matches nothing, cargo reports success for zero tests.
+        run: |
+          cargo test -p monas --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact | tee exact.log
+          grep -q 'test result: ok. 1 passed' exact.log
 
       - name: SoapySDR's modules load beside the native libraries
-        run: cargo test --locked hardware::discovery::tests::installed_soapy_modules_load_after_the_native_libraries -- --ignored --exact
+        # In the engine's crate, and asserted to have run: with a name that
+        # matches nothing, cargo reports success for zero tests.
+        run: |
+          cargo test -p monas --locked hardware::discovery::tests::installed_soapy_modules_load_after_the_native_libraries -- --ignored --exact | tee exact.log
+          grep -q 'test result: ok. 1 passed' exact.log
 
-      # sdrtop is published to crates.io, and a publish cannot be undone: a
-      # version that fails to package can only be fixed by burning the version
-      # number. So the packaging is checked on every push, not at tag time.
+      # sdrtop and the crates it is built from are published to crates.io, and
+      # a publish cannot be undone: a version that fails to package can only be
+      # fixed by burning the version number. So the packaging is checked on
+      # every push, not at tag time.
       #
       # This runs the full verification build rather than --no-verify, and that
-      # is the point. `exclude` in Cargo.toml means the repository can build
-      # while the *package* does not, if something the build needs is excluded.
-      # Only a build from the packaged tree can catch that.
+      # is the point. A package holds only its own crate's directory, so the
+      # repository can build while a *package* does not, if something the build
+      # needs lives outside it. Only a build from the packaged trees can catch
+      # that. Every member is packaged, each built against the others as
+      # packaged, before any of them is on crates.io.
       #
       # It lives here rather than in a job of its own to reuse this one's
       # toolchain, C libraries and warm registry cache.
-      - name: The crate still packages
-        run: cargo package --locked
+      - name: The crates still package
+        run: cargo package --workspace --locked
 
   # macOS has no Mac on the desk, so this runner is the one sdrtop is tested on
   # there: the same lints and tests as Linux on every push, then the parts that
@@ -165,21 +180,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --all --locked
+        run: cargo test --workspace --locked
 
       - name: Homebrew's libhackrf, librtlsdr, libairspy and libairspyhf resolve
-        run: cargo test --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact
+        # In the engine's crate, and asserted to have run: with a name that
+        # matches nothing, cargo reports success for zero tests.
+        run: |
+          cargo test -p monas --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact | tee exact.log
+          grep -q 'test result: ok. 1 passed' exact.log
 
       - name: Homebrew's libSoapySDR resolves
-        run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
+        # In the engine's crate, and asserted to have run: with a name that
+        # matches nothing, cargo reports success for zero tests.
+        run: |
+          cargo test -p monas --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact | tee exact.log
+          grep -q 'test result: ok. 1 passed' exact.log
 
       # Homebrew's modules are built for flat-namespace lookup: they must still
       # load once sdrtop has opened librtlsdr and libhackrf itself (#25).
       - name: Homebrew's SoapySDR modules load beside the native libraries
-        run: cargo test --locked hardware::discovery::tests::installed_soapy_modules_load_after_the_native_libraries -- --ignored --exact
+        # In the engine's crate, and asserted to have run: with a name that
+        # matches nothing, cargo reports success for zero tests.
+        run: |
+          cargo test -p monas --locked hardware::discovery::tests::installed_soapy_modules_load_after_the_native_libraries -- --ignored --exact | tee exact.log
+          grep -q 'test result: ok. 1 passed' exact.log
 
       # install.sh under macOS's own sh (bash 3.2 in POSIX mode, not Linux's
       # dash), and its Homebrew branch against the libraries installed above:
@@ -235,4 +262,4 @@ jobs:
       # --all-targets so the test and build-script code is checked too, since
       # that is where a dependency's MSRV bump usually lands first.
       - name: Check on the declared MSRV
-        run: cargo check --locked --all-targets
+        run: cargo check --workspace --locked --all-targets
