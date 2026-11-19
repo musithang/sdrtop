@@ -32,7 +32,6 @@ use crate::signal::rf_calc::{
     cascade, level_lineup, signal_lineup, staging_target_on, staging_verdict_for, system_nf_db,
     Stage,
 };
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 
 use super::rf_bench::severity_color;
@@ -68,7 +67,7 @@ impl Panel for RfChainPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("RF _Diagnostics")
             .stale_when(Staleness::NotStreaming)
             .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
@@ -78,7 +77,7 @@ impl Panel for RfChainPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

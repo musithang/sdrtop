@@ -106,7 +106,7 @@ impl Panel for Ft8SlotsPanel {
         Some(7)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let (_, seen) = shares(state);
         let mut chrome =
             PanelChrome::new("Room in the passband").stale_when(Staleness::NotStreaming);
@@ -123,7 +123,7 @@ impl Panel for Ft8SlotsPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

@@ -708,7 +708,7 @@ impl Panel for NetCensusPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let c = &state.net.census;
         PanelChrome::new("Band Cens_us")
             .stale_when(Staleness::NotStreaming)
@@ -728,7 +728,7 @@ impl Panel for NetCensusPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

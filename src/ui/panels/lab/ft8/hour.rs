@@ -94,7 +94,7 @@ impl Panel for Ft8HourPanel {
         Some(5)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("The hour").stale_when(Staleness::NotStreaming)
     }
 
@@ -102,7 +102,7 @@ impl Panel for Ft8HourPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

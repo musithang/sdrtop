@@ -8,9 +8,6 @@
 //! whose preset was removed from the config. Every one of them therefore goes
 //! through [`try_set_preset`], which either switches or says why it did not.
 
-use std::sync::{Arc, Mutex};
-
-use crate::state::SdrMetrics;
 use crate::ui;
 
 use super::super::{metrics, KeyAction};
@@ -26,7 +23,7 @@ use super::super::{metrics, KeyAction};
 /// logged a switch that had not happened.
 pub(in crate::app::input) fn try_set_preset(
     engine: &mut ui::LayoutEngine,
-    state: &Arc<Mutex<SdrMetrics>>,
+    state: &crate::ui::Screen,
     name: &str,
 ) -> KeyAction {
     let mut m = metrics(state);

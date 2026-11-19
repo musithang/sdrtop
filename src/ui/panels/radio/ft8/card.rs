@@ -16,7 +16,6 @@ use ratatui::{
 };
 
 use super::{hhmmss, km, parity, path, put, signed};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct Ft8CardPanel;
@@ -39,7 +38,7 @@ impl Panel for Ft8CardPanel {
         Some(9.min(column / 3))
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Station").stale_when(Staleness::Never)
     }
 
@@ -47,7 +46,7 @@ impl Panel for Ft8CardPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

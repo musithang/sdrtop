@@ -31,7 +31,6 @@ mod verdict;
 
 use ratatui::{layout::Rect, text::Line, widgets::Paragraph, Frame};
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 use rows::Rows;
@@ -52,7 +51,7 @@ impl Panel for TimingDiagnosticsPanel {
         &[("R", "Reset jitter peak"), ("C", "Clear history")]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("_Timing Diagnostics").stale_when(Staleness::NotStreaming)
     }
 
@@ -60,7 +59,7 @@ impl Panel for TimingDiagnosticsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -100,6 +99,7 @@ impl Panel for TimingDiagnosticsPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     const W: u16 = 56;
     const H: u16 = 30;
@@ -306,6 +306,7 @@ mod tests {
 mod vocabulary {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     /// The one place a pull panel may say "deadline": to say it does not have
     /// one. Anything else is the panel describing a mechanism the device does

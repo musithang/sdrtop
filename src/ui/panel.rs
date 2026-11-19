@@ -415,7 +415,7 @@ pub trait Panel: Send + Sync {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
     );
@@ -425,7 +425,7 @@ pub trait Panel: Send + Sync {
     ///
     /// Takes the metrics snapshot so tags and the suffix can be live. The
     /// default frames nothing and hands the panel its outer rect.
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::self_framed()
     }
 
@@ -444,7 +444,7 @@ pub trait Panel: Send + Sync {
         &self,
         _f: &mut Frame,
         _area: Rect,
-        _state: &SdrMetrics,
+        _state: &crate::ui::View<'_>,
         _theme: &crate::Theme,
         _focused: bool,
         _bond: Bond,
@@ -493,7 +493,7 @@ pub trait Panel: Send + Sync {
 
     /// Preferred rendered height in rows, given the available terminal width and current state.
     /// Used by the layout engine for top/bottom panels. Default: 3 (1 content + 2 borders).
-    fn preferred_height(&self, _available_width: u16, _state: &SdrMetrics) -> u16 {
+    fn preferred_height(&self, _available_width: u16, _state: &crate::ui::View<'_>) -> u16 {
         3
     }
 }
@@ -524,7 +524,7 @@ mod tests {
             &self,
             _f: &mut Frame,
             _area: Rect,
-            _state: &SdrMetrics,
+            _state: &crate::ui::View<'_>,
             _theme: &crate::Theme,
             _focused: bool,
         ) {

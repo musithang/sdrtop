@@ -3,7 +3,126 @@
 
 use std::time::{Duration, Instant};
 
-use super::MicroView;
+use crate::state::{MicroView, SdrMetrics};
+
+/// What a panel draws from: the engine's state and the screen's own,
+/// together.
+///
+/// The engine's state ([`SdrMetrics`]) holds what is measured; the screen's
+/// ([`UiState`]) holds what the terminal is doing with it (its layout, focus,
+/// menu, the text being typed). They are two things, owned by two sides, and
+/// a panel reads both. **`View` dereferences to the engine's state**, so a
+/// panel writes `state.radio.frequency` and `state.ui.section` exactly as it
+/// did when the screen's state was a field of the engine's: the line moved,
+/// not the hundreds of places that read across it. `ui` is a field of the
+/// view, never of [`SdrMetrics`].
+#[derive(Clone)]
+pub struct View<'a> {
+    m: &'a SdrMetrics,
+    pub ui: std::borrow::Cow<'a, UiState>,
+}
+
+impl<'a> View<'a> {
+    pub fn new(m: &'a SdrMetrics, ui: &'a UiState) -> Self {
+        Self {
+            m,
+            ui: std::borrow::Cow::Borrowed(ui),
+        }
+    }
+}
+
+#[cfg(test)]
+impl View<'static> {
+    /// The view of `m` as the terminal would draw it: the layout and section
+    /// on screen are the ones `m`'s mode was asked for (the app sets both
+    /// from one layout, every frame), everything else as a fresh terminal
+    /// has it. For a test that sets the view with `show_view` and has
+    /// nothing to say about focus, menu or typing.
+    pub fn of(m: &SdrMetrics) -> View<'_> {
+        View {
+            m,
+            ui: std::borrow::Cow::Owned(UiState {
+                section: m.mode.section.clone(),
+                active_preset: m.mode.view.clone(),
+                ..UiState::default()
+            }),
+        }
+    }
+}
+
+impl std::ops::Deref for View<'_> {
+    type Target = SdrMetrics;
+    fn deref(&self) -> &SdrMetrics {
+        self.m
+    }
+}
+
+/// The engine's state and the screen's, for the keys.
+///
+/// The engine's state is shared with every worker behind its mutex; the
+/// screen's lives on the terminal's thread alone, so a `RefCell` is all it
+/// needs. [`Screen::lock`] takes both, the one way the keys reach either.
+pub struct Screen {
+    pub m: std::sync::Arc<std::sync::Mutex<SdrMetrics>>,
+    pub ui: std::cell::RefCell<UiState>,
+}
+
+impl Screen {
+    /// A screen over `m` alone, as a fresh terminal has it: for tests.
+    #[cfg(test)]
+    pub fn of(m: SdrMetrics) -> Self {
+        Self::new(
+            std::sync::Arc::new(std::sync::Mutex::new(m)),
+            UiState::default(),
+        )
+    }
+
+    pub fn new(m: std::sync::Arc<std::sync::Mutex<SdrMetrics>>, ui: UiState) -> Self {
+        Self {
+            m,
+            ui: std::cell::RefCell::new(ui),
+        }
+    }
+
+    /// The engine's state locked, and the screen's borrowed, together. A
+    /// poisoned mutex is recovered, never propagated: a panic in one handler
+    /// must not take the terminal down on the next key.
+    pub fn lock(&self) -> Locked<'_> {
+        Locked {
+            m: self.m.lock().unwrap_or_else(|e| e.into_inner()),
+            ui: self.ui.borrow_mut(),
+        }
+    }
+}
+
+/// What [`Screen::lock`] gives: the engine's state, dereferenced as itself,
+/// and the screen's as `ui`, so a key handler writes `m.ui.input_buf` and
+/// `m.radio.frequency` side by side as it always has. See [`View`] for why.
+pub struct Locked<'a> {
+    m: std::sync::MutexGuard<'a, SdrMetrics>,
+    pub ui: std::cell::RefMut<'a, UiState>,
+}
+
+impl Locked<'_> {
+    /// What a panel would draw from right now, for a key that asks a panel's
+    /// own logic (which row is selected, what is on screen).
+    pub fn view(&self) -> View<'_> {
+        View::new(&self.m, &self.ui)
+    }
+}
+
+impl std::ops::Deref for Locked<'_> {
+    type Target = SdrMetrics;
+    fn deref(&self) -> &SdrMetrics {
+        &self.m
+    }
+}
+
+impl std::ops::DerefMut for Locked<'_> {
+    fn deref_mut(&mut self) -> &mut SdrMetrics {
+        &mut self.m
+    }
+}
 
 /// Which lead view the Command Rail's mode-card shows. It auto-follows what you
 /// are doing - tuning relaxes to **Hunt** (find signals), gain changes to
@@ -397,6 +516,64 @@ impl Default for UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The screen and the engine read one view the same way.** Every
+    /// built-in layout, with the section it declares, asks the engine for
+    /// exactly the feeds the screen's own description of that section says
+    /// it shows. If the two ever disagree, a view stops being fed or starts
+    /// costing a core, and nothing on screen says which.
+    #[test]
+    fn every_built_in_layout_asks_the_engine_for_what_the_screen_says_it_shows() {
+        use crate::config::LayoutConfig;
+        use crate::engine::mode::Mode;
+        use crate::signal::net::lock::{
+            ADVERTISING_VIEWS, CLASSIC_VIEWS, CODED_VIEWS, SURVEY_VIEW, WIFI_VISIT_VIEWS,
+        };
+        let layouts = LayoutConfig::default_config();
+        assert!(
+            layouts.presets.len() > 20,
+            "the built-in layouts were not found"
+        );
+        for (preset, cfg) in &layouts.presets {
+            let section = cfg.section.clone().unwrap_or_default();
+            let ui = UiState {
+                section: section.clone(),
+                active_preset: preset.clone(),
+                ..UiState::default()
+            };
+            let mode = Mode::for_view(&section, preset);
+            let at = format!("{preset} in {section}");
+            assert_eq!(mode.section, section, "{at}");
+            assert_eq!(mode.view, *preset, "{at}");
+            assert_eq!(mode.feeds.net, ui.is_net_section(), "{at}: net feed");
+            assert_eq!(mode.feeds.pager, ui.is_pager_section(), "{at}: pager feed");
+            assert_eq!(mode.feeds.ft8, ui.is_ft8_section(), "{at}: ft8 feed");
+            assert_eq!(mode.ft8_lab, ui.is_ft8_lab(), "{at}: ft8 lab");
+            let p = preset.as_str();
+            assert_eq!(
+                mode.net.classic,
+                CLASSIC_VIEWS.contains(&p),
+                "{at}: classic"
+            );
+            assert_eq!(mode.net.survey, p == SURVEY_VIEW, "{at}: survey");
+            assert_eq!(mode.net.coded, CODED_VIEWS.contains(&p), "{at}: coded");
+            assert_eq!(
+                mode.net.wifi,
+                crate::signal::net::is_wifi(&section),
+                "{at}: wifi"
+            );
+            assert_eq!(
+                mode.net.wifi_visits,
+                WIFI_VISIT_VIEWS.contains(&p),
+                "{at}: wifi visits"
+            );
+            assert_eq!(
+                mode.net.advertising,
+                ADVERTISING_VIEWS.contains(&p),
+                "{at}: advertising"
+            );
+        }
+    }
 
     #[test]
     fn rail_mode_cycles_hunt_monitor_bench() {

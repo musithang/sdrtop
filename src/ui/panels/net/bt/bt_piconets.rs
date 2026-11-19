@@ -530,7 +530,7 @@ impl Panel for NetBtPiconetsPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Pi_conets")
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
@@ -551,7 +551,7 @@ impl Panel for NetBtPiconetsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1159,12 +1159,16 @@ mod tests {
         let (engine, _) =
             crate::app::App::build_ui("net_bt", &std::collections::HashMap::new(), None, true);
         let mut m = heard();
-        m.ui.active_preset = "net_bt".to_string();
+        let ui = crate::ui::UiState {
+            active_preset: "net_bt".to_string(),
+            ..crate::ui::UiState::default()
+        };
         observe(&mut m.net.bt_piconets, 0x9a_0001, 30, Instant::now());
         m.net.bt_view.selected = Some(0x5a3c71);
         let theme = crate::Theme::sdr();
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(191, 41)).unwrap();
-        t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+        t.draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+            .unwrap();
         let buf = t.backend().buffer().clone();
         let text: String = (0..41)
             .map(|y| (0..191).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")

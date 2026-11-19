@@ -9,7 +9,6 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::state::{InputMode, RailMode};
 use crate::ui::panels::core::spectrum::{
     fmt_spectrum_step, next_spectrum_step, prev_spectrum_step,
 };
@@ -17,6 +16,7 @@ use crate::ui::panels::core::waterfall::{
     next_wf_stride, next_wf_zoom, prev_wf_stride, prev_wf_zoom,
 };
 use crate::ui::widgets::micro_common::fmt_bw;
+use crate::ui::{InputMode, RailMode};
 
 use super::{global, metrics, InputCtx, KeyAction};
 
@@ -340,7 +340,7 @@ pub(super) fn waterfall(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use std::sync::Mutex;
+
     use std::time::Instant;
 
     use super::*;
@@ -440,7 +440,7 @@ mod tests {
                 m.spectrum.y_max = max;
                 m.waterfall.db_min = min;
                 m.waterfall.db_max = max;
-                let state = Arc::new(Mutex::new(m));
+                let state = crate::ui::Screen::of(m);
                 let mut engine = LayoutEngine::new(
                     crate::config::LayoutConfig::default_config(),
                     PanelRegistry::new(),

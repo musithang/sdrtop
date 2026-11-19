@@ -21,7 +21,6 @@ use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::{heat, say, sent_db, shown_or_say, HEAT_DB};
 use crate::state::ft8::DecodeEntry;
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
 
@@ -45,7 +44,7 @@ impl Panel for Ft8PowerPanel {
         (30, 6)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Power").stale_when(Staleness::NotStreaming)
     }
 
@@ -53,7 +52,7 @@ impl Panel for Ft8PowerPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -153,6 +152,7 @@ pub fn column_db(tr: &crate::signal::ft8::trace::Trace, c: usize, cols: usize) -
 mod tests {
     use super::*;
     use crate::state::fixture::draw as render;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn the_path_is_named_as_the_decode_judged_it() {

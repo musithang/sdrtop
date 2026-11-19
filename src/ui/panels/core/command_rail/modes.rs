@@ -14,9 +14,10 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::state::{RailMode, SdrMetrics};
+use crate::state::SdrMetrics;
 use crate::ui::panels::core::spectrum::detect_peaks;
 use crate::ui::widgets::band_plan::band_at;
+use crate::ui::RailMode;
 
 /// Columns the full `HUNT·MONITOR·BENCH` strip needs: a leading space, then each
 /// mode as ` LABEL ` (label+2) plus a one-column gap. Pure, for the width check.

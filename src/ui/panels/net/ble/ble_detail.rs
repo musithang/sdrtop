@@ -983,7 +983,7 @@ impl Panel for NetBleDetailPanel {
         (28, 4)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Packet Detail")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.into())
@@ -1005,7 +1005,7 @@ impl Panel for NetBleDetailPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

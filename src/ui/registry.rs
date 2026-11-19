@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-use crate::state::SdrMetrics;
 use crate::ui::chrome::frame;
 use crate::ui::panel::{FrameStyle, Panel};
 use ratatui::{layout::Rect, Frame};
@@ -44,7 +43,7 @@ impl PanelRegistry {
         name: &str,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
     ) {
@@ -83,7 +82,7 @@ mod tests {
             &self,
             _f: &mut Frame,
             _area: Rect,
-            _state: &SdrMetrics,
+            _state: &crate::ui::View<'_>,
             _theme: &crate::Theme,
             _focused: bool,
         ) {

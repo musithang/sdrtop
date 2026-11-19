@@ -13,7 +13,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
 use crate::ui::widgets::band_plan::band_at;
 
@@ -29,11 +28,11 @@ impl Panel for SweepStripPanel {
     fn min_size(&self) -> (u16, u16) {
         (40, 3)
     }
-    fn preferred_height(&self, _w: u16, _s: &SdrMetrics) -> u16 {
+    fn preferred_height(&self, _w: u16, _s: &crate::ui::View<'_>) -> u16 {
         3
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::untitled()
     }
 
@@ -41,7 +40,7 @@ impl Panel for SweepStripPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

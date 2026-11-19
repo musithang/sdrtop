@@ -22,7 +22,6 @@ mod spectrum;
 mod sweep;
 mod system;
 mod timing;
-mod ui;
 mod waterfall;
 
 pub(crate) use acc::{Accumulators, Lead};
@@ -75,10 +74,6 @@ pub use system::SystemState;
 pub use timing::{
     TimingCause, TimingQuality, TimingState, HACKRF_SAMPLES_PER_TRANSFER, RELAYED_CLOCK_FLOOR_PPM,
     RELAY_BASELINE_US, RELAY_STRETCH_US,
-};
-pub use ui::{
-    active_recall_slot, recall_from_hz, recall_to_hz, DeviceOptionUpdate, InputMode, MenuFocus,
-    MenuPath, MenuState, MenuTile, RailMode, UiState, RECALL_SLOTS,
 };
 pub use waterfall::{
     BinAxis, BinWindow, FftFrame, WaterfallPalette, WaterfallState, WATERFALL_MIN_ROWS,
@@ -134,7 +129,6 @@ pub struct SdrMetrics {
     pub system: SystemState,
     pub timing: TimingState,
     pub sweep: SweepState,
-    pub ui: UiState,
     /// What happened, in words. See [`log`].
     pub log: std::collections::VecDeque<LogEntry>,
     /// Where what happens is announced to every client. Shared, so every copy
@@ -416,31 +410,26 @@ impl SdrMetrics {
         }
     }
 
-    /// The screen shows a layout in a section: its own mirror, and the mode
-    /// it asks the engine for, set together so neither is ever a frame
-    /// behind the other.
+    /// A view in a section is asked for: the mode it needs, rebuilt only when
+    /// the view changes. The screen keeps its own record of what it shows.
     pub fn show_view(&mut self, section: &str, preset: &str) {
-        if self.ui.section != section || self.ui.active_preset != preset {
-            self.ui.section = section.to_string();
-            self.ui.active_preset = preset.to_string();
+        if self.mode.section != section || self.mode.view != preset {
             self.mode = crate::engine::mode::Mode::for_view(section, preset);
         }
     }
 
-    /// The screen moved to a section: its own mirror, and the mode it asks
-    /// the engine for.
+    /// The view moved to a section, the layout as it was.
     #[cfg(test)]
     pub fn show_section(&mut self, section: &str) {
-        self.ui.section = section.to_string();
-        self.mode = crate::engine::mode::Mode::for_view(section, &self.ui.active_preset);
+        let view = self.mode.view.clone();
+        self.mode = crate::engine::mode::Mode::for_view(section, &view);
     }
 
-    /// The screen moved to a layout: its own mirror, and the mode it asks
-    /// the engine for.
+    /// The view moved to a layout, the section as it was.
     #[cfg(test)]
     pub fn show_preset(&mut self, preset: &str) {
-        self.ui.active_preset = preset.to_string();
-        self.mode = crate::engine::mode::Mode::for_view(&self.ui.section, preset);
+        let section = self.mode.section.clone();
+        self.mode = crate::engine::mode::Mode::for_view(&section, preset);
     }
 
     pub fn push_log(&mut self, msg: impl Into<String>) {
@@ -683,12 +672,10 @@ mod stage_reading_tests {
     /// way the screen moves: a mode a frame behind its view is a feed fed
     /// for nobody, or a view whose decoder never sees a block.
     #[test]
-    fn showing_a_view_sets_the_mirror_and_the_mode_together() {
+    fn showing_a_view_sets_the_mode_it_asks_for() {
         use crate::engine::mode::Mode;
         let mut m = SdrMetrics::fixture();
         m.show_view(crate::signal::net::SECTION, "net_survey");
-        assert_eq!(m.ui.section, crate::signal::net::SECTION);
-        assert_eq!(m.ui.active_preset, "net_survey");
         assert_eq!(
             m.mode,
             Mode::for_view(crate::signal::net::SECTION, "net_survey")

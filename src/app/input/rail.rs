@@ -8,7 +8,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::state::RailMode;
+use crate::ui::RailMode;
 
 use super::{global, metrics, InputCtx, KeyAction};
 

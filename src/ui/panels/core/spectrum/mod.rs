@@ -33,7 +33,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::chrome::frame;
 use crate::ui::panel::{Bond, Bonding, FrameTone, Panel, PanelChrome, Staleness, Tag};
@@ -73,7 +72,7 @@ impl Panel for SpectrumPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::deck("SP_ECTRUM")
             .stale_when(Staleness::FftAge)
             .tone(FrameTone::Accent)
@@ -92,7 +91,7 @@ impl Panel for SpectrumPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
         bond: Bond,
@@ -107,7 +106,7 @@ impl Panel for SpectrumPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
     ) {
@@ -126,7 +125,7 @@ impl Panel for SpectrumPanel {
 fn render(
     f: &mut Frame,
     area: Rect,
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     focused: bool,
     bond: Bond,
@@ -154,7 +153,7 @@ fn render(
 fn contents(
     f: &mut Frame,
     inner: Rect,
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     focused: bool,
     bond: Bond,
@@ -259,7 +258,7 @@ impl Rows {
 fn draw_instrument(
     f: &mut Frame,
     inner: Rect,
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     focused: bool,
     bond: Bond,
@@ -476,11 +475,19 @@ mod zoom_tests {
     #[test]
     fn level_axis_and_noise_floor_keep_the_iq_readout() {
         let mut state = tuned();
-        state.ui.active_preset = "lab_signal".into();
+        let ui = crate::ui::UiState {
+            active_preset: "lab_signal".into(),
+            ..crate::ui::UiState::default()
+        };
         for (min, max) in [(-120.0, 0.0), (-110.0, -10.0)] {
             state.spectrum.y_min = min;
             state.spectrum.y_max = max;
-            let rows = draw(SpectrumPanel, 100, 20, &state);
+            let rows = crate::state::fixture::draw_view(
+                SpectrumPanel,
+                100,
+                20,
+                &crate::ui::View::new(&state, &ui),
+            );
             let gutter: String = rows
                 .iter()
                 .skip(1)

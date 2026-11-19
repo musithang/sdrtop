@@ -511,7 +511,7 @@ impl Panel for NetBtPacketsPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let chrome = PanelChrome::new("Packets")
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
@@ -546,7 +546,7 @@ impl Panel for NetBtPacketsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

@@ -461,7 +461,7 @@ impl Panel for NetBlePacketsPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         if self.source == ListSource::Coded {
             let view = &state.net.coded_view;
             return PanelChrome::new("LE Coded Ad_vertising")
@@ -501,7 +501,7 @@ impl Panel for NetBlePacketsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -887,7 +887,7 @@ mod tests {
     /// The focus letter is the one the title shows.
     #[test]
     fn the_title_shows_the_focus_letter() {
-        let chrome = NetBlePacketsPanel::ADVERTISING.chrome(&feed(1));
+        let chrome = NetBlePacketsPanel::ADVERTISING.chrome(&crate::ui::View::of(&feed(1)));
         assert!(chrome.title.contains("Ad_vertising"), "{}", chrome.title);
         assert_eq!(NetBlePacketsPanel::ADVERTISING.focus_key(), Some('v'));
     }

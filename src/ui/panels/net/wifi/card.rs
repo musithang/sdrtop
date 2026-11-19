@@ -630,7 +630,7 @@ pub fn fits(cols: u16) -> bool {
 
 /// Whether the card is on screen now, by the width the app last drew at;
 /// unknown reads as wide.
-pub fn on_screen(state: &SdrMetrics) -> bool {
+pub fn on_screen(state: &crate::ui::View<'_>) -> bool {
     state.ui.screen_cols == 0 || fits(state.ui.screen_cols)
 }
 
@@ -666,7 +666,7 @@ impl Panel for NetWifiCardPanel {
         (!fits(body)).then_some(0)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let chrome = PanelChrome::new("Frames a second")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.into())
@@ -688,7 +688,7 @@ impl Panel for NetWifiCardPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -715,8 +715,7 @@ mod tests {
 
     fn on_eleven() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_frames".to_string();
+        m.show_view("wifi_channel", "wifi_frames");
         m.radio.frequency = 2_462_000_000;
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
@@ -869,13 +868,15 @@ mod tests {
             crate::app::App::build_ui("wifi_frames", &std::collections::HashMap::new(), None, true);
         let theme = crate::Theme::sdr();
         let mut m = on_eleven();
+        let mut ui = crate::ui::UiState::default();
         for r in three_seconds().into_iter().rev() {
             m.net.wifi.push_row(r);
         }
         for (w, h, card) in [(191u16, 41u16, true), (152, 32, true), (100, 30, false)] {
-            m.ui.screen_cols = w;
+            ui.screen_cols = w;
             let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            t.draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+                .unwrap();
             let buf = t.backend().buffer().clone();
             let text: Vec<String> = (0..h)
                 .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect())

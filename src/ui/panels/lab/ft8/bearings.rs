@@ -23,7 +23,6 @@ use std::collections::BTreeMap;
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::{placed, say, snr_colour, Placed, NARROW_BODY, SNR_RANGE};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::{km, put, signed};
 
@@ -110,7 +109,7 @@ impl Panel for Ft8BearingsPanel {
         Some(11)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Bearings").stale_when(Staleness::NotStreaming);
         if let Some((pts, _)) = placed(state) {
             chrome.suffix = Some(format!("  {}", open_words(&pts)));
@@ -122,7 +121,7 @@ impl Panel for Ft8BearingsPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -209,6 +208,7 @@ impl Panel for Ft8BearingsPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
     use std::sync::Arc;
 
     fn at(bearing: f64, call: &str, snr: f64) -> Placed {

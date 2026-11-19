@@ -36,7 +36,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::panel::{Panel, PanelChrome};
 use crate::ui::panels::core::log;
@@ -69,7 +68,7 @@ impl Panel for CommandRailPanel {
         ]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::deck("_Command")
     }
 
@@ -77,7 +76,7 @@ impl Panel for CommandRailPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -127,7 +126,7 @@ impl Panel for CommandRailPanel {
 
 /// The whole rail as one line stack, in screen order.
 fn stack(
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     stale: bool,
     active: bool,
     observer: bool,
@@ -198,6 +197,7 @@ fn log_foot(entry: &crate::state::LogEntry, theme: &crate::Theme) -> Line<'stati
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn s_meter_presence_does_not_change_the_stack_height() {
@@ -205,8 +205,22 @@ mod tests {
         let signal = SdrMetrics::fixture().streaming().with_carrier(0.0, 20.0);
         let theme = crate::Theme::sdr();
 
-        let without_meter = stack(&no_signal, false, true, false, 34, &theme);
-        let with_meter = stack(&signal, false, true, false, 34, &theme);
+        let without_meter = stack(
+            &crate::ui::View::of(&no_signal),
+            false,
+            true,
+            false,
+            34,
+            &theme,
+        );
+        let with_meter = stack(
+            &crate::ui::View::of(&signal),
+            false,
+            true,
+            false,
+            34,
+            &theme,
+        );
 
         assert_eq!(without_meter.len(), with_meter.len());
     }
@@ -217,16 +231,23 @@ mod tests {
     fn no_reading_is_said_where_the_meter_stands() {
         let no_signal = SdrMetrics::fixture().streaming();
         let theme = crate::Theme::sdr();
-        let text: String = stack(&no_signal, false, true, false, 34, &theme)
-            .iter()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text: String = stack(
+            &crate::ui::View::of(&no_signal),
+            false,
+            true,
+            false,
+            34,
+            &theme,
+        )
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
         assert!(text.contains("no reading"), "{text}");
     }
 

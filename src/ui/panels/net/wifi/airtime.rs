@@ -190,7 +190,7 @@ impl Panel for NetWifiAirtimePanel {
         Some(if column >= 24 { 11 } else { 7 })
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let mut suffix = match locked(state) {
             Some(ch) => format!(" \u{b7} channel {ch}"),
             None => String::new(),
@@ -230,7 +230,7 @@ impl Panel for NetWifiAirtimePanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -252,8 +252,7 @@ mod tests {
     /// The Airtime view locked on channel 11 at 20 Msps, streaming.
     fn on_eleven() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_airtime".to_string();
+        m.show_view("wifi_channel", "wifi_airtime");
         m.radio.frequency = 2_462_000_000;
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
@@ -283,8 +282,8 @@ mod tests {
 
     /// 100 wide and 11 tall, the hero as the view draws it on a wide
     /// screen: 98 inner columns, 7 of the scale, 30 columns of three.
-    fn lines(m: &SdrMetrics) -> Vec<String> {
-        draw(NetWifiAirtimePanel, 100, 11, m)
+    fn lines(v: &crate::ui::View<'_>) -> Vec<String> {
+        crate::state::fixture::draw_view(NetWifiAirtimePanel, 100, 11, v)
     }
 
     /// Inner row `r`'s cells from the plot's left edge.
@@ -299,7 +298,7 @@ mod tests {
     fn the_newest_second_is_the_rightmost_column() {
         let mut m = on_eleven();
         m.net.wifi.survey.visits[10] = vec![visit(0.6, 1.0, 1.0, 1.0), visit(0.2, 1.0, 1.0, 1.0)];
-        let l = lines(&m);
+        let l = lines(&crate::ui::View::of(&m));
         assert!(l[1].contains("100 %"), "{l:#?}");
         let top = plot_row(&l, 0);
         // The newest column: the 30th, its two bars at cells 87 and 88.
@@ -315,8 +314,10 @@ mod tests {
         m.net.wifi.survey.visits[10] = vec![visit(0.2, 1.0, 1.0, 1.0)];
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(98, 9)).unwrap();
-        t.draw(|f| NetWifiAirtimePanel.render(f, f.area(), &m, &theme, false))
-            .unwrap();
+        t.draw(|f| {
+            NetWifiAirtimePanel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false)
+        })
+        .unwrap();
         let b = t.backend().buffer();
         assert_eq!(b[(7 + 87, 0)].fg, theme.value);
         assert_eq!(b[(7 + 88, 0)].fg, theme.wifi(Family::Dsss));
@@ -329,7 +330,7 @@ mod tests {
     fn a_column_not_heard_whole_is_hatched() {
         let mut m = on_eleven();
         m.net.wifi.survey.visits[10] = vec![visit(3.5, 1.0, 0.5, 0.5), visit(0.5, 0.6, 0.5, 0.5)];
-        let l = lines(&m);
+        let l = lines(&crate::ui::View::of(&m));
         let mid = plot_row(&l, 3);
         // Columns 26 (whole), 27 and 28 (nothing ended), 29 (cut into).
         assert_ne!(mid[78], '╱', "{l:#?}");
@@ -344,13 +345,16 @@ mod tests {
     #[test]
     fn the_title_carries_the_reading_where_the_card_has_no_room() {
         let mut m = on_eleven();
-        m.ui.screen_cols = 100;
+        let mut ui = crate::ui::UiState {
+            screen_cols: 100,
+            ..crate::ui::UiState::default()
+        };
         m.net.wifi.survey.visits[10] = vec![
             visit(2.5, 1.0, 0.2, 0.1),
             visit(1.5, 1.0, 0.2, 0.2),
             visit(0.5, 1.0, 0.2, 0.3),
         ];
-        let l = lines(&m);
+        let l = lines(&crate::ui::View::new(&m, &ui));
         assert!(l[0].contains("channel 11"), "{}", l[0]);
         assert!(l[0].contains("20.0 ± 5.8 % frames over 20 s"), "{}", l[0]);
         // The scale gives way to it, and the mode's tag still fits: the
@@ -358,8 +362,8 @@ mod tests {
         assert!(!l[0].contains("a column a second"), "{}", l[0]);
         assert!(!l[0].contains("0 to 100 %"), "{}", l[0]);
         assert!(l[0].contains("[LOCK]"), "{}", l[0]);
-        m.ui.screen_cols = 191;
-        let l = lines(&m);
+        ui.screen_cols = 191;
+        let l = lines(&crate::ui::View::new(&m, &ui));
         assert!(l[0].contains("a column a second"), "{}", l[0]);
         assert!(!l[0].contains("frames over"), "{}", l[0]);
     }
@@ -367,7 +371,7 @@ mod tests {
     /// Nothing heard on the channel yet: the columns empty, and said so.
     #[test]
     fn listening_says_nothing_was_heard_yet() {
-        let l = lines(&on_eleven());
+        let l = lines(&crate::ui::View::of(&on_eleven()));
         assert!(
             l.iter()
                 .any(|r| r.contains("nothing heard on channel 11 yet")),
@@ -381,7 +385,7 @@ mod tests {
     fn not_locked_is_the_frames_plate() {
         let mut m = on_eleven();
         m.net.mode = NetMode::Survey;
-        let l = lines(&m);
+        let l = lines(&crate::ui::View::of(&m));
         let all = l.join("\n");
         assert!(all.contains("NOT LOCKED ON A CHANNEL"), "{all}");
         assert!(all.contains("The Airtime view reads one channel"), "{all}");
@@ -393,7 +397,7 @@ mod tests {
     fn the_legend_names_the_formats_on_screen() {
         let mut m = on_eleven();
         m.net.wifi.survey.visits[10] = vec![visit(0.2, 1.0, 0.3, 0.3)];
-        let tall = lines(&m);
+        let tall = lines(&crate::ui::View::of(&m));
         let legend = &tall[9];
         assert!(legend.contains("busy (energy)"), "{tall:#?}");
         assert!(legend.contains("802.11b"), "{tall:#?}");
@@ -428,15 +432,15 @@ mod tests {
         ] {
             let size = Rect::new(0, 0, w, h);
             let a = engine
-                .area_of("net_wifi_airtime", size, &m)
+                .area_of("net_wifi_airtime", size, &crate::ui::View::of(&m))
                 .expect("the hero");
             let l = engine
-                .area_of("net_wifi_ledger", size, &m)
+                .area_of("net_wifi_ledger", size, &crate::ui::View::of(&m))
                 .expect("the ledger");
             assert_eq!(a.height, hero, "{w} x {h}");
             assert_eq!(l.y, a.y + a.height, "{w} x {h}");
             assert!(l.height >= 7, "{w} x {h}: {l:?}");
-            let c = engine.area_of("net_wifi_share", size, &m);
+            let c = engine.area_of("net_wifi_share", size, &crate::ui::View::of(&m));
             assert_eq!(c.map(|c| c.width), card, "{w} x {h}");
             if let Some(c) = c {
                 assert_eq!(c.x, a.x + a.width, "{w} x {h}");

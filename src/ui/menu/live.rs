@@ -32,7 +32,7 @@ pub struct Live {
 const PRESENT: Duration = Duration::from_secs(60);
 
 /// The live line for the layout named `preset`, or `None` when it has none.
-pub fn line(preset: &str, m: &SdrMetrics, now: Instant) -> Option<Live> {
+pub fn line(preset: &str, m: &crate::ui::View<'_>, now: Instant) -> Option<Live> {
     let net = &m.net;
     // Running: the radio streaming and the receiver that feeds this view
     // running now, which is not the same as the view being on screen: the
@@ -294,8 +294,7 @@ mod tests {
         } else {
             SdrMetrics::fixture()
         };
-        m.ui.active_preset = preset.to_string();
-        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.show_view(crate::signal::net::SECTION, preset);
         if streaming {
             match preset {
                 "net_ble" | "net_census" => m.net.ble_channel = Some(37),
@@ -309,7 +308,14 @@ mod tests {
 
     #[test]
     fn a_layout_with_nothing_live_has_no_line() {
-        assert_eq!(line("lab_iq", &at("lab_iq", true), Instant::now()), None);
+        assert_eq!(
+            line(
+                "lab_iq",
+                &crate::ui::View::of(&at("lab_iq", true)),
+                Instant::now()
+            ),
+            None
+        );
     }
 
     /// **Running only when streaming and on screen**; otherwise the
@@ -317,20 +323,25 @@ mod tests {
     #[test]
     fn a_view_not_running_says_so_and_keeps_its_session_figures() {
         let mut m = at("net_ble", true);
+        let mut ui = crate::ui::UiState::default();
         m.net.ble_channel_packets = [300, 100, 12];
         m.net.ble_channel_crc_ok = [290, 95, 11];
-        let l = line("net_ble", &m, Instant::now()).unwrap();
+        let l = line("net_ble", &crate::ui::View::new(&m, &ui), Instant::now()).unwrap();
         assert_eq!(l.text, "412 packets this session, 96 % CRC ok");
         assert!(l.running);
 
         // On the census layout the same decoder runs, so it still is.
-        m.ui.active_preset = "net_census".to_string();
-        assert!(line("net_ble", &m, Instant::now()).unwrap().running);
+        ui.active_preset = "net_census".to_string();
+        assert!(
+            line("net_ble", &crate::ui::View::new(&m, &ui), Instant::now())
+                .unwrap()
+                .running
+        );
 
         // On the classic layout it does not.
-        m.ui.active_preset = "net_bt".to_string();
+        ui.active_preset = "net_bt".to_string();
         m.net.ble_channel = None;
-        let l = line("net_ble", &m, Instant::now()).unwrap();
+        let l = line("net_ble", &crate::ui::View::new(&m, &ui), Instant::now()).unwrap();
         assert!(!l.running);
         assert!(l.text.ends_with("; not listening now"), "{}", l.text);
     }
@@ -342,7 +353,7 @@ mod tests {
     fn the_coded_view_has_a_live_line() {
         let now = Instant::now();
         let mut m = at("net_coded", true);
-        let l = line("net_coded", &m, now).unwrap();
+        let l = line("net_coded", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "no LE Coded packet decoded this session");
         assert!(l.running);
 
@@ -350,19 +361,19 @@ mod tests {
         m.net.health.coded.decoded = 18;
         m.net.health.coded.crc_failed = 6;
         m.net.health.aux.heard = 5;
-        let l = line("net_coded", &m, now).unwrap();
+        let l = line("net_coded", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(
             l.text,
             "24 LE Coded packets this session, 75 % CRC ok, 5 aux heard"
         );
 
         m.net.coded_refused = Some("no advertising channel in view".to_string());
-        let l = line("net_coded", &m, now).unwrap();
+        let l = line("net_coded", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "refused: no advertising channel in view");
 
         m.net.coded_refused = None;
         m.net.coded_channel = None;
-        let l = line("net_coded", &m, now).unwrap();
+        let l = line("net_coded", &crate::ui::View::of(&m), now).unwrap();
         assert!(!l.running);
         assert!(l.text.ends_with("; not listening now"), "{}", l.text);
     }
@@ -373,7 +384,7 @@ mod tests {
         let mut m = at("net_ble", true);
         m.net.ble_channel_packets = [9, 0, 0];
         m.net.ble_channel_crc_ok = [9, 0, 0];
-        let l = line("net_ble", &m, Instant::now()).unwrap();
+        let l = line("net_ble", &crate::ui::View::of(&m), Instant::now()).unwrap();
         assert_eq!(l.text, "9 packets this session");
     }
 
@@ -382,7 +393,7 @@ mod tests {
     fn a_refusal_is_the_line() {
         let mut m = at("net_bt", true);
         m.net.bt_refused = Some("no classic channel fits the view".to_string());
-        let l = line("net_bt", &m, Instant::now()).unwrap();
+        let l = line("net_bt", &crate::ui::View::of(&m), Instant::now()).unwrap();
         assert_eq!(l.text, "refused: no classic channel fits the view");
         assert!(!l.running);
     }
@@ -396,7 +407,7 @@ mod tests {
             Device::heard([2; 6], false, now - Duration::from_secs(600)),
         ];
         m.net.census.devices[1].last_seen = now - Duration::from_secs(300);
-        let l = line("net_census", &m, now).unwrap();
+        let l = line("net_census", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "2 devices counted, 1 heard in the last minute");
     }
 
@@ -405,7 +416,9 @@ mod tests {
     fn the_survey_states_no_duty_without_a_trusted_floor() {
         let mut m = at("net_survey", true);
         assert_eq!(
-            line("net_survey", &m, Instant::now()).unwrap().text,
+            line("net_survey", &crate::ui::View::of(&m), Instant::now())
+                .unwrap()
+                .text,
             "no band measurement yet"
         );
         m.net.band.cells.push(crate::state::CellReading {
@@ -415,12 +428,12 @@ mod tests {
             ..Default::default()
         });
         m.net.band.trusted = false;
-        assert!(line("net_survey", &m, Instant::now())
+        assert!(line("net_survey", &crate::ui::View::of(&m), Instant::now())
             .unwrap()
             .text
             .contains("no duty is stated"));
         m.net.band.trusted = true;
-        let l = line("net_survey", &m, Instant::now()).unwrap();
+        let l = line("net_survey", &crate::ui::View::of(&m), Instant::now()).unwrap();
         assert!(l.text.starts_with("busiest "), "{}", l.text);
         assert!(l.text.ends_with("34 % duty"), "{}", l.text);
     }
@@ -433,7 +446,7 @@ mod tests {
         crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, 2, 11, now);
         m.net.bt_uap.insert(1, vec![0x4c]);
         m.net.bt_uap.insert(2, vec![0x4c, 0x9a]);
-        let l = line("net_bt", &m, now).unwrap();
+        let l = line("net_bt", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "2 piconets heard, 1 UAP resolved");
     }
 
@@ -443,7 +456,7 @@ mod tests {
     fn the_piconet_view_has_a_live_line() {
         let mut m = at("net_piconet", true);
         let now = Instant::now();
-        let l = line("net_piconet", &m, now).unwrap();
+        let l = line("net_piconet", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "no piconet selected");
         crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, 0xc3_d318, 10, now);
         let sides = &mut m.net.bt_piconets[0].headers.sides;
@@ -451,18 +464,18 @@ mod tests {
         sides.slave.packets = 230;
         sides.unknown.packets = 2;
         m.net.bt_view.selected = Some(0xc3_d318);
-        let l = line("net_piconet", &m, now).unwrap();
+        let l = line("net_piconet", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "0xc3d318: 412 packets, 180 master, 230 slave");
         assert!(l.running);
 
         m.net.address_display = crate::state::AddressDisplay::Masked;
-        assert!(!line("net_piconet", &m, now)
+        assert!(!line("net_piconet", &crate::ui::View::of(&m), now)
             .unwrap()
             .text
             .contains("c3d318"));
 
         m.net.bt_channels_watched.clear();
-        let l = line("net_piconet", &m, now).unwrap();
+        let l = line("net_piconet", &crate::ui::View::of(&m), now).unwrap();
         assert!(!l.running);
         assert!(l.text.ends_with("; not listening now"), "{}", l.text);
     }
@@ -475,18 +488,20 @@ mod tests {
         let mut m = at("net_bench", true);
         let now = Instant::now();
         assert_eq!(
-            line("net_bench", &m, now).unwrap().text,
+            line("net_bench", &crate::ui::View::of(&m), now)
+                .unwrap()
+                .text,
             "no piconet selected"
         );
         crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, 0xc3_d318, 10, now);
         m.net.bt_view.selected = Some(0xc3_d318);
         m.net.bt_piconets[0].headers.sides.master.deviation =
             Deviation::from_readings(&[155_000.0, 155_500.0, 156_000.0], &[]);
-        let l = line("net_bench", &m, now).unwrap();
+        let l = line("net_bench", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "0xc3d318: index 0.311 master · — slave");
         assert!(l.running);
         m.net.bt_channels_watched.clear();
-        assert!(line("net_bench", &m, now)
+        assert!(line("net_bench", &crate::ui::View::of(&m), now)
             .unwrap()
             .text
             .ends_with("; not listening now"));
@@ -498,7 +513,7 @@ mod tests {
     fn the_connection_view_has_a_live_line() {
         let mut m = at("net_connection", true);
         let now = Instant::now();
-        let l = line("net_connection", &m, now).unwrap();
+        let l = line("net_connection", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(
             l.text,
             "no connection followed this session; not listening now"
@@ -525,7 +540,7 @@ mod tests {
         m.net.ble_connections[0]
             .connection
             .account(crate::signal::ble::follow::Listened::NotInView, Vec::new());
-        let l = line("net_connection", &m, now).unwrap();
+        let l = line("net_connection", &crate::ui::View::of(&m), now).unwrap();
         assert_eq!(l.text, "0x50654b6a: 0 of 1 events in view followed");
         assert!(l.running);
     }
@@ -533,7 +548,7 @@ mod tests {
     #[test]
     fn the_capability_line_is_the_verdicts_own() {
         let m = at("net", false);
-        let l = line("net", &m, Instant::now()).unwrap();
+        let l = line("net", &crate::ui::View::of(&m), Instant::now()).unwrap();
         assert!(
             l.text.contains("OF") || l.text.contains("OUT OF BAND"),
             "{}",

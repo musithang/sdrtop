@@ -36,7 +36,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct ImageScopePanel;
@@ -63,7 +62,7 @@ impl Panel for ImageScopePanel {
         (28, 12)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Image-Rejection Scope").stale_when(Staleness::NotStreaming)
     }
 
@@ -71,7 +70,7 @@ impl Panel for ImageScopePanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -145,6 +144,7 @@ fn placeholder(f: &mut Frame, inner: Rect, text: &'static str, theme: &crate::Th
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn panel_name_is_stable() {

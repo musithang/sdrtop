@@ -49,7 +49,7 @@ impl Panel for LevelDiagramPanel {
         (40, 14)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Gain-Staging Level Diagram")
             .stale_when(Staleness::NotStreaming)
             .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
@@ -59,7 +59,7 @@ impl Panel for LevelDiagramPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

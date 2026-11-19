@@ -31,10 +31,15 @@ pub mod overlay;
 pub mod panel;
 pub mod panels;
 pub mod registry;
+pub mod screen;
 pub mod widgets;
 
 pub use engine::LayoutEngine;
 pub use registry::PanelRegistry;
+pub use screen::{
+    active_recall_slot, recall_from_hz, recall_to_hz, DeviceOptionUpdate, InputMode, MenuFocus,
+    MenuPath, MenuState, MenuTile, RailMode, Screen, UiState, View, RECALL_SLOTS,
+};
 
 pub use panels::core::command_rail::CommandRailPanel;
 pub use panels::core::footer::FooterPanel;
@@ -267,11 +272,19 @@ mod gain_rendering {
     #[test]
     fn the_rail_marks_the_selected_stage_without_moving_the_bars() {
         let plain = SdrMetrics::fixture().streaming();
-        let mut picked = SdrMetrics::fixture().streaming();
-        picked.ui.gain_stage = Some(1);
+        let picked = SdrMetrics::fixture().streaming();
+        let picked_ui = crate::ui::UiState {
+            gain_stage: Some(1),
+            ..crate::ui::UiState::default()
+        };
 
         let a = draw(super::CommandRailPanel, 60, 30, &plain);
-        let b = draw(super::CommandRailPanel, 60, 30, &picked);
+        let b = crate::state::fixture::draw_view(
+            super::CommandRailPanel,
+            60,
+            30,
+            &crate::ui::View::new(&picked, &picked_ui),
+        );
         assert_eq!(a.len(), b.len());
 
         let marked: Vec<usize> = b
@@ -306,10 +319,19 @@ mod gain_rendering {
     /// from `focus_bindings`, so this also pins that the rail declares them.
     #[test]
     fn the_rail_focus_footer_names_the_stage_keys() {
-        let mut m = SdrMetrics::fixture().streaming();
-        m.ui.focused_panel = Some("command_rail".into());
-        m.ui.focused_panel_bindings = super::CommandRailPanel.focus_bindings();
-        let out = draw(super::FooterPanel, 150, 4, &m).join("\n");
+        let m = SdrMetrics::fixture().streaming();
+        let ui = crate::ui::UiState {
+            focused_panel: Some("command_rail".into()),
+            focused_panel_bindings: super::CommandRailPanel.focus_bindings(),
+            ..crate::ui::UiState::default()
+        };
+        let out = crate::state::fixture::draw_view(
+            super::FooterPanel,
+            150,
+            4,
+            &crate::ui::View::new(&m, &ui),
+        )
+        .join("\n");
         assert!(out.contains("Stage"), "no stage key hint:\n{out}");
         assert!(out.contains("Adjust"), "no adjust key hint:\n{out}");
     }

@@ -21,7 +21,6 @@ use ratatui::{
 
 use super::mhz;
 use crate::signal::pocsag::page::Content;
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 
 pub struct PagerInboxPanel;
@@ -50,7 +49,7 @@ impl Panel for PagerInboxPanel {
         Some(if body < CARDS_MIN_BODY { 0 } else { CARDS_W })
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let p = &state.pager;
         PanelChrome::new("Inbox")
             .stale_when(Staleness::Never)
@@ -63,7 +62,7 @@ impl Panel for PagerInboxPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

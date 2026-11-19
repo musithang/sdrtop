@@ -14,8 +14,8 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::event::{DeviceOptionCompletion, DeviceOptionRequest};
-use crate::state::{DeviceOptionUpdate, InputMode, MenuFocus, MenuState, MenuTile, SdrMetrics};
 use crate::ui::menu::{self, keys, tree};
+use crate::ui::{DeviceOptionUpdate, InputMode, MenuFocus, MenuState, MenuTile};
 
 use super::{global, metrics, InputCtx, KeyAction};
 
@@ -347,7 +347,7 @@ fn keys_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyActio
             let last = {
                 let m = metrics(ctx.state);
                 let section = menu::keys_section(ctx.engine, &state);
-                let controls = ctx.engine.section_controls(section, &m);
+                let controls = ctx.engine.section_controls(section, &m.view());
                 keys::row_count_for(&m.caps, &controls).saturating_sub(1)
             };
             set(
@@ -444,7 +444,10 @@ fn request_option_change(ctx: &mut InputCtx<'_>, menu: MenuState, step: isize) -
     submit_option_request(&mut m, request)
 }
 
-pub(super) fn submit_option_request(m: &mut SdrMetrics, request: DeviceOptionRequest) -> KeyAction {
+pub(super) fn submit_option_request(
+    m: &mut crate::ui::screen::Locked<'_>,
+    request: DeviceOptionRequest,
+) -> KeyAction {
     if m.ui.device_option_update.is_pending() {
         return KeyAction::Continue;
     }
@@ -456,7 +459,7 @@ pub(super) fn submit_option_request(m: &mut SdrMetrics, request: DeviceOptionReq
 }
 
 pub(super) fn complete_device_option(
-    state: &std::sync::Arc<std::sync::Mutex<SdrMetrics>>,
+    state: &crate::ui::Screen,
     completion: DeviceOptionCompletion,
 ) -> bool {
     let mut m = metrics(state);
@@ -551,13 +554,13 @@ mod tests {
     use crate::ui::{self, PanelRegistry};
     use ratatui::crossterm::event::KeyEvent;
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     /// Drives the menu layer the way the app does, minus the terminal. Same
     /// shape as the harness in `global/mod.rs`, and deliberately device-free:
     /// nothing the menu does should reach the radio.
     struct Harness {
-        state: Arc<Mutex<SdrMetrics>>,
+        state: crate::ui::Screen,
         engine: ui::LayoutEngine,
         show_footer: bool,
         focus_keys: crate::app::FocusKeys,
@@ -568,8 +571,8 @@ mod tests {
             let mut engine =
                 ui::LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
             engine.set_preset("command_rail");
-            let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
-            state.lock().unwrap().ui.menu = Some(MenuState::default());
+            let state = crate::ui::Screen::of(SdrMetrics::fixture());
+            state.lock().ui.menu = Some(MenuState::default());
             Self {
                 state,
                 engine,
@@ -596,11 +599,11 @@ mod tests {
         }
 
         fn menu(&self) -> MenuState {
-            self.state.lock().unwrap().ui.menu.expect("menu is open")
+            self.state.lock().ui.menu.expect("menu is open")
         }
 
         fn show_options(&mut self, options: Vec<DeviceOption>) {
-            let mut m = self.state.lock().unwrap();
+            let mut m = self.state.lock();
             m.device_options = Arc::new(options);
             m.ui.menu = Some(MenuState {
                 tile: MenuTile::Options,
@@ -1000,7 +1003,7 @@ mod tests {
     }
 
     /// The path to the rows titled `want` in the Lab tree.
-    fn lab_path(h: &Harness, want: &[&str]) -> crate::state::MenuPath {
+    fn lab_path(h: &Harness, want: &[&str]) -> crate::ui::MenuPath {
         let tree = h.engine.menu_tree();
         let mut rows = tree.root(tree::Tile::Lab);
         let mut path = Vec::new();
@@ -1012,10 +1015,10 @@ mod tests {
             path.push(i);
             rows = rows[i].children();
         }
-        crate::state::MenuPath::from_rows(&path)
+        crate::ui::MenuPath::from_rows(&path)
     }
 
-    fn titles(h: &Harness, path: crate::state::MenuPath) -> Vec<String> {
+    fn titles(h: &Harness, path: crate::ui::MenuPath) -> Vec<String> {
         h.engine
             .menu_tree()
             .trail(tree::Tile::Lab, &path.into())
@@ -1029,7 +1032,7 @@ mod tests {
     #[test]
     fn the_tiles_are_chosen_by_arrows_and_letters() {
         let mut h = Harness::new();
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
+        h.state.lock().ui.menu = Some(MenuState {
             resume: true,
             ..MenuState::default()
         });
@@ -1086,7 +1089,7 @@ mod tests {
     fn the_tree_is_walked_in_and_out() {
         let mut h = Harness::new();
         let bluetooth = lab_path(&h, &["Bluetooth"]);
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
+        h.state.lock().ui.menu = Some(MenuState {
             focus: MenuFocus::Below,
             lab: bluetooth,
             ..MenuState::default()
@@ -1120,16 +1123,16 @@ mod tests {
     fn enter_and_digits_open_views() {
         let mut h = Harness::new();
         let iq = lab_path(&h, &["Receiver", "IQ balance"]);
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
+        h.state.lock().ui.menu = Some(MenuState {
             focus: MenuFocus::Below,
             lab: iq,
             ..MenuState::default()
         });
         h.key(KeyCode::Enter);
         assert_eq!(h.engine.active_preset(), "lab_iq");
-        assert!(h.state.lock().unwrap().ui.menu.is_none(), "the menu closed");
+        assert!(h.state.lock().ui.menu.is_none(), "the menu closed");
 
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
+        h.state.lock().ui.menu = Some(MenuState {
             lab: iq,
             ..MenuState::default()
         });
@@ -1147,7 +1150,7 @@ mod tests {
         h.engine.set_preset("radio_ft8");
         let opening = crate::ui::menu::opening(&h.engine, true);
         // The preset the row at `path` opens, if it is a view.
-        fn opens(h: &Harness, tile: tree::Tile, path: crate::state::MenuPath) -> Option<String> {
+        fn opens(h: &Harness, tile: tree::Tile, path: crate::ui::MenuPath) -> Option<String> {
             h.engine
                 .menu_tree()
                 .trail(tile, &path.into())
@@ -1159,8 +1162,8 @@ mod tests {
             opens(&h, tree::Tile::Radio, opening.radio).as_deref(),
             Some("radio_ft8")
         );
-        assert_eq!(opening.lab, crate::state::MenuState::default().lab);
-        h.state.lock().unwrap().ui.menu = Some(opening);
+        assert_eq!(opening.lab, crate::ui::MenuState::default().lab);
+        h.state.lock().ui.menu = Some(opening);
         h.key(KeyCode::Down);
         assert_eq!(h.menu().tile, MenuTile::Radio);
         assert_eq!(
@@ -1177,20 +1180,20 @@ mod tests {
         h.engine.set_preset("lab_rf");
         let opening = crate::ui::menu::opening(&h.engine, true);
         assert_eq!(opening.tile, MenuTile::Resume);
-        h.state.lock().unwrap().ui.menu = Some(opening);
+        h.state.lock().ui.menu = Some(opening);
         h.key(KeyCode::Down);
         assert_eq!(h.menu().tile, MenuTile::Lab);
         assert_eq!(titles(&h, h.menu().lab), ["Receiver", "Gain & noise"]);
 
         h.engine.set_preset("command_rail");
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
+        h.state.lock().ui.menu = Some(MenuState {
             tile: MenuTile::Resume,
             resume: true,
             ..opening
         });
         h.key(KeyCode::Enter);
         assert_eq!(h.engine.active_preset(), "command_rail");
-        assert!(h.state.lock().unwrap().ui.menu.is_none());
+        assert!(h.state.lock().ui.menu.is_none());
     }
 
     /// Options with nothing on the radio to set still holds your station:
@@ -1282,7 +1285,7 @@ mod tests {
             },
         );
 
-        let m = h.state.lock().unwrap();
+        let m = h.state.lock();
         assert_eq!(m.device_options[0].selected_choice, "Wide");
         assert_eq!(m.device_options[1].selected_choice, "0 dB");
         assert!(matches!(
@@ -1299,7 +1302,7 @@ mod tests {
     fn a_failed_completion_keeps_state_and_surfaces_the_error() {
         let mut h = Harness::new();
         h.show_options(vec![option("bandwidth", "Bandwidth", "Narrow")]);
-        let before = h.state.lock().unwrap().device_options.clone();
+        let before = h.state.lock().device_options.clone();
         let KeyAction::ApplyDeviceOption(_) = h.key(KeyCode::Right) else {
             panic!("value change did not create a request");
         };
@@ -1312,7 +1315,7 @@ mod tests {
             },
         );
 
-        let m = h.state.lock().unwrap();
+        let m = h.state.lock();
         assert_eq!(m.device_options, before);
         assert!(matches!(
             m.ui.device_option_update,
@@ -1344,7 +1347,7 @@ mod tests {
             },
         );
 
-        let m = h.state.lock().unwrap();
+        let m = h.state.lock();
         assert_eq!(m.device_options[0].selected_choice, "Auto");
         assert!(m
             .log
@@ -1368,7 +1371,7 @@ mod tests {
             },
         );
 
-        let m = h.state.lock().unwrap();
+        let m = h.state.lock();
         assert!(m
             .log
             .back()
@@ -1391,7 +1394,7 @@ mod tests {
         h.key(KeyCode::Down);
         assert_eq!(h.menu().scroll, 1);
         h.key(KeyCode::Esc);
-        assert!(h.state.lock().unwrap().ui.menu.is_some());
+        assert!(h.state.lock().ui.menu.is_some());
         h.key(KeyCode::Tab);
         assert_eq!(h.menu().focus, MenuFocus::Below, "Tab waits for the device");
         h.key(KeyCode::BackTab);
@@ -1443,7 +1446,7 @@ mod tests {
         )]);
         assert_eq!(h.key(KeyCode::Right), KeyAction::Continue);
         assert!(matches!(
-            h.state.lock().unwrap().ui.device_option_update,
+            h.state.lock().ui.device_option_update,
             DeviceOptionUpdate::Idle
         ));
     }
@@ -1454,7 +1457,7 @@ mod tests {
     fn a_pane_visit_does_not_disturb_the_place_in_the_tree() {
         let mut h = Harness::new();
         let frames = lab_path(&h, &["Wi-Fi", "2.4 GHz", "Channel", "Frames"]);
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
+        h.state.lock().ui.menu = Some(MenuState {
             lab: frames,
             ..MenuState::default()
         });

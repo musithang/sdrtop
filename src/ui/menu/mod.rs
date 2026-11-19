@@ -52,9 +52,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::{InputMode, MenuFocus, MenuPath, MenuState, MenuTile, SdrMetrics};
+use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::LayoutEngine;
+use crate::ui::{InputMode, MenuFocus, MenuPath, MenuState, MenuTile};
 
 /// Rows the tile row leaves the menu below it at least, before it shrinks.
 const BELOW_TILES: u16 = 18;
@@ -147,7 +148,7 @@ fn resume_line(engine: &LayoutEngine) -> String {
 pub fn render(
     f: &mut Frame,
     area: Rect,
-    m: &SdrMetrics,
+    m: &crate::ui::View<'_>,
     engine: &LayoutEngine,
     state: &MenuState,
     controls: &[keys::Control],
@@ -243,7 +244,7 @@ pub fn render(
 fn below_tree(
     f: &mut Frame,
     area: Rect,
-    m: &SdrMetrics,
+    m: &crate::ui::View<'_>,
     engine: &LayoutEngine,
     state: &MenuState,
     tile: tree::Tile,
@@ -314,7 +315,7 @@ fn below_tree(
 fn below_pane(
     f: &mut Frame,
     area: Rect,
-    m: &SdrMetrics,
+    m: &crate::ui::View<'_>,
     engine: &LayoutEngine,
     state: &MenuState,
     controls: &[keys::Control],
@@ -403,7 +404,13 @@ fn header(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
 }
 
 /// The keys that work where the focus is.
-fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &crate::Theme) {
+fn footer(
+    f: &mut Frame,
+    area: Rect,
+    state: &MenuState,
+    m: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+) {
     if area.height == 0 {
         return;
     }
@@ -507,11 +514,16 @@ mod tests {
     /// the menu is not a panel, so it cannot go through
     /// `PanelRegistry::render_panel` and needs its own harness.
     fn draw(w: u16, h: u16, state: &MenuState) -> Vec<String> {
-        draw_with_metrics(w, h, state, &SdrMetrics::fixture())
+        draw_with_metrics(w, h, state, &crate::ui::View::of(&SdrMetrics::fixture()))
     }
 
-    fn draw_with_metrics(w: u16, h: u16, state: &MenuState, m: &SdrMetrics) -> Vec<String> {
-        draw_on(&engine(), w, h, state, m)
+    fn draw_with_metrics(
+        w: u16,
+        h: u16,
+        state: &MenuState,
+        v: &crate::ui::View<'_>,
+    ) -> Vec<String> {
+        draw_on(&engine(), w, h, state, v)
     }
 
     fn draw_on(
@@ -519,13 +531,13 @@ mod tests {
         w: u16,
         h: u16,
         state: &MenuState,
-        m: &SdrMetrics,
+        v: &crate::ui::View<'_>,
     ) -> Vec<String> {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        let controls = engine.section_controls(keys_section(engine, state), m);
+        let controls = engine.section_controls(keys_section(engine, state), v);
         terminal
-            .draw(|f| render(f, f.area(), m, engine, state, &controls, &theme))
+            .draw(|f| render(f, f.area(), v, engine, state, &controls, &theme))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..h)
@@ -625,7 +637,14 @@ mod tests {
             resume: true,
             ..MenuState::default()
         };
-        let all = draw_on(&e, 191, 41, &state, &SdrMetrics::fixture()).join("\n");
+        let all = draw_on(
+            &e,
+            191,
+            41,
+            &state,
+            &crate::ui::View::of(&SdrMetrics::fixture()),
+        )
+        .join("\n");
         assert!(all.contains("Wi-Fi · Frames"), "{all}");
         assert!(all.contains("WHERE YOU LEFT OFF"), "{all}");
         assert!(all.contains("100.000 MHz ·"), "{all}");
@@ -667,18 +686,18 @@ mod tests {
     #[test]
     fn a_views_card_carries_its_live_line() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.active_preset = "net_ble".to_string();
+        m.show_preset("net_ble");
         m.net.ble_channel = Some(37);
         m.net.ble_channel_packets = [300, 100, 12];
         m.net.ble_channel_crc_ok = [290, 95, 11];
         let state = in_lab(&["Bluetooth", "2.4 GHz", "Low Energy", "Advertising"]);
-        let le = draw_with_metrics(191, 41, &state, &m).join("\n");
+        let le = draw_with_metrics(191, 41, &state, &crate::ui::View::of(&m)).join("\n");
         assert!(
             le.contains("\u{25cf} 412 packets this session, 96 % CRC ok"),
             "{le}"
         );
         let state = in_lab(&["Bluetooth", "2.4 GHz", "Classic", "Piconets nearby"]);
-        let classic = draw_with_metrics(191, 41, &state, &m).join("\n");
+        let classic = draw_with_metrics(191, 41, &state, &crate::ui::View::of(&m)).join("\n");
         assert!(
             classic.contains("\u{25cb} no piconet heard this session; not listening now"),
             "{classic}"
@@ -707,7 +726,14 @@ mod tests {
             resume: true,
             ..MenuState::default()
         };
-        let all = draw_on(&refused, 191, 41, &state, &SdrMetrics::fixture()).join("\n");
+        let all = draw_on(
+            &refused,
+            191,
+            41,
+            &state,
+            &crate::ui::View::of(&SdrMetrics::fixture()),
+        )
+        .join("\n");
         assert!(all.contains("✗ Not on this radio"), "{all}");
         assert!(all.contains("This radio cannot reach the band."), "{all}");
         assert!(all.contains("refused"), "{all}");
@@ -807,7 +833,7 @@ mod tests {
         let m = SdrMetrics::fixture();
         let presets = &crate::config::LayoutConfig::default_config().presets;
         for (si, section) in engine.menu().sections.iter().enumerate() {
-            let controls = engine.section_controls(si, &m);
+            let controls = engine.section_controls(si, &crate::ui::View::of(&m));
             for entry in &section.entries {
                 for spec in &presets[&entry.preset].panels {
                     let Some(panel) = engine.registered_panels().find(|p| p.name() == spec.name)
@@ -889,7 +915,7 @@ mod tests {
                 integer_range: None,
             });
         }
-        let all = draw_with_metrics(40, 10, &state, &metrics).join("\n");
+        let all = draw_with_metrics(40, 10, &state, &crate::ui::View::of(&metrics)).join("\n");
         assert!(all.contains("Option 5"), "{all}");
     }
 
@@ -897,6 +923,7 @@ mod tests {
     fn numeric_options_show_entry_hints_and_keep_the_accepted_value_in_the_editor() {
         let state = pane(MenuTile::Options, 0);
         let mut m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         m.device_options = Arc::new(vec![crate::hardware::DeviceOption {
             id: "gain".into(),
             label: "Gain".into(),
@@ -905,17 +932,17 @@ mod tests {
             integer_range: Some(-100..=100),
         }]);
         for (w, h) in [(40, 10), (90, 24)] {
-            let all = draw_with_metrics(w, h, &state, &m).join("\n");
+            let all = draw_with_metrics(w, h, &state, &crate::ui::View::new(&m, &ui)).join("\n");
             assert!(all.contains("Enter number"), "{all}");
             assert!(all.contains("all choices"), "{all}");
         }
-        m.ui.input_mode = InputMode::DeviceOptionInput {
+        ui.input_mode = InputMode::DeviceOptionInput {
             id: "gain".into(),
             error: None,
         };
-        m.ui.input_buf = "-12".into();
+        ui.input_buf = "-12".into();
         for (w, h) in [(40, 10), (90, 24)] {
-            let all = draw_with_metrics(w, h, &state, &m).join("\n");
+            let all = draw_with_metrics(w, h, &state, &crate::ui::View::new(&m, &ui)).join("\n");
             for text in [
                 "Gain: 0",
                 "Value: -12\u{258c}",
@@ -927,12 +954,12 @@ mod tests {
             }
             assert!(!all.contains("Enter number"), "{all}");
         }
-        m.ui.input_mode = InputMode::DeviceOptionInput {
+        ui.input_mode = InputMode::DeviceOptionInput {
             id: "gain".into(),
             error: Some("Out of range: -100 to 100".into()),
         };
         for (w, h) in [(40, 6), (40, 7), (40, 8), (90, 5), (90, 6), (90, 7)] {
-            let all = draw_with_metrics(w, h, &state, &m).join("\n");
+            let all = draw_with_metrics(w, h, &state, &crate::ui::View::new(&m, &ui)).join("\n");
             for text in ["Value: -12\u{258c}", "Enter apply", "Esc cancel"] {
                 assert!(all.contains(text), "'{text}' missing:\n{all}");
             }

@@ -356,7 +356,7 @@ impl Panel for NetWifiLeastBusyPanel {
         (20, 8)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Least busy")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.into())
@@ -367,7 +367,7 @@ impl Panel for NetWifiLeastBusyPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

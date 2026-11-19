@@ -97,7 +97,7 @@ impl Panel for Ft8DecoderPanel {
         Some(12)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let (_, _, cycles) = summed(state);
         let mut chrome = PanelChrome::new("Decoder").stale_when(Staleness::NotStreaming);
         chrome.suffix = Some(if cycles == 1 {
@@ -112,7 +112,7 @@ impl Panel for Ft8DecoderPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

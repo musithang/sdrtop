@@ -9,9 +9,10 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::state::{active_recall_slot, SdrMetrics, RECALL_SLOTS};
+use crate::state::SdrMetrics;
 use crate::ui::panels::core::header::vfo_string;
 use crate::ui::widgets::band_plan::band_at;
+use crate::ui::{active_recall_slot, RECALL_SLOTS};
 
 use super::modes::rail_peaks;
 
@@ -48,7 +49,11 @@ fn recall_pip(slot_hz: u64, state: &SdrMetrics, stale: bool) -> Option<(&'static
 /// on lit with `▸`. Empty slots show a dim dash. `M` saves the current tuning,
 /// `1·2·3` jump (both in rail-focus). Band tags come from `band_at`.
 /// Activity pips appear on the right when a slot frequency is visible in the spectrum.
-pub(super) fn lines(state: &SdrMetrics, stale: bool, theme: &crate::Theme) -> Vec<Line<'static>> {
+pub(super) fn lines(
+    state: &crate::ui::View<'_>,
+    stale: bool,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
     let active = active_recall_slot(&state.ui.recall, state.radio.frequency);
     let mut out: Vec<Line<'static>> = (0..RECALL_SLOTS)
         .map(|i| {

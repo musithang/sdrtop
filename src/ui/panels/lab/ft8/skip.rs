@@ -13,7 +13,6 @@ use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::reach::km_frac;
 use super::{placed, say, snr_colour, Pixels, Placed, SNR_RANGE};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
 
@@ -44,7 +43,7 @@ impl Panel for Ft8SkipPanel {
         (30, 6)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("SNR against distance").stale_when(Staleness::NotStreaming)
     }
 
@@ -52,7 +51,7 @@ impl Panel for Ft8SkipPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -111,6 +110,7 @@ impl Panel for Ft8SkipPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
     use std::sync::Arc;
 
     #[test]

@@ -123,7 +123,7 @@ impl Panel for WaterfallPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let wf = &state.waterfall;
         let buf = &wf.buffer;
         PanelChrome::deck("WATERFA_LL")
@@ -149,7 +149,7 @@ impl Panel for WaterfallPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
         bond: Bond,
@@ -162,7 +162,7 @@ impl Panel for WaterfallPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
     ) {
@@ -180,7 +180,7 @@ impl Panel for WaterfallPanel {
 fn render(
     f: &mut Frame,
     area: Rect,
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     focused: bool,
     bond: Bond,

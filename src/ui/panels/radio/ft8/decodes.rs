@@ -17,7 +17,6 @@ use ratatui::{
 
 use super::{hhmmss, km, parity, path, put, signed};
 use crate::state::ft8::DecodeEntry;
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use std::sync::Arc;
 
@@ -36,7 +35,7 @@ impl Panel for Ft8DecodesPanel {
         (48, 6)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let f = &state.ft8;
         let newest = super::newest_cycle(f);
         let now = newest.map_or(0, |n| {
@@ -57,7 +56,7 @@ impl Panel for Ft8DecodesPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

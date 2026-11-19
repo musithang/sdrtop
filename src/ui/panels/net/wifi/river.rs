@@ -382,7 +382,7 @@ impl Panel for NetWifiRiverPanel {
         Some(2 * lanes_for(column) + 3)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let scope = &state.net.wifi.scope;
         let wide = super::card::on_screen(state);
         let mut suffix = match capture(state) {
@@ -417,7 +417,7 @@ impl Panel for NetWifiRiverPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -441,8 +441,7 @@ mod tests {
     /// The Frames view on channel 11 at 20 Msps, streaming.
     fn on_eleven(zoom: FrameZoom) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_frames".to_string();
+        m.show_view("wifi_channel", "wifi_frames");
         m.radio.frequency = 2_462_000_000;
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
@@ -499,8 +498,17 @@ mod tests {
         let mut registry = crate::ui::PanelRegistry::new();
         registry.register(NetWifiRiverPanel);
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 11)).unwrap();
-        t.draw(|f| registry.render_panel("net_wifi_river", f, f.area(), m, &theme, false))
-            .unwrap();
+        t.draw(|f| {
+            registry.render_panel(
+                "net_wifi_river",
+                f,
+                f.area(),
+                &crate::ui::View::of(m),
+                &theme,
+                false,
+            )
+        })
+        .unwrap();
         t.backend().buffer().clone()
     }
 
@@ -742,9 +750,12 @@ mod tests {
         let theme = crate::Theme::sdr();
         for (w, h, lanes) in [(191u16, 41u16, 4u64), (152, 32, 2), (100, 30, 2)] {
             let size = ratatui::layout::Rect::new(0, 0, w, h);
-            let at = engine.area_of("net_wifi_river", size, &m).expect("a river");
+            let at = engine
+                .area_of("net_wifi_river", size, &crate::ui::View::of(&m))
+                .expect("a river");
             let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            t.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &theme))
+                .unwrap();
             let buf = t.backend().buffer().clone();
             assert_eq!(buf[(at.x, at.y)].symbol(), "\u{256d}", "{w} x {h}: {at:?}");
             assert_eq!(buf[(at.x + at.width - 1, at.y)].symbol(), "\u{256e}");
@@ -752,7 +763,10 @@ mod tests {
             assert_eq!(super::capture_cells(at), lanes * cells, "{w} x {h}");
         }
         let narrow = ratatui::layout::Rect::new(0, 0, 100, 30);
-        assert_eq!(engine.area_of("net_wifi_card", narrow, &m), None);
+        assert_eq!(
+            engine.area_of("net_wifi_card", narrow, &crate::ui::View::of(&m)),
+            None
+        );
     }
 
     /// **The river's height is the column's to decide**: four lanes when the
@@ -765,7 +779,8 @@ mod tests {
         let theme = crate::Theme::sdr();
         for (w, h, rows) in [(191u16, 41u16, 11usize), (152, 32, 7)] {
             let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            t.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &theme))
+                .unwrap();
             let buf = t.backend().buffer().clone();
             let text: Vec<String> = (0..h)
                 .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect())

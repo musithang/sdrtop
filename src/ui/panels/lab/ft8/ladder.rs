@@ -31,7 +31,6 @@ use ratatui::{
 use super::{caption, heat, say, shown_or_say};
 use crate::signal::ft8::modulate::{COSTAS, COSTAS_AT, SYMBOLS};
 use crate::state::ft8::{DecodeEntry, Shown};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
 
@@ -115,7 +114,7 @@ impl Panel for Ft8LadderPanel {
         (PAD + LABEL_W + SYMBOLS as u16 + 2, ROWS + 2)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Tone ladder").stale_when(Staleness::NotStreaming);
         if let Shown::Decode(d) = state.ft8.shown() {
             chrome.suffix = Some(caption(&d));
@@ -127,7 +126,7 @@ impl Panel for Ft8LadderPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -302,6 +301,7 @@ fn draw(
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn the_ladder_takes_the_whole_width_it_has() {

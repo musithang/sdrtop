@@ -9,7 +9,6 @@ use ratatui::{
 };
 
 use crate::config::{LayoutConfig, Position};
-use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::menu;
 use crate::ui::panel::{Bond, Bonding, Panel};
@@ -115,7 +114,7 @@ impl LayoutEngine {
     pub fn section_controls(
         &self,
         section: usize,
-        state: &crate::state::SdrMetrics,
+        state: &crate::ui::View<'_>,
     ) -> Vec<menu::keys::Control> {
         let Some(s) = self.menu.sections.get(section) else {
             return Vec::new();
@@ -297,7 +296,7 @@ impl LayoutEngine {
             .unwrap_or(&[])
     }
 
-    pub fn draw(&self, f: &mut Frame, state: &SdrMetrics, theme: &crate::Theme) {
+    pub fn draw(&self, f: &mut Frame, state: &crate::ui::View<'_>, theme: &crate::Theme) {
         let focused = self.focused_panel.as_deref();
         let placed = self.place(f.area(), state);
         for (spec, area) in &placed.stacked {
@@ -331,7 +330,7 @@ impl LayoutEngine {
     /// does not show it there. For a panel whose state depends on its size,
     /// written before the frame is drawn (the Frames river's capture is as
     /// long as its lanes).
-    pub fn area_of(&self, name: &str, size: Rect, state: &SdrMetrics) -> Option<Rect> {
+    pub fn area_of(&self, name: &str, size: Rect, state: &crate::ui::View<'_>) -> Option<Rect> {
         let placed = self.place(size, state);
         if let Some((upper, lower, halves)) = placed.bonded {
             if upper.name() == name {
@@ -349,7 +348,7 @@ impl LayoutEngine {
     }
 
     /// Where every panel of the active layout goes on a screen of `size`.
-    fn place(&self, size: Rect, state: &SdrMetrics) -> Placement<'_> {
+    fn place(&self, size: Rect, state: &crate::ui::View<'_>) -> Placement<'_> {
         self.place_specs(self.config.active_panels(), size, state)
     }
 
@@ -361,7 +360,7 @@ impl LayoutEngine {
         &self,
         preset: &str,
         size: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
     ) -> Vec<(String, Rect)> {
         let Some(config) = self.config.presets.get(preset) else {
             return Vec::new();
@@ -395,7 +394,7 @@ impl LayoutEngine {
         &'a self,
         specs: &'a [crate::config::PanelSpec],
         size: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
     ) -> Placement<'a> {
         let visible = |name: &str| !self.hidden_panels.contains(name);
         let mut placed = Placement {
@@ -602,6 +601,7 @@ fn column<'a>(
 mod tests {
     use super::*;
     use crate::config::{PanelSpec, PresetConfig};
+    use crate::state::SdrMetrics;
     use crate::ui::panel::Panel;
     use std::collections::HashMap;
 
@@ -618,7 +618,15 @@ mod tests {
         fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
             self.1
         }
-        fn render(&self, _: &mut Frame, _: Rect, _: &SdrMetrics, _: &crate::Theme, _: bool) {}
+        fn render(
+            &self,
+            _: &mut Frame,
+            _: Rect,
+            _: &crate::ui::View<'_>,
+            _: &crate::Theme,
+            _: bool,
+        ) {
+        }
     }
 
     fn spec(name: &str) -> PanelSpec {
@@ -673,7 +681,14 @@ mod tests {
         fn bonding(&self) -> Option<crate::ui::panel::Bonding> {
             self.1
         }
-        fn render(&self, f: &mut Frame, area: Rect, _: &SdrMetrics, _: &crate::Theme, _: bool) {
+        fn render(
+            &self,
+            f: &mut Frame,
+            area: Rect,
+            _: &crate::ui::View<'_>,
+            _: &crate::Theme,
+            _: bool,
+        ) {
             let text = format!("{}:plain", self.0);
             f.render_widget(ratatui::widgets::Paragraph::new(text), area);
         }
@@ -681,7 +696,7 @@ mod tests {
             &self,
             f: &mut Frame,
             area: Rect,
-            _: &SdrMetrics,
+            _: &crate::ui::View<'_>,
             _: &crate::Theme,
             _: bool,
             bond: Bond,
@@ -733,8 +748,14 @@ mod tests {
         let engine = LayoutEngine::new(cfg, registry);
         let backend = ratatui::backend::TestBackend::new(60, 20);
         let mut term = ratatui::Terminal::new(backend).unwrap();
-        term.draw(|f| engine.draw(f, &SdrMetrics::fixture(), &crate::Theme::sdr()))
-            .unwrap();
+        term.draw(|f| {
+            engine.draw(
+                f,
+                &crate::ui::View::of(&SdrMetrics::fixture()),
+                &crate::Theme::sdr(),
+            )
+        })
+        .unwrap();
         let buf = term.backend().buffer();
         (0..20)
             .map(|y| (0..60).map(|x| buf[(x, y)].symbol()).collect::<String>())
@@ -976,7 +997,7 @@ mod tests {
             crate::app::App::build_ui("command_rail", &HashMap::new(), None, true);
         let m = SdrMetrics::fixture();
         let size = Rect::new(0, 0, 191, 41);
-        let placed = engine.placement_of("lab_iq", size, &m);
+        let placed = engine.placement_of("lab_iq", size, &crate::ui::View::of(&m));
         assert!(placed.len() >= 5, "{placed:?}");
         assert!(placed.iter().all(|(_, r)| r.intersection(size) == *r));
         assert!(
@@ -984,9 +1005,13 @@ mod tests {
             "{placed:?}"
         );
         engine.set_preset("lab_iq");
-        let constellation = engine.area_of("iq_constellation", size, &m).unwrap();
+        let constellation = engine
+            .area_of("iq_constellation", size, &crate::ui::View::of(&m))
+            .unwrap();
         assert!(placed.iter().any(|(_, r)| *r == constellation));
-        assert!(engine.placement_of("no_such_view", size, &m).is_empty());
+        assert!(engine
+            .placement_of("no_such_view", size, &crate::ui::View::of(&m))
+            .is_empty());
     }
 
     /// The built-ins file themselves cleanly, so a default install logs nothing

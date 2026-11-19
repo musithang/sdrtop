@@ -493,7 +493,7 @@ impl Panel for NetBleConnectionPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         // The events are the session's, counted from the feed.
         let chrome = PanelChrome::new("Connection")
             .stale_when(Staleness::NotStreaming)
@@ -513,7 +513,7 @@ impl Panel for NetBleConnectionPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

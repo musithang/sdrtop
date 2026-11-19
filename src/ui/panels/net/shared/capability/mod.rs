@@ -30,7 +30,7 @@ use ratatui::{
 
 use crate::hardware::DeliveryModel;
 use crate::signal::net::gate::{HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
-use crate::state::{RetuneRun, SdrMetrics};
+use crate::state::RetuneRun;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::widgets::reading::Reading;
 
@@ -170,7 +170,7 @@ impl Panel for NetCapabilityPanel {
         &[("K", "time the tuning call")]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         // Nothing here ages with the stream. The record was written when the
         // device was opened and is true until it is closed; the one measurement,
         // the tuning call, is of the radio, taken on request and dated on its row.
@@ -184,7 +184,7 @@ impl Panel for NetCapabilityPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

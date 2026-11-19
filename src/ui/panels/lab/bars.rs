@@ -294,7 +294,7 @@ fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static 
 }
 
 fn banner_lines(
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     iw: usize,
     focused: bool,
@@ -468,7 +468,7 @@ fn marker_spans(
 
 /// Right-side focus hints from the currently focused panel, appended if they fit.
 fn append_focus_hints(
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     iw: usize,
     used: usize,
@@ -498,7 +498,11 @@ fn append_focus_hints(
 /// Lab IQ marker bar: MKR1 = IMAGE, MKR2 = CARRIER (mirror about the LO), and
 /// `image down` = the measured suppression. Auto-tracks the strongest carrier live
 /// unless pinned via `[M]` ([`crate::state::LabState::iq_marker_pin`]).
-fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
+fn iq_marker_lines(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    iw: usize,
+) -> Vec<Line<'static>> {
     let dim = Style::default().fg(theme.label);
 
     // carrier_image resolves pin → placed marker → auto and returns the carrier /
@@ -609,7 +613,11 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 /// `CLIP 0 dBFS · PEAK −8 dBFS · Δ headroom +8 dB · FLOOR −100 dBFS/1.8 kHz · SNR 40 dB` -
 /// plus the focused panel's key hints. PEAK / headroom carry the staging severity
 /// colour so a clipping or starved chain reads at a glance.
-fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
+fn rf_marker_lines(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    iw: usize,
+) -> Vec<Line<'static>> {
     let dim = Style::default().fg(theme.label);
     let val = Style::default().fg(theme.value);
 
@@ -733,7 +741,11 @@ fn titlecase(s: &str) -> String {
 /// `JITTER ±42 µs · CLOCK +18 ppm · LATE 0 · BUF 0% · QUALITY ✓ Excellent` -
 /// plus the focused panel's key hints. LATE / BUF / QUALITY carry their severity
 /// colour so a pressured pipeline reads at a glance.
-fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
+fn timing_marker_lines(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    iw: usize,
+) -> Vec<Line<'static>> {
     let dim = Style::default().fg(theme.label);
     let val = Style::default().fg(theme.value);
     let t = &state.timing;
@@ -860,7 +872,11 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 /// calls `signal_characterization::verdict` directly - one source of truth, so
 /// the bottom bar and the card can never disagree (same precedent as Lab IQ's
 /// marker bar reading `image_scope::carrier_image`).
-fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
+fn signal_marker_lines(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    iw: usize,
+) -> Vec<Line<'static>> {
     let dim = Style::default().fg(theme.label);
     let val = Style::default().fg(theme.value);
     let sig = &state.signal;
@@ -966,7 +982,11 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     vec![hairline(iw, theme.border_dim), Line::from(spans)]
 }
 
-fn marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
+fn marker_lines(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    iw: usize,
+) -> Vec<Line<'static>> {
     if state.ui.active_preset == "lab_iq" {
         return iq_marker_lines(state, theme, iw);
     }
@@ -1076,7 +1096,7 @@ impl Panel for LabBannerPanel {
             ("R", "Clear ref"),
         ]
     }
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::untitled().frame(FrameStyle::Borderless)
     }
 
@@ -1084,7 +1104,7 @@ impl Panel for LabBannerPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
     ) {
@@ -1103,7 +1123,7 @@ impl Panel for LabMarkerPanel {
     fn min_size(&self) -> (u16, u16) {
         (20, 1)
     }
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::untitled().frame(FrameStyle::Borderless)
     }
 
@@ -1111,7 +1131,7 @@ impl Panel for LabMarkerPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1212,7 +1232,7 @@ mod tests {
             occupied_bw_hz: 1_900_000,
             ..measured()
         };
-        let text: String = signal_marker_lines(&m, &crate::Theme::sdr(), 190)
+        let text: String = signal_marker_lines(&crate::ui::View::of(&m), &crate::Theme::sdr(), 190)
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
             .collect();
@@ -1249,7 +1269,7 @@ mod tests {
     #[test]
     fn the_rf_marker_draws_the_radios_own_rail() {
         let text = |m: &SdrMetrics| -> String {
-            rf_marker_lines(m, &crate::Theme::sdr(), 190)
+            rf_marker_lines(&crate::ui::View::of(m), &crate::Theme::sdr(), 190)
                 .iter()
                 .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
                 .collect()
@@ -1279,7 +1299,7 @@ mod tests {
     #[test]
     fn the_rf_marker_floor_is_the_measured_one() {
         let text = |m: &SdrMetrics| -> String {
-            rf_marker_lines(m, &crate::Theme::sdr(), 190)
+            rf_marker_lines(&crate::ui::View::of(m), &crate::Theme::sdr(), 190)
                 .iter()
                 .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
                 .collect()

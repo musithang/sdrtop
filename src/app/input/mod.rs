@@ -33,13 +33,11 @@ mod signal;
 mod sweep;
 mod text;
 
-use std::sync::{Arc, Mutex, MutexGuard};
-
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::event::{DeviceOptionCompletion, DeviceOptionRequest};
-use crate::state::{InputMode, SdrMetrics};
 use crate::ui;
+use crate::ui::InputMode;
 
 /// What the main loop should do next. `PartialEq`/`Debug` so a test can say
 /// which one it expected.
@@ -61,7 +59,7 @@ pub enum KeyAction {
 /// out into locals and still pass `ctx` on to [`global::handle`] afterwards -
 /// that is what keeps the fall-through a single line.
 pub(super) struct InputCtx<'a> {
-    pub state: &'a Arc<Mutex<SdrMetrics>>,
+    pub state: &'a crate::ui::Screen,
     /// The engine the keys send their commands to. `None` in observer mode,
     /// when the radio belongs to another process - and temporarily `None`
     /// inside [`global::handle_no_device`].
@@ -78,8 +76,8 @@ pub(super) struct InputCtx<'a> {
 /// lock would otherwise take the whole app down on the *next* key. Recovering the
 /// guard is that rule, and it was written out at all 122 lock sites in this module
 /// before it was written down once here.
-pub(super) fn metrics(state: &Arc<Mutex<SdrMetrics>>) -> MutexGuard<'_, SdrMetrics> {
-    state.lock().unwrap_or_else(|e| e.into_inner())
+pub(super) fn metrics(state: &crate::ui::Screen) -> crate::ui::screen::Locked<'_> {
+    state.lock()
 }
 
 /// Tune through the engine: the frequency the radio settled on, which a
@@ -95,7 +93,7 @@ pub(super) fn tune(core: &crate::engine::Engine, hz: u64) -> Result<u64, String>
 #[allow(clippy::too_many_arguments)]
 pub fn handle_key(
     key: KeyEvent,
-    state: &Arc<Mutex<SdrMetrics>>,
+    state: &crate::ui::Screen,
     core: Option<&crate::engine::Engine>,
     engine: &mut ui::LayoutEngine,
     show_footer: &mut bool,
@@ -154,7 +152,7 @@ pub fn handle_key(
 }
 
 pub(super) fn complete_device_option(
-    state: &Arc<Mutex<SdrMetrics>>,
+    state: &crate::ui::Screen,
     completion: DeviceOptionCompletion,
 ) -> bool {
     menu::complete_device_option(state, completion)

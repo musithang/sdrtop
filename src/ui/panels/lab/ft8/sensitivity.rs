@@ -18,7 +18,6 @@
 use ratatui::{layout::Rect, style::Style, Frame};
 
 use super::{say, snr_colour, NARROW_BODY};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::put;
 
@@ -62,7 +61,7 @@ impl Panel for Ft8SensitivityPanel {
         (body < NARROW_BODY).then_some(0)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Sensitivity").stale_when(Staleness::NotStreaming);
         chrome.suffix = Some("  the hour's SNR, sdrtop's".to_string());
         chrome
@@ -72,7 +71,7 @@ impl Panel for Ft8SensitivityPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -159,6 +158,7 @@ impl Panel for Ft8SensitivityPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn the_weakest_is_worded_by_its_side_of_the_line() {

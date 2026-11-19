@@ -136,7 +136,7 @@ impl Panel for NetWifiLedgerPanel {
         (60, 4)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let mut suffix = " \u{b7} by format and rate".to_string();
         if let Some(l) = locked(state).and(state.net.wifi.ledger(state.radio.frequency as f64)) {
             suffix.push_str(&format!(" \u{b7} over the last {:.1} s", l.span_s));
@@ -158,7 +158,7 @@ impl Panel for NetWifiLedgerPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -222,8 +222,7 @@ mod tests {
     /// 802.11b beacons, two non-HT rates and a frame not decoded.
     fn on_eleven() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_airtime".to_string();
+        m.show_view("wifi_channel", "wifi_airtime");
         m.radio.frequency = 2_462_000_000;
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
@@ -281,7 +280,7 @@ mod tests {
         let m = on_eleven();
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(118, 8)).unwrap();
-        t.draw(|f| NetWifiLedgerPanel.render(f, f.area(), &m, &theme, false))
+        t.draw(|f| NetWifiLedgerPanel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false))
             .unwrap();
         let b = t.backend().buffer();
         assert_eq!(b[(0, 1)].fg, theme.wifi(Family::Dsss));

@@ -255,7 +255,7 @@ impl Panel for NetCodedDetailPanel {
         (28, 4)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         // With nothing selected it counts the session's packets, which a
         // dropped block is packets this feed never saw.
         let mut chrome = PanelChrome::new("Packet Detail")
@@ -276,7 +276,7 @@ impl Panel for NetCodedDetailPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

@@ -35,7 +35,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct TimingStripchartPanel;
@@ -48,7 +47,7 @@ impl Panel for TimingStripchartPanel {
         (48, 12)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new(match state.caps.delivery {
             // A pull backend has no callbacks; the plot is of read gaps.
             crate::hardware::DeliveryModel::Push => "Callback Interval",
@@ -63,7 +62,7 @@ impl Panel for TimingStripchartPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -127,6 +126,7 @@ impl Panel for TimingStripchartPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     const W: u16 = 80;
     const H: u16 = 18;

@@ -20,7 +20,7 @@ use ratatui::{
 use super::{hhmmss, put};
 use crate::signal::ft8::cycle::BAND_BIN_HZ;
 use crate::signal::ft8::search::F_MIN;
-use crate::state::{CycleOutcome, SdrMetrics};
+use crate::state::CycleOutcome;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct Ft8BandPanel;
@@ -58,7 +58,7 @@ impl Panel for Ft8BandPanel {
         (body < MAP_MIN_BODY).then_some(body)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let dial = state
             .ft8
             .cycles
@@ -75,7 +75,7 @@ impl Panel for Ft8BandPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

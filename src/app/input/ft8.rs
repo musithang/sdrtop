@@ -222,7 +222,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    fn press(state: &Arc<Mutex<SdrMetrics>>, code: KeyCode) {
+    fn press(state: &crate::ui::Screen, code: KeyCode) {
         let mut engine =
             ui::LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
         let mut footer = true;
@@ -236,10 +236,13 @@ mod tests {
         );
     }
 
-    fn on_view() -> Arc<Mutex<SdrMetrics>> {
-        let mut m = crate::ui::panels::radio::ft8::sample::evening();
-        m.ui.section = crate::signal::ft8::SECTION.to_string();
-        Arc::new(Mutex::new(m))
+    fn on_view() -> crate::ui::Screen {
+        let m = crate::ui::panels::radio::ft8::sample::evening();
+        let ui = crate::ui::UiState {
+            section: crate::signal::ft8::SECTION.to_string(),
+            ..crate::ui::UiState::default()
+        };
+        crate::ui::Screen::new(Arc::new(Mutex::new(m)), ui)
     }
 
     #[test]
@@ -247,26 +250,14 @@ mod tests {
         let s = on_view();
         press(&s, KeyCode::Down);
         // The newest cycle by tone: YO3GCI at 340 Hz first.
-        assert_eq!(
-            s.lock().unwrap().ft8.view.selected.as_deref(),
-            Some("YO3GCI")
-        );
+        assert_eq!(s.lock().ft8.view.selected.as_deref(), Some("YO3GCI"));
         press(&s, KeyCode::Down);
-        assert_eq!(
-            s.lock().unwrap().ft8.view.selected.as_deref(),
-            Some("EA8ZQ")
-        );
+        assert_eq!(s.lock().ft8.view.selected.as_deref(), Some("EA8ZQ"));
         press(&s, KeyCode::Up);
         press(&s, KeyCode::Up);
-        assert_eq!(
-            s.lock().unwrap().ft8.view.selected.as_deref(),
-            Some("YO3GCI")
-        );
+        assert_eq!(s.lock().ft8.view.selected.as_deref(), Some("YO3GCI"));
         // The gain was not touched.
-        assert_eq!(
-            s.lock().unwrap().radio.gains,
-            SdrMetrics::fixture().radio.gains
-        );
+        assert_eq!(s.lock().radio.gains, SdrMetrics::fixture().radio.gains);
     }
 
     /// `L` crosses from World to the FT8 Lab and back, each time to the
@@ -278,28 +269,28 @@ mod tests {
             crate::app::App::build_ui("radio_ft8", &HashMap::new(), None, true);
         engine.set_preset("radio_ft8");
         let s = on_view();
-        s.lock().unwrap().ft8.view.selected = Some("JA1VQD".into());
+        s.lock().ft8.view.selected = Some("JA1VQD".into());
         let press_on = |code: KeyCode, engine: &mut ui::LayoutEngine| {
             let mut footer = true;
             handle_key(KeyEvent::from(code), &s, None, engine, &mut footer, &keys);
             // What `App::draw` does every frame: the section is the layout's.
             let section = engine.scope().map(|sc| sc.id.clone()).unwrap_or_default();
-            s.lock().unwrap().ui.section = section;
+            s.lock().ui.section = section;
         };
         press_on(KeyCode::Char('L'), &mut engine);
         assert_eq!(engine.active_preset(), "lab_ft8_signal");
         {
-            let m = s.lock().unwrap();
+            let m = s.lock();
             assert!(m.ui.is_ft8_lab() && m.ui.is_ft8_section());
             assert_eq!(m.ft8.view.selected.as_deref(), Some("JA1VQD"));
             assert_eq!(m.ft8.view.world_preset.as_deref(), Some("radio_ft8"));
         }
-        let range = s.lock().unwrap().ft8.view.range;
+        let range = s.lock().ft8.view.range;
         press_on(KeyCode::Char('z'), &mut engine);
-        assert_eq!(s.lock().unwrap().ft8.view.range, range);
+        assert_eq!(s.lock().ft8.view.range, range);
         press_on(KeyCode::Char('L'), &mut engine);
         assert_eq!(engine.active_preset(), "radio_ft8");
-        let m = s.lock().unwrap();
+        let m = s.lock();
         assert_eq!(m.ui.section, crate::signal::ft8::SECTION);
         assert_eq!(m.ft8.view.lab_preset.as_deref(), Some("lab_ft8_signal"));
         assert_eq!(m.ft8.view.selected.as_deref(), Some("JA1VQD"));
@@ -326,7 +317,7 @@ mod tests {
         for k in ['r', 'g', 'k', 'l', 'n', 't', 'b', 'w', 'z'] {
             press_on(KeyCode::Char(k));
         }
-        let m = s.lock().unwrap();
+        let m = s.lock();
         assert_eq!(m.ui.focused_panel.as_deref(), Some("ft8_map"));
         let map = &m.ft8.view.map;
         assert!(!map.rays && !map.grid && !map.rings && !map.sun && map.this_band);
@@ -358,47 +349,47 @@ mod tests {
         // North of Budapest there are stations in the sample; which one is
         // the direction tests' business, here only that the map chose.
         press_on(KeyCode::Up);
-        let chosen = s.lock().unwrap().ft8.view.selected.clone();
+        let chosen = s.lock().ft8.view.selected.clone();
         assert!(chosen.is_some(), "Up chose nobody");
-        let dial = s.lock().unwrap().radio.frequency;
+        let dial = s.lock().radio.frequency;
         press_on(KeyCode::Left);
         // The arrows in focus are the map's: the band did not change.
-        assert_eq!(s.lock().unwrap().radio.frequency, dial);
+        assert_eq!(s.lock().radio.frequency, dial);
         press_on(KeyCode::Enter);
-        assert!(s.lock().unwrap().ft8.view.zoomed);
+        assert!(s.lock().ft8.view.zoomed);
         press_on(KeyCode::Enter);
-        assert!(!s.lock().unwrap().ft8.view.zoomed);
+        assert!(!s.lock().ft8.view.zoomed);
         // Esc leaves the focus and the zoom with it; z ends one too.
         press_on(KeyCode::Enter);
         press_on(KeyCode::Esc);
-        assert!(!s.lock().unwrap().ft8.view.zoomed);
-        s.lock().unwrap().ft8.view.zoomed = true;
+        assert!(!s.lock().ft8.view.zoomed);
+        s.lock().ft8.view.zoomed = true;
         press_on(KeyCode::Char('z'));
-        assert!(!s.lock().unwrap().ft8.view.zoomed);
+        assert!(!s.lock().ft8.view.zoomed);
     }
 
     #[test]
     fn z_steps_the_map_u_filters_c_clears() {
         let s = on_view();
         press(&s, KeyCode::Char('z'));
-        assert_eq!(s.lock().unwrap().ft8.view.range, MapRange::Km1500);
+        assert_eq!(s.lock().ft8.view.range, MapRange::Km1500);
         press(&s, KeyCode::Char('u'));
         {
-            let m = s.lock().unwrap();
+            let m = s.lock();
             assert!(m.ft8.view.only_yours);
             assert_eq!(m.ft8.listed().len(), 1);
         }
         press(&s, KeyCode::Char('c'));
-        let m = s.lock().unwrap();
+        let m = s.lock();
         assert!(m.ft8.decodes.is_empty() && m.ft8.stations.is_empty());
     }
 
     #[test]
     fn u_without_a_call_is_refused_and_said() {
         let s = on_view();
-        s.lock().unwrap().home.callsign = None;
+        s.lock().home.callsign = None;
         press(&s, KeyCode::Char('u'));
-        let m = s.lock().unwrap();
+        let m = s.lock();
         assert!(!m.ft8.view.only_yours);
         assert!(m.log.iter().any(|l| l.text.contains("Options")));
     }
@@ -406,16 +397,16 @@ mod tests {
     #[test]
     fn off_the_view_the_keys_are_left_alone() {
         let s = on_view();
-        s.lock().unwrap().ui.section = "spectrum".into();
+        s.lock().ui.section = "spectrum".into();
         press(&s, KeyCode::Char('z'));
-        assert_eq!(s.lock().unwrap().ft8.view.range, MapRange::Log);
+        assert_eq!(s.lock().ft8.view.range, MapRange::Log);
     }
 
     #[test]
     fn a_picked_gain_stage_takes_the_arrows_back() {
         let s = on_view();
-        s.lock().unwrap().ui.gain_stage = Some(0);
+        s.lock().ui.gain_stage = Some(0);
         press(&s, KeyCode::Down);
-        assert_eq!(s.lock().unwrap().ft8.view.selected, None);
+        assert_eq!(s.lock().ft8.view.selected, None);
     }
 }

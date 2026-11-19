@@ -10,7 +10,6 @@ use ratatui::{
 };
 
 use crate::hardware::StageReading;
-use crate::state::SdrMetrics;
 use crate::ui::panels::core::header::gain_bar;
 use crate::ui::widgets::charts::gain_bar_colored;
 
@@ -27,7 +26,7 @@ fn gain_bar_width(inner_w: usize) -> usize {
 /// its clip headroom. `active` is "streaming and we own the radio" - idle, every
 /// value drops to the label colour and the bars go flat.
 pub(super) fn lines(
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     active: bool,
     observer: bool,
     iw: usize,

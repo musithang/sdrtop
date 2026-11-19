@@ -95,14 +95,14 @@ impl Panel for LogPanel {
     fn min_size(&self) -> (u16, u16) {
         (20, 7)
     }
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::deck("Log")
     }
     fn render(
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

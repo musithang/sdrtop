@@ -27,7 +27,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
 
 use super::field::{self, Field};
@@ -42,7 +41,7 @@ impl Panel for MicroHealthPanel {
         (44, 8)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::untitled()
     }
 
@@ -50,7 +49,7 @@ impl Panel for MicroHealthPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -92,6 +91,7 @@ impl Panel for MicroHealthPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     const W: u16 = 46;
     const H: u16 = 18;

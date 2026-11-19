@@ -309,12 +309,12 @@ fn keys(width: usize, card: bool) -> &'static str {
 
 /// Whether the list shows the selected frame in its place: opened, and the
 /// card not on screen to show it.
-fn opened(state: &SdrMetrics) -> bool {
+fn opened(state: &crate::ui::View<'_>) -> bool {
     state.net.wifi.frames_view.open && !super::card::on_screen(state)
 }
 
 fn lines(
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     width: usize,
     height: usize,
     theme: &crate::Theme,
@@ -463,7 +463,7 @@ impl Panel for NetWifiFramesPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let view = &state.net.wifi.frames_view;
         let scope = &state.net.wifi.scope;
         let mut chrome = PanelChrome::new("Fram_es")
@@ -495,7 +495,7 @@ impl Panel for NetWifiFramesPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -517,14 +517,13 @@ mod tests {
     use crate::signal::wifi::htsig::HtSig;
     use crate::signal::wifi::lsig::{LSig, Refused};
     use crate::signal::wifi::signal_field::Rate;
-    use crate::state::fixture::draw;
+
     use crate::state::{Capture, FrameZoom, Lost, RowKind, SdrMetrics, Trigger, WifiRow};
 
     /// The Frames view on channel 11 at 20 Msps, streaming.
     fn on_eleven() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_frames".to_string();
+        m.show_view("wifi_channel", "wifi_frames");
         m.radio.frequency = 2_462_000_000;
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
@@ -618,8 +617,8 @@ mod tests {
         })
     }
 
-    fn text(m: &SdrMetrics, w: u16, h: u16) -> String {
-        draw(NetWifiFramesPanel, w, h, m).join("\n")
+    fn text(v: &crate::ui::View<'_>, w: u16, h: u16) -> String {
+        crate::state::fixture::draw_view(NetWifiFramesPanel, w, h, v).join("\n")
     }
 
     /// Every frame kept as one capture at 40 us a cell over 400 cells (16
@@ -689,7 +688,7 @@ mod tests {
         ));
         w.push_row(row(5_000.0, unreadable(), None));
         capture_all(&mut m, 0);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(out.contains("Frames"), "the nameplate: {out}");
 
         let r = line(&out, "non-HT");
@@ -730,7 +729,7 @@ mod tests {
         w.push_row(row(64.0, non_ht(Rate::R6, 14), Some(44)));
         w.push_row(row(200.0, non_ht(Rate::R12, 30), Some(40)));
         capture_all(&mut m, 1);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         let r = rows(&out);
         assert_eq!(r.len(), 3, "{out}");
         assert!(
@@ -759,7 +758,7 @@ mod tests {
         );
         assert!(!out.contains("STOP"), "{out}");
         m.net.wifi.scope.stopped = true;
-        assert!(text(&m, 191, 16).contains("STOP"));
+        assert!(text(&crate::ui::View::of(&m), 191, 16).contains("STOP"));
     }
 
     /// The gap is unknown after a frame that stated no length, and written
@@ -773,7 +772,7 @@ mod tests {
         w.push_row(row(3_000.0, RowKind::OtherOfdm { shift_mhz: 5 }, None));
         w.push_row(row(3_100.0, non_ht(Rate::R12, 30), Some(40)));
         capture_all(&mut m, 0);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         let r = rows(&out);
         assert!(r[1].contains("2.5 ms"), "{out}");
         let gap = r[3].split("ms").nth(1).unwrap().trim_start();
@@ -787,11 +786,11 @@ mod tests {
         let mut m = on_eleven();
         m.net.wifi.push_row(row(0.0, ht(7, 1_500), Some(200)));
         capture_all(&mut m, 0);
-        let out = text(&m, 98, 10);
+        let out = text(&crate::ui::View::of(&m), 98, 10);
         let r = line(&out, "MCS 7");
         assert!(!r.contains('\u{b1}') && r.contains("48.0 kHz"), "{r}");
         assert!(r.contains("1500 B") && r.contains("27.0 dB"), "{r}");
-        let out = text(&m, 90, 10);
+        let out = text(&crate::ui::View::of(&m), 90, 10);
         let r = line(&out, "MCS 7");
         assert!(!r.contains("1500 B"), "{r}");
         assert!(r.contains("200 \u{b5}s") && r.contains("27.0 dB"), "{r}");
@@ -810,7 +809,7 @@ mod tests {
         }
         capture_all(&mut m, 0);
         m.net.wifi.frames_view.selected = Some(21);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         let marked: Vec<&str> = rows(&out)
             .into_iter()
             .filter(|l| l.contains('\u{258c}'))
@@ -839,7 +838,7 @@ mod tests {
                 to: 3_200 * 20,
             }];
         }
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         let lines: Vec<&str> = out.lines().collect();
         let at = lines
             .iter()
@@ -863,7 +862,7 @@ mod tests {
             .wifi
             .push_row(row(307_188.0, non_ht(Rate::R6, 14), Some(44)));
         capture_all(&mut m, 0);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(
             line(&out, "6 Mb/s").contains("+307.188 ms 307.2 ms"),
             "{out}"
@@ -895,7 +894,7 @@ mod tests {
                 lost(27_300, 33_900),
             ];
         }
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert_eq!(out.matches("not received").count(), 1, "{out}");
         assert!(
             out.contains("19.8 ms not received in 3 gaps over 32.9 ms"),
@@ -909,27 +908,28 @@ mod tests {
     #[test]
     fn narrow_the_selected_frame_opens_in_place_of_the_list() {
         let mut m = on_eleven();
+        let mut ui = crate::ui::UiState::default();
         m.net
             .wifi
             .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
         m.net.wifi.push_row(row(100.0, ht(7, 1_500), Some(200)));
         capture_all(&mut m, 1);
         m.net.wifi.frames_view.open = true;
-        m.ui.screen_cols = 100;
-        let out = text(&m, 100, 15);
+        ui.screen_cols = 100;
+        let out = text(&crate::ui::View::new(&m, &ui), 100, 15);
         assert!(out.contains("MCS 7 \u{b7} 1500 B \u{b7} STBC 0"), "{out}");
         assert!(out.contains("Enter: the list"), "{out}");
         assert!(!out.contains("gap \u{b5}s"), "{out}");
         m.net.wifi.frames_view.decode = true;
-        let out = text(&m, 100, 15);
+        let out = text(&crate::ui::View::new(&m, &ui), 100, 15);
         assert!(out.contains("this channel"), "{out}");
         m.net.wifi.frames_view.decode = false;
-        m.ui.screen_cols = 191;
-        let out = text(&m, 100, 15);
+        ui.screen_cols = 191;
+        let out = text(&crate::ui::View::new(&m, &ui), 100, 15);
         assert!(out.contains("gap \u{b5}s"), "the card has it: {out}");
-        m.ui.screen_cols = 100;
+        ui.screen_cols = 100;
         m.net.wifi.frames_view.open = false;
-        let out = text(&m, 100, 15);
+        let out = text(&crate::ui::View::new(&m, &ui), 100, 15);
         assert!(out.contains("Enter the frame"), "{out}");
     }
 
@@ -942,12 +942,13 @@ mod tests {
         m.net
             .wifi
             .push_row(row(0.0, non_ht(Rate::R6, 14), Some(44)));
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(out.contains("armed: waiting for any frame"), "{out}");
         m.net.wifi.scope.trigger = Trigger::Family(crate::state::Family::Dsss);
-        assert!(text(&m, 191, 16).contains("waiting for 802.11b"));
+        assert!(text(&crate::ui::View::of(&m), 191, 16).contains("waiting for 802.11b"));
         m.net.wifi.scope.stopped = true;
-        assert!(text(&m, 191, 16).contains("stopped: H or End takes captures again"));
+        assert!(text(&crate::ui::View::of(&m), 191, 16)
+            .contains("stopped: H or End takes captures again"));
 
         let mut m = on_eleven();
         m.net.wifi.push_row(WifiRow {
@@ -955,7 +956,7 @@ mod tests {
             ..row(0.0, non_ht(Rate::R54, 99), Some(30))
         });
         capture_all(&mut m, 0);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(!out.contains("54 Mb/s"), "{out}");
     }
 
@@ -964,7 +965,7 @@ mod tests {
     fn unlocked_the_list_says_how_to_lock_a_channel() {
         let mut m = on_eleven();
         m.net.mode = crate::state::NetMode::Survey;
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(out.contains("not locked on a channel"), "{out}");
     }
 
@@ -972,7 +973,7 @@ mod tests {
     /// an empty list that would read as a quiet channel.
     #[test]
     fn listening_says_nothing_has_been_heard_yet() {
-        let out = text(&on_eleven(), 191, 16);
+        let out = text(&crate::ui::View::of(&on_eleven()), 191, 16);
         assert!(out.contains("nothing heard on channel 11 yet"), "{out}");
     }
 
@@ -983,7 +984,7 @@ mod tests {
         let mut m = on_eleven();
         m.radio.config_sample_rate = 2e6;
         m.net.wifi.refused = crate::signal::net::wifi::rate_refusal(2e6);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(out.contains("nothing can be heard"), "{out}");
         assert!(out.contains("20 Msps") || out.contains("20.000"), "{out}");
 
@@ -991,7 +992,7 @@ mod tests {
             .wifi
             .push_row(row(0.0, non_ht(Rate::R6, 14), Some(44)));
         capture_all(&mut m, 0);
-        let out = text(&m, 191, 16);
+        let out = text(&crate::ui::View::of(&m), 191, 16);
         assert!(out.contains("from before"), "{out}");
         assert_eq!(rows(&out).len(), 1, "{out}");
     }

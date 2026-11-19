@@ -160,7 +160,7 @@ impl Panel for NetBtHopsPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let v = state.net.hop_view;
         PanelChrome::new("Classic _Bluetooth Hops")
             .stale_when(Staleness::NotStreaming)
@@ -182,7 +182,7 @@ impl Panel for NetBtHopsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -730,7 +730,7 @@ mod tests {
         m.net.bt_view.selected = Some(0xbbbbbb);
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(90, 16)).unwrap();
-        t.draw(|f| NetBtHopsPanel.render(f, f.area(), &m, &theme, false))
+        t.draw(|f| NetBtHopsPanel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false))
             .unwrap();
         let buf = t.backend().buffer().clone();
         let row_text = |y: u16| (0..90).map(|x| buf[(x, y)].symbol()).collect::<String>();
@@ -769,7 +769,7 @@ mod tests {
         m.net.bt_view.selected = Some(0xbbbbbb);
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(90, 20)).unwrap();
-        t.draw(|f| NetBtHopsPanel.render(f, f.area(), &m, &theme, false))
+        t.draw(|f| NetBtHopsPanel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false))
             .unwrap();
         let buf = t.backend().buffer().clone();
         // Column of channel 10: the scale, then the channels spread over

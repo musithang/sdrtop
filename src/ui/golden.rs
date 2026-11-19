@@ -122,14 +122,21 @@ mod tests {
             let section = engine.scope().map(|s| s.id.clone()).unwrap_or_default();
             for (state_name, state) in states() {
                 let mut m = state;
-                // What the app does before every frame: the view on screen,
-                // and the mode it asks the engine for.
+                // What the app does before every frame: the view on screen in
+                // the screen's own state, and the mode it asks the engine for.
+                let ui = crate::ui::UiState {
+                    section: section.clone(),
+                    active_preset: preset.clone(),
+                    preset_names: engine.preset_names(),
+                    ..crate::ui::UiState::default()
+                };
                 m.show_view(&section, preset);
-                m.ui.preset_names = engine.preset_names();
                 for (w, h) in SIZES {
                     let backend = ratatui::backend::TestBackend::new(w, h);
                     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-                    terminal.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+                    terminal
+                        .draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+                        .unwrap();
                     write(
                         &layouts,
                         &format!("{preset}__{state_name}__{w}x{h}.txt"),
@@ -147,9 +154,14 @@ mod tests {
                     terminal
                         .draw(|f| {
                             let area = f.area();
-                            engine
-                                .registry()
-                                .render_panel(name, f, area, &m, &theme, false);
+                            engine.registry().render_panel(
+                                name,
+                                f,
+                                area,
+                                &crate::ui::View::of(&m),
+                                &theme,
+                                false,
+                            );
                         })
                         .unwrap();
                     write(

@@ -22,7 +22,7 @@ use crate::hardware::Boost;
 #[cfg(test)]
 use crate::hardware::GainModel;
 use crate::hardware::{StageReading, StageSpec};
-use crate::state::RailMode;
+use crate::ui::RailMode;
 
 use super::super::{metrics, InputCtx};
 

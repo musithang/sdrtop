@@ -6,7 +6,8 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{global, metrics, InputCtx, KeyAction};
-use crate::state::{InputMode, SdrMetrics};
+use crate::state::SdrMetrics;
+use crate::ui::InputMode;
 
 /// The Capability panel's one action: `K` times the radio's tuning call across
 /// the band (`signal::retune::measure_calls`).
@@ -47,15 +48,23 @@ pub(super) fn net_capability(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
         m.net.retune = Some(crate::state::RetuneRun::Measuring);
         m.push_log("Retune timing: ten calls across the band".to_string());
     }
-    let state = std::sync::Arc::clone(ctx.state);
+    // The engine's state alone: the thread outlives the key, and the
+    // screen's state stays on the terminal's thread.
+    let state = std::sync::Arc::clone(&ctx.state.m);
     std::thread::spawn(move || {
         let result = crate::signal::retune::measure_calls(
             device.as_ref(),
             &crate::signal::retune::BAND_HOPS_HZ,
-            |hz| metrics(&state).radio.frequency = hz,
+            |hz| {
+                state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .radio
+                    .frequency = hz
+            },
         );
         let back = device.set_frequency(home);
-        let mut m = metrics(&state);
+        let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
         if back.is_ok() {
             m.radio.frequency = home;
         }
@@ -384,8 +393,8 @@ pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 /// place of the list and closes it.
 pub(super) fn net_wifi_frames(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let card = crate::ui::panels::net::wifi::card::on_screen(&m);
-    let step = crate::ui::panels::net::wifi::frames::selection(&m).map(|(c, at)| {
+    let card = crate::ui::panels::net::wifi::card::on_screen(&m.view());
+    let step = crate::ui::panels::net::wifi::frames::selection(&m.view()).map(|(c, at)| {
         let to = match key.code {
             KeyCode::Up => at.saturating_sub(1),
             _ => (at + 1).min(c.rows.len().saturating_sub(1)),
@@ -714,7 +723,7 @@ pub(super) fn carry_census_selection(m: &mut SdrMetrics) {
 
 /// Start the reference-accuracy entry for the selected census device, or say
 /// why not: nothing selected, or no offset measured to reference against.
-fn trust_selected(m: &mut SdrMetrics) {
+fn trust_selected(m: &mut crate::ui::screen::Locked<'_>) {
     let device = m
         .net
         .census
@@ -785,7 +794,7 @@ mod tests {
 
     /// Presses on the Wi-Fi survey's focus, in order, on `m`.
     fn survey_keys(m: SdrMetrics, keys: &[KeyCode]) -> SdrMetrics {
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -871,7 +880,7 @@ mod tests {
         m.net.census.devices = vec![device(2, 5), device(1, 50), device(3, 500)];
         m.net.census.sort = crate::signal::net::census::column("PKTS");
         m.net.census.descending = true;
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -921,7 +930,7 @@ mod tests {
         };
         m.net.census.devices = vec![trusted, device(2, 5)];
         m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 1]);
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -1015,14 +1024,15 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.census.devices = vec![device(1, 50)];
         m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 1]);
-        trust_selected(&mut m);
-        assert!(m.ui.input_mode == InputMode::Normal);
+        let state = crate::ui::Screen::of(m);
+        trust_selected(&mut metrics(&state));
+        assert!(metrics(&state).ui.input_mode == InputMode::Normal);
         let said = |m: &SdrMetrics, text: &str| m.log.iter().any(|l| l.text.contains(text));
-        assert!(said(&m, "nothing to reference against"));
+        assert!(said(&metrics(&state), "nothing to reference against"));
 
-        m.net.census.selection.selected = None;
-        trust_selected(&mut m);
-        assert!(said(&m, "select a device"));
+        metrics(&state).net.census.selection.selected = None;
+        trust_selected(&mut metrics(&state));
+        assert!(said(&metrics(&state), "select a device"));
     }
 
     /// **The arrows walk the packets in the order the list draws them**,
@@ -1036,7 +1046,7 @@ mod tests {
                 ..sample_packet()
             });
         }
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -1053,7 +1063,7 @@ mod tests {
         let mut press = |code| {
             net_ble_packets(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
         };
-        let selected = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.ble_view.selection.selected;
+        let selected = |s: &crate::ui::Screen| metrics(s).net.ble_view.selection.selected;
         press(KeyCode::Down);
         assert_eq!(selected(&state), Some(3));
         press(KeyCode::Down);
@@ -1076,7 +1086,7 @@ mod tests {
         }
         m.net.ble_heard = 3;
         m.net.ble_view.selection.selected = Some(2);
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -1143,7 +1153,7 @@ mod tests {
                 ..sample_packet()
             });
         }
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -1160,10 +1170,10 @@ mod tests {
         let mut press = |code| {
             net_ble_packets(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
         };
-        let shown = |s: &Arc<Mutex<SdrMetrics>>| -> Vec<u64> {
+        let shown = |s: &crate::ui::Screen| -> Vec<u64> {
             metrics(s).net.ble_shown().iter().map(|p| p.seq).collect()
         };
-        let kind = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.ble_view.kind;
+        let kind = |s: &crate::ui::Screen| metrics(s).net.ble_view.kind;
 
         assert_eq!(shown(&state).len(), 8);
         press(KeyCode::Char('t'));
@@ -1219,7 +1229,7 @@ mod tests {
 
     /// A state with two connections followed, newest first, and the
     /// CONNECT_IND of `aa` selected in the BLE list.
-    fn with_connections(state: &Arc<Mutex<SdrMetrics>>, selected_aa: u32) {
+    fn with_connections(state: &crate::ui::Screen, selected_aa: u32) {
         let mut m = metrics(state);
         let now = Instant::now();
         for aa in [0x1111_1111u32, 0x2222_2222] {
@@ -1354,7 +1364,7 @@ mod tests {
     /// roster shows first.
     #[test]
     fn the_hop_scatter_zooms_scrubs_and_selects() {
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture());
         {
             let mut m = metrics(&state);
             let seen = Instant::now() - Duration::from_secs(12);
@@ -1384,7 +1394,7 @@ mod tests {
         let mut press = |code| {
             net_bt_hops(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
         };
-        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.hop_view;
+        let view = |s: &crate::ui::Screen| metrics(s).net.hop_view;
 
         press(KeyCode::Char('+'));
         assert_eq!(view(&state).span_ms(), 10_000);
@@ -1417,10 +1427,10 @@ mod tests {
     fn focused_on(
         preset: &str,
         panel: &str,
-    ) -> (LayoutEngine, crate::app::FocusKeys, Arc<Mutex<SdrMetrics>>) {
+    ) -> (LayoutEngine, crate::app::FocusKeys, crate::ui::Screen) {
         let (mut engine, keys) = crate::app::App::build_ui(preset, &HashMap::new(), None, true);
         engine.focus(panel);
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture().streaming());
         metrics(&state).ui.focused_panel = Some(panel.to_string());
         (engine, keys, state)
     }
@@ -1428,7 +1438,7 @@ mod tests {
     fn key(
         engine: &mut LayoutEngine,
         keys: &crate::app::FocusKeys,
-        state: &Arc<Mutex<SdrMetrics>>,
+        state: &crate::ui::Screen,
         code: KeyCode,
     ) {
         let mut show_footer = true;
@@ -1613,7 +1623,7 @@ mod tests {
 
     /// Classic 2 with two piconets heard, the first with `n` packets kept, one
     /// a slot apart on stream 1, and the packet list focused.
-    fn piconet_view(n: u32) -> (LayoutEngine, crate::app::FocusKeys, Arc<Mutex<SdrMetrics>>) {
+    fn piconet_view(n: u32) -> (LayoutEngine, crate::app::FocusKeys, crate::ui::Screen) {
         use crate::signal::bt::piconet::{observe, observe_packet, BtPacket, PayloadVerdict};
         let (engine, keys, state) = focused_on("net_piconet", "net_bt_packets");
         {
@@ -1656,7 +1666,7 @@ mod tests {
     #[test]
     fn the_packet_list_scrolls_holds_and_returns_to_live() {
         let (mut engine, keys, state) = piconet_view(30);
-        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.packets_view;
+        let view = |s: &crate::ui::Screen| metrics(s).net.packets_view;
 
         key(&mut engine, &keys, &state, KeyCode::Up);
         assert_eq!(view(&state).first_visible, 0, "nothing above the top");
@@ -1688,7 +1698,7 @@ mod tests {
 
     /// The Frames view on channel 11 with `n` frames heard, a millisecond
     /// apart, and the list focused.
-    fn frames_view(n: u64) -> (LayoutEngine, crate::app::FocusKeys, Arc<Mutex<SdrMetrics>>) {
+    fn frames_view(n: u64) -> (LayoutEngine, crate::app::FocusKeys, crate::ui::Screen) {
         let (engine, keys, state) = focused_on("wifi_frames", "net_wifi_frames");
         {
             let mut m = metrics(&state);
@@ -1737,8 +1747,8 @@ mod tests {
                 lost: Vec::new(),
             });
         }
-        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.frames_view;
-        let stopped = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.scope.stopped;
+        let view = |s: &crate::ui::Screen| metrics(s).net.wifi.frames_view;
+        let stopped = |s: &crate::ui::Screen| metrics(s).net.wifi.scope.stopped;
 
         key(&mut engine, &keys, &state, KeyCode::Down);
         key(&mut engine, &keys, &state, KeyCode::Down);
@@ -1781,7 +1791,7 @@ mod tests {
     fn t_steps_the_trigger_and_plus_minus_the_holdoff() {
         use crate::state::{Family, Holdoff, Trigger};
         let (mut engine, keys, state) = frames_view(3);
-        let scope = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.scope.clone();
+        let scope = |s: &crate::ui::Screen| metrics(s).net.wifi.scope.clone();
         key(&mut engine, &keys, &state, KeyCode::Char('t'));
         assert_eq!(scope(&state).trigger, Trigger::Family(Family::NonHt));
         assert!(said(&metrics(&state), "trigger: non-HT"));
@@ -1805,7 +1815,7 @@ mod tests {
     #[test]
     fn enter_opens_the_frame_where_the_card_has_no_room() {
         let (mut engine, keys, state) = frames_view(5);
-        let open = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.frames_view.open;
+        let open = |s: &crate::ui::Screen| metrics(s).net.wifi.frames_view.open;
         metrics(&state).ui.screen_cols = 191;
         key(&mut engine, &keys, &state, KeyCode::Enter);
         assert!(!open(&state));
@@ -1833,7 +1843,7 @@ mod tests {
             let older: Vec<_> = p.packets.iter().skip(10).take(5).cloned().collect();
             p.lmp.extend(older);
         }
-        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.packets_view;
+        let view = |s: &crate::ui::Screen| metrics(s).net.packets_view;
         key(&mut engine, &keys, &state, KeyCode::Down);
         key(&mut engine, &keys, &state, KeyCode::Char('l'));
         assert_eq!(
@@ -1916,7 +1926,7 @@ mod tests {
     fn the_piconet_view_steps_the_radio_as_the_classic_view_does() {
         let step = |preset: &str| {
             let (mut engine, keys) = crate::app::App::build_ui(preset, &HashMap::new(), None, true);
-            let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+            let state = crate::ui::Screen::of(SdrMetrics::fixture().streaming());
             {
                 let mut m = metrics(&state);
                 m.ui.active_preset = preset.to_string();
@@ -2096,7 +2106,7 @@ mod tests {
     fn a_device_selected_in_the_census_arrives_in_the_list_filtered_to_it() {
         let (mut engine, _) = crate::app::App::build_ui("net_census", &HashMap::new(), None, true);
         let device = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture());
         metrics(&state).net.census.selection.selected = Some(device);
         let switch = |engine: &mut LayoutEngine, to: &str| {
             super::global::presets::try_set_preset(engine, &state, to);
@@ -2132,7 +2142,7 @@ mod tests {
     fn a_shared_focus_letter_focuses_the_panel_on_screen() {
         let (mut engine, focus_keys) =
             crate::app::App::build_ui("net_ble", &HashMap::new(), None, true);
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture());
         let mut show_footer = true;
         let mut focus = |engine: &mut LayoutEngine, preset: &str| {
             engine.set_preset(preset);
@@ -2194,7 +2204,7 @@ mod tests {
         }
     }
 
-    fn press_k(state: &Arc<Mutex<SdrMetrics>>, core: Option<&crate::engine::Engine>) {
+    fn press_k(state: &crate::ui::Screen, core: Option<&crate::engine::Engine>) {
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -2214,7 +2224,7 @@ mod tests {
         );
     }
 
-    fn log(state: &Arc<Mutex<SdrMetrics>>) -> String {
+    fn log(state: &crate::ui::Screen) -> String {
         metrics(state)
             .log
             .iter()
@@ -2230,12 +2240,12 @@ mod tests {
     fn k_times_ten_calls_and_puts_the_radio_back() {
         let mut m = SdrMetrics::fixture();
         m.radio.frequency = 2_426_000_000;
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let tuner = Arc::new(Tuner {
             caps: crate::hardware::native::hackrf::caps(),
             calls: Mutex::new(Vec::new()),
         });
-        let core = crate::engine::Engine::new(Arc::clone(&state), tuner.clone());
+        let core = crate::engine::Engine::new(Arc::clone(&state.m), tuner.clone());
         press_k(&state, Some(&core));
 
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -2271,7 +2281,7 @@ mod tests {
     fn k_refuses_to_fight_the_survey_and_needs_a_radio() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.mode = crate::state::NetMode::Survey;
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         press_k(&state, None);
         assert!(log(&state).contains("lock first"), "{}", log(&state));
         assert!(metrics(&state).net.retune.is_none());
@@ -2294,7 +2304,7 @@ mod tests {
             cells[i].duty = duty;
         }
         m.net.band.cells = cells;
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -2311,7 +2321,7 @@ mod tests {
         let mut press = |code| {
             net_occupancy(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
         };
-        let at = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.band_cursor.selected;
+        let at = |s: &crate::ui::Screen| metrics(s).net.band_cursor.selected;
 
         press(KeyCode::Right);
         assert_eq!(at(&state), Some(0), "the first press starts at 2400 MHz");
@@ -2333,7 +2343,7 @@ mod tests {
             m.net.band.history.push_back(vec![v; 4]);
             m.net.band.columns_taken += 1;
         }
-        let state = Arc::new(Mutex::new(m));
+        let state = crate::ui::Screen::of(m);
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),
@@ -2350,7 +2360,7 @@ mod tests {
         let mut press = |code| {
             net_coexist(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
         };
-        let back = |s: &Arc<Mutex<SdrMetrics>>| {
+        let back = |s: &crate::ui::Screen| {
             let m = metrics(s);
             m.net.band_scrub.and_then(|id| m.net.band.back_of(id))
         };
@@ -2389,12 +2399,12 @@ mod tests {
     /// or no radio, it says why and asks nothing.
     #[test]
     fn l_asks_for_a_lock_where_the_cursor_stands() {
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture().streaming());
         let concrete = Arc::new(Tuner {
             caps: crate::hardware::native::hackrf::caps(),
             calls: Mutex::new(Vec::new()),
         });
-        let tuner = crate::engine::Engine::new(Arc::clone(&state), concrete.clone());
+        let tuner = crate::engine::Engine::new(Arc::clone(&state.m), concrete.clone());
         let mut engine = LayoutEngine::new(
             crate::config::LayoutConfig::default_config(),
             PanelRegistry::new(),

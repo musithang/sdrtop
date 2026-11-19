@@ -238,7 +238,7 @@ impl Panel for NetWifiSurveyPanel {
         (60, 12)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let survey = &state.net.wifi.survey;
         let visits: usize = survey.visits.iter().map(Vec::len).sum();
         let visited = survey.visits.iter().filter(|v| !v.is_empty()).count();
@@ -277,7 +277,7 @@ impl Panel for NetWifiSurveyPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -345,7 +345,7 @@ mod tests {
     fn buffer(m: &SdrMetrics, w: u16, h: u16) -> Buffer {
         let theme = crate::Theme::sdr();
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| NetWifiSurveyPanel.render(f, f.area(), m, &theme, false))
+        t.draw(|f| NetWifiSurveyPanel.render(f, f.area(), &crate::ui::View::of(m), &theme, false))
             .unwrap();
         t.backend().buffer().clone()
     }

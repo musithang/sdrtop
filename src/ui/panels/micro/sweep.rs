@@ -16,7 +16,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
 use crate::ui::widgets::band_plan::band_at;
 use crate::ui::widgets::micro_common::bar_spans;
@@ -37,7 +36,7 @@ impl Panel for MicroSweepPanel {
         (40, 8)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::untitled()
     }
 
@@ -45,7 +44,7 @@ impl Panel for MicroSweepPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -178,6 +177,7 @@ impl Panel for MicroSweepPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn power_sweep_peaks_use_dbm() {

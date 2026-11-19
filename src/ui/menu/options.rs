@@ -13,8 +13,8 @@ use ratatui::{
 };
 
 use crate::{
-    state::{DeviceOptionUpdate, InputMode, SdrMetrics, StationField},
-    ui::chrome,
+    state::{SdrMetrics, StationField},
+    ui::{chrome, DeviceOptionUpdate, InputMode},
 };
 
 /// The pane as lines, for an inner width of `iw` and a height of `height`:
@@ -22,7 +22,7 @@ use crate::{
 /// in view. `selected` counts the radio's options first, then
 /// [`StationField::ALL`].
 fn lines(
-    m: &SdrMetrics,
+    m: &crate::ui::View<'_>,
     selected: usize,
     iw: usize,
     height: usize,
@@ -176,7 +176,7 @@ fn locator_line(m: &SdrMetrics, iw: usize, theme: &crate::Theme) -> Line<'static
 /// Typing a `[station]` setting: the field as typed, what was wrong with
 /// the last try, and what it holds now.
 fn station_editor_lines(
-    m: &SdrMetrics,
+    m: &crate::ui::View<'_>,
     field: StationField,
     error: Option<&str>,
     iw: usize,
@@ -224,7 +224,7 @@ fn station_editor_lines(
 }
 
 fn editor_lines(
-    m: &SdrMetrics,
+    m: &crate::ui::View<'_>,
     id: &str,
     error: Option<&str>,
     iw: usize,
@@ -343,7 +343,13 @@ fn text_width(text: &str) -> usize {
     Line::from(text).width()
 }
 
-pub fn render(f: &mut Frame, area: Rect, m: &SdrMetrics, selected: usize, theme: &crate::Theme) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    m: &crate::ui::View<'_>,
+    selected: usize,
+    theme: &crate::Theme,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -363,8 +369,8 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    fn text(m: &SdrMetrics, selected: usize, iw: usize, height: usize) -> String {
-        lines(m, selected, iw, height, &crate::Theme::sdr())
+    fn text(v: &crate::ui::View<'_>, selected: usize, iw: usize, height: usize) -> String {
+        lines(v, selected, iw, height, &crate::Theme::sdr())
             .iter()
             .map(|l| l.to_string())
             .collect::<Vec<_>>()
@@ -373,7 +379,7 @@ mod tests {
 
     #[test]
     fn a_radio_with_nothing_to_set_says_so_and_the_station_follows() {
-        let t = text(&SdrMetrics::fixture(), 0, 60, 20);
+        let t = text(&crate::ui::View::of(&SdrMetrics::fixture()), 0, 60, 20);
         assert!(t.contains("nothing to set"), "{t}");
         assert!(t.contains("Station"), "{t}");
         assert!(t.contains("Latitude") && t.contains("not set"), "{t}");
@@ -386,7 +392,7 @@ mod tests {
         m.home.latitude = Some(47.497);
         m.home.longitude = Some(19.04);
         m.home.callsign = Some("HA5ZZT".into());
-        let t = text(&m, 2, 60, 20);
+        let t = text(&crate::ui::View::of(&m), 2, 60, 20);
         assert!(t.contains("47.497") && t.contains("19.040"), "{t}");
         assert!(t.contains("JN97ml"), "{t}");
         assert!(
@@ -401,7 +407,7 @@ mod tests {
         m.home.latitude = Some(-33.868);
         m.home.longitude = Some(151.209);
         for iw in [1, 4, 7, 12, 28, 40, 60, 100] {
-            for line in lines(&m, 1, iw, 20, &crate::Theme::sdr()) {
+            for line in lines(&crate::ui::View::of(&m), 1, iw, 20, &crate::Theme::sdr()) {
                 assert!(line.width() <= iw, "{iw}: {line:?}");
             }
         }
@@ -410,18 +416,25 @@ mod tests {
     #[test]
     fn the_station_editor_says_what_went_wrong_and_what_is_kept() {
         let mut m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         m.home.latitude = Some(47.497);
-        m.ui.input_mode = InputMode::StationInput {
+        ui.input_mode = InputMode::StationInput {
             field: StationField::Latitude,
             error: Some("Latitude runs -90 to 90".into()),
         };
-        m.ui.input_buf = "95".into();
-        let t = text(&m, 0, 60, 20);
+        ui.input_buf = "95".into();
+        let t = text(&crate::ui::View::new(&m, &ui), 0, 60, 20);
         assert!(t.contains("Latitude: 95\u{258c}"), "{t}");
         assert!(t.contains("runs -90 to 90"), "{t}");
         assert!(t.contains("Now: 47.497"), "{t}");
         for iw in [1, 7, 20] {
-            for line in lines(&m, 0, iw, 20, &crate::Theme::sdr()) {
+            for line in lines(
+                &crate::ui::View::new(&m, &ui),
+                0,
+                iw,
+                20,
+                &crate::Theme::sdr(),
+            ) {
                 assert!(line.width() <= iw, "{line:?}");
             }
         }
@@ -437,7 +450,7 @@ mod tests {
             selected_choice: "Wide".into(),
             integer_range: None,
         });
-        let text = lines(&m, 0, 60, 20, &crate::Theme::sdr())
+        let text = lines(&crate::ui::View::of(&m), 0, 60, 20, &crate::Theme::sdr())
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -459,7 +472,7 @@ mod tests {
             });
         }
 
-        let text = lines(&m, 5, 60, 5, &crate::Theme::sdr())
+        let text = lines(&crate::ui::View::of(&m), 5, 60, 5, &crate::Theme::sdr())
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -479,7 +492,7 @@ mod tests {
             integer_range: None,
         });
 
-        let text = lines(&m, 0, 60, 1, &crate::Theme::sdr())
+        let text = lines(&crate::ui::View::of(&m), 0, 60, 1, &crate::Theme::sdr())
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -500,7 +513,7 @@ mod tests {
         });
 
         for width in [1, 4, 7, 8, 12, 20, 28] {
-            for line in lines(&m, 0, width, 6, &crate::Theme::sdr()) {
+            for line in lines(&crate::ui::View::of(&m), 0, width, 6, &crate::Theme::sdr()) {
                 assert!(
                     line.width() <= width,
                     "a {}-wide row does not fit {width} columns: {line:?}",
@@ -513,6 +526,7 @@ mod tests {
     #[test]
     fn pending_change_keeps_the_accepted_choice_visible() {
         let mut m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         Arc::make_mut(&mut m.device_options).push(crate::hardware::DeviceOption {
             id: "bandwidth".into(),
             label: "Bandwidth".into(),
@@ -520,7 +534,7 @@ mod tests {
             selected_choice: "Narrow".into(),
             integer_range: None,
         });
-        m.ui.device_option_update = DeviceOptionUpdate::Pending {
+        ui.device_option_update = DeviceOptionUpdate::Pending {
             request: crate::event::DeviceOptionRequest {
                 id: "bandwidth".into(),
                 label: "Bandwidth".into(),
@@ -529,17 +543,24 @@ mod tests {
             quit_requested: false,
         };
 
-        let text = lines(&m, 0, 80, 1, &crate::Theme::sdr())
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text = lines(
+            &crate::ui::View::new(&m, &ui),
+            0,
+            80,
+            1,
+            &crate::Theme::sdr(),
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
         assert!(text.contains("Narrow -> Wide..."), "{text}");
     }
 
     #[test]
     fn failed_change_keeps_the_accepted_choice_visible() {
         let mut m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         Arc::make_mut(&mut m.device_options).push(crate::hardware::DeviceOption {
             id: "bandwidth".into(),
             label: "Bandwidth".into(),
@@ -547,15 +568,21 @@ mod tests {
             selected_choice: "Narrow".into(),
             integer_range: None,
         });
-        m.ui.device_option_update = DeviceOptionUpdate::Failed {
+        ui.device_option_update = DeviceOptionUpdate::Failed {
             id: "bandwidth".into(),
         };
 
-        let text = lines(&m, 0, 80, 1, &crate::Theme::sdr())
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text = lines(
+            &crate::ui::View::new(&m, &ui),
+            0,
+            80,
+            1,
+            &crate::Theme::sdr(),
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
         assert!(text.contains("Narrow (failed)"), "{text}");
         assert!(!text.contains("Wide"), "{text}");
     }
@@ -563,6 +590,7 @@ mod tests {
     #[test]
     fn numeric_editor_shows_validation_errors_and_fits_narrow_panes() {
         let mut m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         m.device_options = Arc::new(vec![crate::hardware::DeviceOption {
             id: "gain".into(),
             label: "Gain".into(),
@@ -570,34 +598,52 @@ mod tests {
             selected_choice: "0".into(),
             integer_range: Some(-100..=100),
         }]);
-        m.ui.input_mode = InputMode::DeviceOptionInput {
+        ui.input_mode = InputMode::DeviceOptionInput {
             id: "gain".into(),
             error: Some("Enter an advertised integer from -100 to 100".into()),
         };
-        m.ui.input_buf = "101".into();
+        ui.input_buf = "101".into();
         for width in [0, 1, 4, 7, 12, 28, 60] {
-            for line in lines(&m, 0, width, 20, &crate::Theme::sdr()) {
+            for line in lines(
+                &crate::ui::View::new(&m, &ui),
+                0,
+                width,
+                20,
+                &crate::Theme::sdr(),
+            ) {
                 assert!(line.width() <= width, "{line:?}");
             }
         }
-        let text = lines(&m, 0, 60, 20, &crate::Theme::sdr())
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text = lines(
+            &crate::ui::View::new(&m, &ui),
+            0,
+            60,
+            20,
+            &crate::Theme::sdr(),
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
         assert!(text.contains("Gain: 0"), "{text}");
         assert!(text.contains("Value: 101\u{258c}"), "{text}");
         assert!(text.contains("Enter an advertised integer"), "{text}");
 
         m.device_options = Arc::new(Vec::new());
-        m.ui.input_mode = InputMode::DeviceOptionInput {
+        ui.input_mode = InputMode::DeviceOptionInput {
             id: "gain".into(),
             error: None,
         };
-        let text = lines(&m, 0, 60, 20, &crate::Theme::sdr())
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<String>();
+        let text = lines(
+            &crate::ui::View::new(&m, &ui),
+            0,
+            60,
+            20,
+            &crate::Theme::sdr(),
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<String>();
         assert!(
             text.contains("Option is no longer available. Esc cancels."),
             "{text}"
@@ -607,6 +653,7 @@ mod tests {
     #[test]
     fn short_numeric_panes_prioritize_input_tail_then_error() {
         let mut m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         m.device_options = Arc::new(vec![crate::hardware::DeviceOption {
             id: "gain".into(),
             label: "Gain".into(),
@@ -614,9 +661,9 @@ mod tests {
             selected_choice: "0".into(),
             integer_range: Some(-100..=100),
         }]);
-        m.ui.input_buf = "12345678901234567890".into();
+        ui.input_buf = "12345678901234567890".into();
         for error in [None, Some("Out of range: -100 to 100".to_string())] {
-            m.ui.input_mode = InputMode::DeviceOptionInput {
+            ui.input_mode = InputMode::DeviceOptionInput {
                 id: "gain".into(),
                 error: error.clone(),
             };
@@ -626,7 +673,15 @@ mod tests {
                         ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
                             .unwrap();
                     terminal
-                        .draw(|f| render(f, f.area(), &m, 0, &crate::Theme::sdr()))
+                        .draw(|f| {
+                            render(
+                                f,
+                                f.area(),
+                                &crate::ui::View::new(&m, &ui),
+                                0,
+                                &crate::Theme::sdr(),
+                            )
+                        })
                         .unwrap();
                     let buffer = terminal.backend().buffer();
                     let rows: Vec<String> = (0..height)
@@ -662,9 +717,16 @@ mod tests {
                             "{rows:?}"
                         );
                     }
-                    assert_eq!(m.ui.input_buf, "12345678901234567890");
+                    assert_eq!(ui.input_buf, "12345678901234567890");
                     assert!(
-                        lines(&m, 0, width as usize, height as usize, &crate::Theme::sdr()).len()
+                        lines(
+                            &crate::ui::View::new(&m, &ui),
+                            0,
+                            width as usize,
+                            height as usize,
+                            &crate::Theme::sdr()
+                        )
+                        .len()
                             <= height as usize
                     );
                 }

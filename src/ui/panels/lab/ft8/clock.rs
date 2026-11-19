@@ -71,7 +71,7 @@ impl Panel for Ft8ClockPanel {
         (50, 8)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Clock as heard").stale_when(Staleness::NotStreaming);
         chrome.suffix =
             Some("  the hour · this computer's clock and the receive path together".to_string());
@@ -82,7 +82,7 @@ impl Panel for Ft8ClockPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

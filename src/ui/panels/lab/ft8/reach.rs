@@ -80,7 +80,7 @@ impl Panel for Ft8ReachPanel {
         (LEFT + RIGHT + 40, MIN_PLOT + AXIS + FARTHEST + 2)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Reach").stale_when(Staleness::NotStreaming);
         if let Some((pts, unplaced)) = placed(state) {
             chrome.suffix = Some(format!(
@@ -95,7 +95,7 @@ impl Panel for Ft8ReachPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

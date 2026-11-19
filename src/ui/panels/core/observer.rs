@@ -9,7 +9,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{FrameTone, Panel, PanelChrome};
 
 pub struct ObserverPanel;
@@ -22,7 +21,7 @@ impl Panel for ObserverPanel {
         (40, 10)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         // The border is the mode indicator: the radio belongs to another process,
         // and the whole panel exists to say so.
         PanelChrome::new("Observer Mode").tone(FrameTone::Observer)
@@ -32,7 +31,7 @@ impl Panel for ObserverPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -139,6 +138,7 @@ impl Panel for ObserverPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     fn held(cpu: Option<f32>, ram: Option<u64>) -> SdrMetrics {
         let mut m = SdrMetrics::fixture();

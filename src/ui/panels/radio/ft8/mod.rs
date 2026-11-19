@@ -319,11 +319,46 @@ fn render_the_view_to_html() {
     let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(191, 41)).unwrap();
     t.draw(|f| {
         let at = |x, y, w, h| Rect::new(x, y, w, h);
-        registry.render_panel("ft8_cycles", f, at(0, 0, 191, 1), &m, &theme, false);
-        registry.render_panel("ft8_map", f, at(0, 1, 112, 40), &m, &theme, false);
-        registry.render_panel("ft8_band", f, at(112, 1, 79, 12), &m, &theme, false);
-        registry.render_panel("ft8_decodes", f, at(112, 13, 79, 19), &m, &theme, false);
-        registry.render_panel("ft8_station", f, at(112, 32, 79, 9), &m, &theme, false);
+        registry.render_panel(
+            "ft8_cycles",
+            f,
+            at(0, 0, 191, 1),
+            &crate::ui::View::of(&m),
+            &theme,
+            false,
+        );
+        registry.render_panel(
+            "ft8_map",
+            f,
+            at(0, 1, 112, 40),
+            &crate::ui::View::of(&m),
+            &theme,
+            false,
+        );
+        registry.render_panel(
+            "ft8_band",
+            f,
+            at(112, 1, 79, 12),
+            &crate::ui::View::of(&m),
+            &theme,
+            false,
+        );
+        registry.render_panel(
+            "ft8_decodes",
+            f,
+            at(112, 13, 79, 19),
+            &crate::ui::View::of(&m),
+            &theme,
+            false,
+        );
+        registry.render_panel(
+            "ft8_station",
+            f,
+            at(112, 32, 79, 9),
+            &crate::ui::View::of(&m),
+            &theme,
+            false,
+        );
     })
     .unwrap();
     let buf = t.backend().buffer().clone();

@@ -127,7 +127,7 @@ pub fn bonded_frame(
     panel: &dyn crate::ui::panel::Panel,
     f: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
-    state: &crate::state::SdrMetrics,
+    state: &crate::ui::View<'_>,
     theme: &crate::Theme,
     focused: bool,
     borders: ratatui::widgets::Borders,

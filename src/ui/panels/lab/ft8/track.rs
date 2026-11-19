@@ -18,7 +18,6 @@ use ratatui::{layout::Rect, style::Style, Frame};
 use super::{say, shown_or_say, NARROW_BODY};
 use crate::signal::ft8::modulate::{SYMBOLS, SYMBOL_SECONDS, TONE_SPACING};
 use crate::state::ft8::DecodeEntry;
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::panels::radio::ft8::{put, signed};
 
@@ -54,7 +53,7 @@ impl Panel for Ft8TrackPanel {
         (body < NARROW_BODY).then_some(0)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Frequency track").stale_when(Staleness::NotStreaming)
     }
 
@@ -62,7 +61,7 @@ impl Panel for Ft8TrackPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -225,6 +224,7 @@ fn draw(buf: &mut ratatui::buffer::Buffer, area: Rect, d: &DecodeEntry, t: &crat
 mod tests {
     use super::*;
     use crate::state::fixture::draw as render;
+    use crate::state::SdrMetrics;
     use std::sync::Arc;
 
     #[test]

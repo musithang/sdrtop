@@ -261,7 +261,7 @@ impl Panel for NetWifiSharePanel {
         })
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Share of the time")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.into())
@@ -272,7 +272,7 @@ impl Panel for NetWifiSharePanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -296,8 +296,7 @@ mod tests {
     /// The Airtime view locked on channel 11 at 20 Msps, streaming.
     fn on_eleven() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_airtime".to_string();
+        m.show_view("wifi_channel", "wifi_airtime");
         m.radio.frequency = 2_462_000_000;
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;

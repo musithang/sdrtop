@@ -47,7 +47,7 @@ pub(super) fn leave_focus(ctx: &mut InputCtx<'_>) {
 /// that takes the panel off screen, the sweep's jump to the spectrum.
 pub(in crate::app::input) fn end_focus(
     engine: &mut crate::ui::LayoutEngine,
-    m: &mut crate::state::SdrMetrics,
+    m: &mut crate::ui::screen::Locked<'_>,
 ) {
     let Some(panel) = engine.focused_panel_name().map(str::to_string) else {
         return;

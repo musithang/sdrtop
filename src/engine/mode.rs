@@ -100,63 +100,6 @@ impl Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LayoutConfig;
-    use crate::signal::net::lock::{
-        ADVERTISING_VIEWS, CLASSIC_VIEWS, CODED_VIEWS, SURVEY_VIEW, WIFI_VISIT_VIEWS,
-    };
-    use crate::state::UiState;
-
-    /// **Moved, not rewritten.** Every built-in layout, with the section it
-    /// declares, asks the engine for exactly what the old gates read off the
-    /// screen asked for. If a gate and its mode ever disagree, a view stops
-    /// being fed or starts costing a core, and nothing on screen says which.
-    #[test]
-    fn for_view_agrees_with_the_old_gates_on_every_built_in_preset() {
-        let layouts = LayoutConfig::default_config();
-        assert!(
-            layouts.presets.len() > 20,
-            "the built-in layouts were not found"
-        );
-        for (preset, cfg) in &layouts.presets {
-            let section = cfg.section.clone().unwrap_or_default();
-            let ui = UiState {
-                section: section.clone(),
-                active_preset: preset.clone(),
-                ..UiState::default()
-            };
-            let mode = Mode::for_view(&section, preset);
-            let at = format!("{preset} in {section}");
-            assert_eq!(mode.section, section, "{at}");
-            assert_eq!(mode.view, *preset, "{at}");
-            assert_eq!(mode.feeds.net, ui.is_net_section(), "{at}: net feed");
-            assert_eq!(mode.feeds.pager, ui.is_pager_section(), "{at}: pager feed");
-            assert_eq!(mode.feeds.ft8, ui.is_ft8_section(), "{at}: ft8 feed");
-            assert_eq!(mode.ft8_lab, ui.is_ft8_lab(), "{at}: ft8 lab");
-            let p = preset.as_str();
-            assert_eq!(
-                mode.net.classic,
-                CLASSIC_VIEWS.contains(&p),
-                "{at}: classic"
-            );
-            assert_eq!(mode.net.survey, p == SURVEY_VIEW, "{at}: survey");
-            assert_eq!(mode.net.coded, CODED_VIEWS.contains(&p), "{at}: coded");
-            assert_eq!(
-                mode.net.wifi,
-                crate::signal::net::is_wifi(&section),
-                "{at}: wifi"
-            );
-            assert_eq!(
-                mode.net.wifi_visits,
-                WIFI_VISIT_VIEWS.contains(&p),
-                "{at}: wifi visits"
-            );
-            assert_eq!(
-                mode.net.advertising,
-                ADVERTISING_VIEWS.contains(&p),
-                "{at}: advertising"
-            );
-        }
-    }
 
     /// Nothing asked for, nothing fed.
     #[test]

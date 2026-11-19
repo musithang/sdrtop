@@ -28,7 +28,7 @@ mod side;
 
 use ratatui::{layout::Rect, style::Style, text::Span, widgets::Paragraph, Frame};
 
-use crate::state::{IqState, SdrMetrics};
+use crate::state::IqState;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct IqConstellationPanel;
@@ -47,7 +47,7 @@ impl Panel for IqConstellationPanel {
         (18, 10)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("IQ Constellation").stale_when(Staleness::NotStreaming)
     }
 
@@ -55,7 +55,7 @@ impl Panel for IqConstellationPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -164,6 +164,7 @@ mod tests_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn panel_name_and_min_size() {

@@ -800,7 +800,7 @@ impl Panel for NetBtBenchPanel {
         &[("← →", "the previous or next piconet")]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let chrome = PanelChrome::new("Bench")
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
@@ -818,7 +818,7 @@ impl Panel for NetBtBenchPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1366,12 +1366,16 @@ mod tests {
         let screen = |preset: &str| {
             let (engine, _) =
                 crate::app::App::build_ui(preset, &std::collections::HashMap::new(), None, true);
-            let mut m = heard();
-            m.ui.active_preset = preset.to_string();
+            let m = heard();
+            let ui = crate::ui::UiState {
+                active_preset: preset.to_string(),
+                ..crate::ui::UiState::default()
+            };
             let theme = crate::Theme::sdr();
             let mut t =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(191, 41)).unwrap();
-            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            t.draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+                .unwrap();
             let buf = t.backend().buffer().clone();
             (0..41)
                 .map(|y| (0..191).map(|x| buf[(x, y)].symbol()).collect::<String>())
@@ -1497,11 +1501,15 @@ mod tests {
     fn at_191_by_41_net_7_shows_every_section() {
         let (engine, _) =
             crate::app::App::build_ui("net_bench", &std::collections::HashMap::new(), None, true);
-        let mut m = both_read();
-        m.ui.active_preset = "net_bench".to_string();
+        let m = both_read();
+        let ui = crate::ui::UiState {
+            active_preset: "net_bench".to_string(),
+            ..crate::ui::UiState::default()
+        };
         let theme = crate::Theme::sdr();
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(191, 41)).unwrap();
-        t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+        t.draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+            .unwrap();
         let buf = t.backend().buffer().clone();
         let text: String = (0..41)
             .map(|y| (0..191).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")

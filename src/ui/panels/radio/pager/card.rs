@@ -27,7 +27,6 @@ use ratatui::{
 
 use super::{link_line, mhz};
 use crate::signal::pocsag::page::{Content, Decided, End};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 
 pub struct PagerCardPanel;
@@ -55,7 +54,7 @@ impl Panel for PagerCardPanel {
         Some(ROWS.min(column.saturating_sub(6)))
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("This page")
             .stale_when(Staleness::Never)
             .shows_offsets()
@@ -66,7 +65,7 @@ impl Panel for PagerCardPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

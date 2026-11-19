@@ -121,7 +121,6 @@ pub(super) mod sample {
 
     pub fn with_pages(pages: &[(u32, &str)]) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::pocsag::SECTION.to_string();
         for (ric, text) in pages {
             m.pager.push(
                 alpha(*ric, text),

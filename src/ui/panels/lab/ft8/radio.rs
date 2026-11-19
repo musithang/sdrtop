@@ -77,7 +77,7 @@ impl Panel for Ft8RadioPanel {
         Some(10)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("The radio").stale_when(Staleness::FftAge)
     }
 
@@ -85,7 +85,7 @@ impl Panel for Ft8RadioPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

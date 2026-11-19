@@ -178,15 +178,15 @@ pub struct Path {
     pub rows: Vec<usize>,
 }
 
-impl From<crate::state::MenuPath> for Path {
-    fn from(p: crate::state::MenuPath) -> Self {
+impl From<crate::ui::MenuPath> for Path {
+    fn from(p: crate::ui::MenuPath) -> Self {
         Path { rows: p.rows() }
     }
 }
 
-impl From<&Path> for crate::state::MenuPath {
+impl From<&Path> for crate::ui::MenuPath {
     fn from(p: &Path) -> Self {
-        crate::state::MenuPath::from_rows(&p.rows)
+        crate::ui::MenuPath::from_rows(&p.rows)
     }
 }
 

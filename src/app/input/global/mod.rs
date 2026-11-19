@@ -143,12 +143,12 @@ mod tests {
     use crate::ui;
     use crate::ui::PanelRegistry;
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     /// A context with no device: the observer-mode shape, and the one that makes
     /// the hardware keys' guards visible.
     struct Harness {
-        state: Arc<Mutex<SdrMetrics>>,
+        state: crate::ui::Screen,
         engine: ui::LayoutEngine,
         show_footer: bool,
         focus_keys: crate::app::FocusKeys,
@@ -161,7 +161,7 @@ mod tests {
                 ui::LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
             engine.set_preset("command_rail");
             Self {
-                state: Arc::new(Mutex::new(SdrMetrics::fixture())),
+                state: crate::ui::Screen::of(SdrMetrics::fixture()),
                 engine,
                 show_footer: true,
                 focus_keys: HashMap::new(),
@@ -174,7 +174,7 @@ mod tests {
         fn on_r2(r2: &crate::hardware::native::airspy::bench::BenchR2, gains: [f64; 3]) -> Self {
             let mut h = Self::new();
             h.core = Some(crate::engine::Engine::new(
-                Arc::clone(&h.state),
+                Arc::clone(&h.state.m),
                 Arc::clone(&r2.device) as Arc<dyn crate::hardware::SdrDevice>,
             ));
             let mut m = metrics(&h.state);

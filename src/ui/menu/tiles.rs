@@ -22,7 +22,7 @@ use ratatui::{
 };
 
 use super::ink;
-use crate::state::MenuTile;
+use crate::ui::MenuTile;
 
 /// How each tile looks and what it says. Here rather than beside the type,
 /// because the state only needs to know which tile is selected.

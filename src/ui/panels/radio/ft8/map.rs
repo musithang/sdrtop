@@ -221,7 +221,7 @@ impl Panel for Ft8MapPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let f = &state.ft8;
         let mut suffix = String::new();
         if let Some((lat, lon)) = state.home.position() {
@@ -281,7 +281,7 @@ impl Panel for Ft8MapPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1142,7 +1142,7 @@ pub(crate) mod tests {
         let theme = crate::Theme::sdr();
         let mut frame = |m: &SdrMetrics| {
             let t = Instant::now();
-            term.draw(|f| panel.render(f, f.area(), m, &theme, false))
+            term.draw(|f| panel.render(f, f.area(), &crate::ui::View::of(m), &theme, false))
                 .unwrap();
             t.elapsed()
         };
@@ -1203,8 +1203,17 @@ pub(crate) mod tests {
             let theme = crate::Theme::sdr();
             let mut t =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(112, 37)).unwrap();
-            t.draw(|f| registry.render_panel("ft8_map", f, f.area(), &m, &theme, false))
-                .unwrap();
+            t.draw(|f| {
+                registry.render_panel(
+                    "ft8_map",
+                    f,
+                    f.area(),
+                    &crate::ui::View::of(&m),
+                    &theme,
+                    false,
+                )
+            })
+            .unwrap();
             let buf = t.backend().buffer().clone();
             out.push_str(&format!("<h2>{title}</h2><div class=g>"));
             for y in 0..37 {

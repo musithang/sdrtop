@@ -71,7 +71,7 @@ mod tests {
     use crate::ui::{self, PanelRegistry};
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+
     use std::time::Instant;
 
     fn page(ric: u32) -> Page {
@@ -101,7 +101,7 @@ mod tests {
         }
     }
 
-    fn press(state: &Arc<Mutex<SdrMetrics>>, code: KeyCode) -> KeyAction {
+    fn press(state: &crate::ui::Screen, code: KeyCode) -> KeyAction {
         let mut engine =
             ui::LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
         let mut footer = true;
@@ -115,14 +115,17 @@ mod tests {
         )
     }
 
-    fn on(section: &str) -> Arc<Mutex<SdrMetrics>> {
+    fn on(section: &str) -> crate::ui::Screen {
         let mut m = SdrMetrics::fixture();
-        m.ui.section = section.to_string();
+        let ui = crate::ui::UiState {
+            section: section.to_string(),
+            ..crate::ui::UiState::default()
+        };
         for ric in [8, 16, 8] {
             m.pager
                 .push(page(ric), link(), 439_987_500, Instant::now(), 0.0);
         }
-        Arc::new(Mutex::new(m))
+        crate::ui::Screen::new(std::sync::Arc::new(std::sync::Mutex::new(m)), ui)
     }
 
     /// On the pager view its buttons work without focusing anything.
@@ -130,22 +133,19 @@ mod tests {
     fn the_buttons_work_on_the_view() {
         let state = on(crate::signal::pocsag::SECTION);
         press(&state, KeyCode::Left);
-        assert_eq!(state.lock().unwrap().pager.current().map(|e| e.n), Some(2));
+        assert_eq!(state.lock().pager.current().map(|e| e.n), Some(2));
         press(&state, KeyCode::Enter);
-        assert!(state.lock().unwrap().pager.view.read.contains(&2));
+        assert!(state.lock().pager.view.read.contains(&2));
         press(&state, KeyCode::Char('m'));
-        assert!(state.lock().unwrap().pager.view.masked);
+        assert!(state.lock().pager.view.masked);
         press(&state, KeyCode::Char('u'));
-        assert_eq!(state.lock().unwrap().pager.view.mine, Some(16));
+        assert_eq!(state.lock().pager.view.mine, Some(16));
         press(&state, KeyCode::Char('b'));
-        assert!(state.lock().unwrap().pager.view.night);
+        assert!(state.lock().pager.view.night);
         press(&state, KeyCode::Char('l'));
-        assert_eq!(
-            state.lock().unwrap().pager.view.display.as_deref(),
-            Some("green")
-        );
+        assert_eq!(state.lock().pager.view.display.as_deref(), Some("green"));
         press(&state, KeyCode::Char('c'));
-        assert!(state.lock().unwrap().pager.inbox.is_empty());
+        assert!(state.lock().pager.inbox.is_empty());
     }
 
     /// Anywhere else they are not the pager's: `m` there is not masking.
@@ -154,7 +154,7 @@ mod tests {
         let state = on("lab");
         press(&state, KeyCode::Char('m'));
         press(&state, KeyCode::Char('u'));
-        let m = state.lock().unwrap();
+        let m = state.lock();
         assert!(!m.pager.view.masked);
         assert_eq!(m.pager.view.mine, None);
     }

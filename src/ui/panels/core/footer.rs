@@ -10,10 +10,11 @@ use ratatui::{
 };
 
 use crate::hardware::GainModel;
-use crate::state::{InputMode, MicroView, SdrMetrics};
+use crate::state::MicroView;
 use crate::ui::chrome::frame;
 use crate::ui::panel::{FrameStyle, FrameTone, Panel, PanelChrome};
 use crate::ui::widgets::timing_fmt::fmt_msps;
+use crate::ui::InputMode;
 
 const FOCUS_SEP: &str = "  ·  ";
 const NORMAL_SEP: &str = " · ";
@@ -109,7 +110,7 @@ fn radio_group(gm: &GainModel, span: bool, picked: Option<usize>, curve: Option<
 /// their keys. Focus keys
 /// are not here: every panel that takes focus names its letter in its own
 /// title.
-fn section_group(m: &SdrMetrics) -> Group {
+fn section_group(m: &crate::ui::View<'_>) -> Group {
     use crate::ui::menu::keys::{Footer, GLOBAL};
     let mut out = Vec::new();
     for (_, rows) in GLOBAL {
@@ -275,7 +276,7 @@ fn scope_map_items(active: &str, scope: &[(Option<u8>, String, String)]) -> Vec<
 /// keys, the section's layouts, and the way out. Each section gets a footer of
 /// its own this way, because the middle two groups are the section's. Micro
 /// keeps its condensed field footer.
-fn normal_groups(m: &SdrMetrics, available_width: u16) -> Vec<Group> {
+fn normal_groups(m: &crate::ui::View<'_>, available_width: u16) -> Vec<Group> {
     let narrow = available_width < NARROW_COLS;
     let preset = m.ui.active_preset.as_str();
     if is_micro_preset(preset) {
@@ -518,7 +519,7 @@ fn styled_lines(
 }
 
 /// Public free function - called directly from the engine (bypasses dyn dispatch).
-pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
+pub fn compute_footer_height(available_width: u16, state: &crate::ui::View<'_>) -> u16 {
     if !matches!(
         state.ui.input_mode,
         InputMode::Normal | InputMode::DeviceOptionInput { .. }
@@ -552,11 +553,11 @@ impl Panel for FooterPanel {
         (40, 3)
     }
 
-    fn preferred_height(&self, available_width: u16, state: &SdrMetrics) -> u16 {
+    fn preferred_height(&self, available_width: u16, state: &crate::ui::View<'_>) -> u16 {
         compute_footer_height(available_width, state)
     }
 
-    fn chrome(&self, m: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, m: &crate::ui::View<'_>) -> PanelChrome {
         // The footer's border is an application-mode indicator rather than a
         // panel state: it reports what the keys along it are currently for.
         PanelChrome::untitled()
@@ -568,7 +569,7 @@ impl Panel for FooterPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        m: &SdrMetrics,
+        m: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -673,7 +674,7 @@ impl Panel for FooterPanel {
 /// This is the one border in the deck that reports an *application* mode rather
 /// than a panel's own state, so it names its tone instead of taking the standard
 /// focus-and-staleness rule.
-fn footer_tone(m: &SdrMetrics) -> FrameTone {
+fn footer_tone(m: &crate::ui::View<'_>) -> FrameTone {
     tone_for(
         m.observer.active,
         &m.ui.input_mode,
@@ -708,7 +709,7 @@ const NAME_MARK: char = '\u{2014}';
 /// Wrapped here rather than appended after, which cut the name off at the
 /// frame on a long footer (`net_ble_packets` lost its last letter); the
 /// height is counted from the same lines, so the two cannot disagree.
-fn focus_lines(m: &SdrMetrics, inner_w: usize) -> Vec<Vec<String>> {
+fn focus_lines(m: &crate::ui::View<'_>, inner_w: usize) -> Vec<Vec<String>> {
     let mut lines = wrap_items_grouped(&focus_items(m), FOCUS_SEP, inner_w);
     let Some(panel) = &m.ui.focused_panel else {
         return lines;
@@ -731,7 +732,7 @@ fn focus_lines(m: &SdrMetrics, inner_w: usize) -> Vec<Vec<String>> {
 const NAME_GAP: &str = "  ";
 
 /// Build the ordered items list for focus-mode footer.
-fn focus_items(m: &SdrMetrics) -> Vec<String> {
+fn focus_items(m: &crate::ui::View<'_>) -> Vec<String> {
     let mut items: Vec<String> =
         m.ui.focused_panel_bindings
             .iter()
@@ -754,7 +755,11 @@ fn focus_items(m: &SdrMetrics) -> Vec<String> {
 /// empty, the one it runs at, which is where the arrows step from); then
 /// the keys, led by a typed figure that is not on the list. A footer one line
 /// high gets both on that line.
-fn rate_list_prompt(m: &SdrMetrics, theme: &crate::Theme, max_lines: usize) -> Vec<Line<'static>> {
+fn rate_list_prompt(
+    m: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    max_lines: usize,
+) -> Vec<Line<'static>> {
     use ratatui::style::Modifier;
     let typed =
         m.ui.input_buf
@@ -811,6 +816,7 @@ fn rate_list_prompt(m: &SdrMetrics, theme: &crate::Theme, max_lines: usize) -> V
 mod tests {
     use super::*;
     use crate::hardware::native::hackrf;
+    use crate::state::SdrMetrics;
 
     #[test]
     fn the_footer_frame_reports_what_the_keys_are_for() {
@@ -844,25 +850,29 @@ mod tests {
 
     #[test]
     fn numeric_entry_keeps_the_normal_deck_footer() {
-        let mut m = SdrMetrics::fixture();
+        let m = SdrMetrics::fixture();
+        let mut ui = crate::ui::UiState::default();
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 5)).unwrap();
-        let normal_height = compute_footer_height(80, &m);
-        let mut draw = |m: &SdrMetrics| {
+        let normal_height = compute_footer_height(80, &crate::ui::View::new(&m, &ui));
+        let mut draw = |v: &crate::ui::View<'_>| {
             terminal
-                .draw(|f| FooterPanel.render(f, f.area(), m, &crate::Theme::sdr(), false))
+                .draw(|f| FooterPanel.render(f, f.area(), v, &crate::Theme::sdr(), false))
                 .unwrap();
             terminal.backend().buffer().clone()
         };
-        let normal = draw(&m);
-        m.ui.input_mode = InputMode::DeviceOptionInput {
+        let normal = draw(&crate::ui::View::new(&m, &ui));
+        ui.input_mode = InputMode::DeviceOptionInput {
             id: "level".into(),
             error: None,
         };
-        m.ui.input_buf = "123456".into();
-        assert_eq!(draw(&m), normal);
-        assert_eq!(compute_footer_height(80, &m), normal_height);
-        assert_eq!(tone_for(false, &m.ui.input_mode, false), FrameTone::Dim);
+        ui.input_buf = "123456".into();
+        assert_eq!(draw(&crate::ui::View::new(&m, &ui)), normal);
+        assert_eq!(
+            compute_footer_height(80, &crate::ui::View::new(&m, &ui)),
+            normal_height
+        );
+        assert_eq!(tone_for(false, &ui.input_mode, false), FrameTone::Dim);
     }
 
     #[test]
@@ -934,16 +944,19 @@ mod tests {
     /// and the height the engine gives the footer counts that line.
     #[test]
     fn the_focused_panel_name_is_never_cut() {
-        let mut m = SdrMetrics::fixture();
-        m.ui.focused_panel = Some("net_ble_packets".to_string());
-        m.ui.focused_panel_bindings = &[
-            ("↑↓", "select a packet"),
-            ("Enter", "filter to its address"),
-            ("h", "hold the list"),
-            ("\u{2190}\u{2192}", "step the advertising channel"),
-        ];
+        let m = SdrMetrics::fixture();
+        let ui = crate::ui::UiState {
+            focused_panel: Some("net_ble_packets".to_string()),
+            focused_panel_bindings: &[
+                ("↑↓", "select a packet"),
+                ("Enter", "filter to its address"),
+                ("h", "hold the list"),
+                ("\u{2190}\u{2192}", "step the advertising channel"),
+            ],
+            ..crate::ui::UiState::default()
+        };
         for inner_w in 40..140 {
-            let lines = focus_lines(&m, inner_w);
+            let lines = focus_lines(&crate::ui::View::new(&m, &ui), inner_w);
             let joined: Vec<String> = lines
                 .iter()
                 .map(|l| {
@@ -966,7 +979,8 @@ mod tests {
                 joined.iter().all(|l| l.chars().count() <= inner_w),
                 "{inner_w}: {joined:?}"
             );
-            let height = compute_footer_height(inner_w as u16 + 2, &m) as usize;
+            let height =
+                compute_footer_height(inner_w as u16 + 2, &crate::ui::View::new(&m, &ui)) as usize;
             assert_eq!(
                 height,
                 (lines.len() + 2).clamp(3, MAX_CONTENT_LINES as usize + 2)
@@ -980,11 +994,14 @@ mod tests {
         scope: Vec<(Option<u8>, String, String)>,
         width: u16,
     ) -> Vec<Group> {
-        let mut m = SdrMetrics::fixture();
-        m.ui.active_preset = preset.to_string();
-        m.ui.section = section.to_string();
-        m.ui.scope = scope;
-        normal_groups(&m, width)
+        let m = SdrMetrics::fixture();
+        let ui = crate::ui::UiState {
+            active_preset: preset.to_string(),
+            section: section.to_string(),
+            scope,
+            ..crate::ui::UiState::default()
+        };
+        normal_groups(&crate::ui::View::new(&m, &ui), width)
     }
 
     fn slots(entries: &[(&str, &str)]) -> Vec<(Option<u8>, String, String)> {
@@ -1070,12 +1087,15 @@ mod tests {
     #[test]
     fn the_net_footer_carries_its_keys_and_their_state() {
         let mut m = SdrMetrics::fixture();
-        m.ui.active_preset = "net_ble".to_string();
-        m.ui.section = "net".to_string();
-        m.ui.scope = net_scope();
+        let ui = crate::ui::UiState {
+            active_preset: "net_ble".to_string(),
+            section: "net".to_string(),
+            scope: net_scope(),
+            ..crate::ui::UiState::default()
+        };
         m.net.mode = crate::state::NetMode::Lock;
         m.net.address_display = crate::state::AddressDisplay::Masked;
-        let groups = normal_groups(&m, 200);
+        let groups = normal_groups(&crate::ui::View::new(&m, &ui), 200);
         assert_eq!(
             groups[1],
             vec![
@@ -1260,11 +1280,14 @@ mod tests {
 
     #[test]
     fn micro_footer_narrow_is_more_compact() {
-        let mut m = SdrMetrics::fixture();
-        m.ui.active_preset = "micro_signal".to_string();
-        m.ui.section = "micro".to_string();
-        m.ui.scope = micro_scope();
-        let items = &normal_groups(&m, 50)[0];
+        let m = SdrMetrics::fixture();
+        let ui = crate::ui::UiState {
+            active_preset: "micro_signal".to_string(),
+            section: "micro".to_string(),
+            scope: micro_scope(),
+            ..crate::ui::UiState::default()
+        };
+        let items = &normal_groups(&crate::ui::View::new(&m, &ui), 50)[0];
         assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
         assert!(items.iter().any(|i| i == "2/5"));
     }
@@ -1315,11 +1338,11 @@ mod tests {
     /// header writes rates.
     #[test]
     fn the_rate_prompt_lists_a_radios_rates() {
-        let draw = |m: &SdrMetrics| {
+        let draw = |v: &crate::ui::View<'_>| {
             let mut terminal =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 4)).unwrap();
             terminal
-                .draw(|f| FooterPanel.render(f, f.area(), m, &crate::Theme::sdr(), false))
+                .draw(|f| FooterPanel.render(f, f.area(), v, &crate::Theme::sdr(), false))
                 .unwrap();
             let buf = terminal.backend().buffer().clone();
             (0..buf.area.height)
@@ -1331,9 +1354,12 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        let mut m = SdrMetrics::fixture().airspyhf();
-        m.ui.input_mode = InputMode::SampleRateInput;
-        let out = draw(&m);
+        let m = SdrMetrics::fixture().airspyhf();
+        let mut ui = crate::ui::UiState {
+            input_mode: InputMode::SampleRateInput,
+            ..crate::ui::UiState::default()
+        };
+        let out = draw(&crate::ui::View::new(&m, &ui));
         for rate in ["0.192", "0.228", "0.384", "0.456", "0.650", "0.912"] {
             assert!(out.contains(rate), "{rate}: {out}");
         }
@@ -1342,24 +1368,35 @@ mod tests {
             "the running rate lit: {out}"
         );
         assert!(out.contains("Step") && out.contains("Cancel"), "{out}");
-        m.ui.input_buf = "0.192".into();
-        let out = draw(&m);
+        ui.input_buf = "0.192".into();
+        let out = draw(&crate::ui::View::new(&m, &ui));
         assert!(out.contains("\u{25b8}0.192\u{25c2}"), "{out}");
         assert!(!out.contains("\u{25b8}0.768"), "{out}");
-        m.ui.input_buf = "0.5".into();
+        ui.input_buf = "0.5".into();
         assert!(
-            draw(&m).contains("[0.5\u{258c}]"),
+            draw(&crate::ui::View::new(&m, &ui)).contains("[0.5\u{258c}]"),
             "a typed figure off the list"
         );
 
         // A footer one line high, as the compact layouts have: list and keys
         // on the one line.
-        let mut one = SdrMetrics::fixture().airspyhf();
-        one.ui.input_mode = InputMode::SampleRateInput;
+        let one = SdrMetrics::fixture().airspyhf();
+        let one_ui = crate::ui::UiState {
+            input_mode: InputMode::SampleRateInput,
+            ..crate::ui::UiState::default()
+        };
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 1)).unwrap();
         terminal
-            .draw(|f| FooterPanel.render(f, f.area(), &one, &crate::Theme::sdr(), false))
+            .draw(|f| {
+                FooterPanel.render(
+                    f,
+                    f.area(),
+                    &crate::ui::View::new(&one, &one_ui),
+                    &crate::Theme::sdr(),
+                    false,
+                )
+            })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let row: String = (0..buf.area.width)
@@ -1370,9 +1407,12 @@ mod tests {
             "{row}"
         );
 
-        let mut wide = SdrMetrics::fixture();
-        wide.ui.input_mode = InputMode::SampleRateInput;
-        let out = draw(&wide);
+        let wide = SdrMetrics::fixture();
+        let wide_ui = crate::ui::UiState {
+            input_mode: InputMode::SampleRateInput,
+            ..crate::ui::UiState::default()
+        };
+        let out = draw(&crate::ui::View::new(&wide, &wide_ui));
         assert!(out.contains("(2.0\u{2013}20.0 MHz)"), "{out}");
     }
 }

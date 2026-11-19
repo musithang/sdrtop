@@ -21,7 +21,7 @@ use ratatui::{
 };
 
 use super::{hhmmss, put, signed};
-use crate::state::{CycleOutcome, SdrMetrics};
+use crate::state::CycleOutcome;
 use crate::ui::panel::{FrameStyle, Panel, PanelChrome, Staleness};
 
 pub struct Ft8CyclesPanel;
@@ -42,7 +42,7 @@ impl Panel for Ft8CyclesPanel {
         (60, 1)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::untitled()
             .frame(FrameStyle::Borderless)
             .stale_when(Staleness::NotStreaming)
@@ -52,7 +52,7 @@ impl Panel for Ft8CyclesPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

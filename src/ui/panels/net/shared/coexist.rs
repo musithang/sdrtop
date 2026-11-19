@@ -218,7 +218,7 @@ impl Panel for NetCoexistPanel {
         (30, 8)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Coexistence")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.into())
@@ -258,7 +258,7 @@ impl Panel for NetCoexistPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
         _bond: Bond,
@@ -298,7 +298,7 @@ impl Panel for NetCoexistPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -454,7 +454,7 @@ mod tests {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal
-            .draw(|f| NetCoexistPanel.render(f, f.area(), m, &theme, false))
+            .draw(|f| NetCoexistPanel.render(f, f.area(), &crate::ui::View::of(m), &theme, false))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -673,7 +673,7 @@ mod tests {
                     width: 59,
                     height: 20,
                 };
-                NetCoexistPanel.render(f, inner, &m, &theme, false)
+                NetCoexistPanel.render(f, inner, &crate::ui::View::of(&m), &theme, false)
             })
             .unwrap();
         let buf = terminal.backend().buffer();
@@ -705,7 +705,7 @@ mod tests {
                     width: 60,
                     height: 20,
                 };
-                NetCoexistPanel.render(f, inner, &m, &theme, false)
+                NetCoexistPanel.render(f, inner, &crate::ui::View::of(&m), &theme, false)
             })
             .unwrap();
         let buf = terminal.backend().buffer();

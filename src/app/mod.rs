@@ -33,6 +33,9 @@ pub(crate) type FocusKeys = HashMap<char, Vec<&'static str>>;
 pub struct App {
     pub(super) state: Arc<Mutex<SdrMetrics>>,
     pub(super) device: Option<Arc<dyn SdrDevice>>,
+    /// The engine's state beside the screen's own, which the keys and the
+    /// frame read together. The screen's lives only here.
+    pub(super) screen: crate::ui::Screen,
     /// The engine the keys send their commands to; `None` in observer mode.
     pub(super) core: Option<crate::engine::Engine>,
     pub(super) rx_ctx: Option<Arc<RxContext>>,
@@ -161,7 +164,7 @@ impl App {
                     } else {
                         match input::handle_key(
                             key,
-                            &self.state,
+                            &self.screen,
                             self.core.as_ref(),
                             &mut self.engine,
                             &mut self.show_footer,
@@ -188,7 +191,7 @@ impl App {
                 }
                 AppEvent::Tick => true,
                 AppEvent::DeviceOptionComplete(completion) => {
-                    if input::complete_device_option(&self.state, completion) {
+                    if input::complete_device_option(&self.screen, completion) {
                         self.finish_session()?;
                         return Ok(());
                     }
@@ -207,7 +210,7 @@ impl App {
     fn start_device_option(&self, request: DeviceOptionRequest) {
         let Some(device) = self.device.as_ref().cloned() else {
             input::complete_device_option(
-                &self.state,
+                &self.screen,
                 DeviceOptionCompletion {
                     retune: None,
                     result: Err("device is unavailable".to_string()),
@@ -239,8 +242,7 @@ impl App {
     }
 
     fn device_option_pending(&self) -> bool {
-        let m = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        m.ui.device_option_update.is_pending()
+        self.screen.ui.borrow().device_option_update.is_pending()
     }
 
     /// `Ctrl+C`: quit without saving, as `user_docs/keys.md` promises and
@@ -319,7 +321,7 @@ impl App {
     }
 
     fn request_pending_option_quit(&self) -> bool {
-        let mut m = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut m = self.screen.lock();
         let forced = m.ui.device_option_update.request_quit();
         if !forced {
             m.push_log(
@@ -410,12 +412,23 @@ impl App {
             guard.show_view(&section, &active_preset);
             guard.clone()
         };
-        m.ui.preset_names = self.engine.preset_names();
+        // The screen's own state, beside the snapshot: what the screen shows
+        // and how wide it is, read back by the footer and the panels that
+        // give way on a narrow screen.
+        let mut ui = self.screen.ui.borrow_mut();
+        let section = self
+            .engine
+            .scope()
+            .map(|s| s.id.clone())
+            .unwrap_or_default();
+        ui.section = section;
+        ui.active_preset = active_preset.clone();
+        ui.preset_names = self.engine.preset_names();
         // The footer names the keys that work right now, and the digits are
         // scoped, so it reads the active section rather than keeping a table.
         // The section itself is set above, on the shared state, because it has
         // readers off this thread.
-        m.ui.scope = self
+        ui.scope = self
             .engine
             .scope()
             .map(|s| {
@@ -427,21 +440,22 @@ impl App {
             .unwrap_or_default();
         let hide_footer = !self.show_footer
             && matches!(
-                m.ui.input_mode,
-                crate::state::InputMode::Normal | crate::state::InputMode::DeviceOptionInput { .. }
+                ui.input_mode,
+                crate::ui::InputMode::Normal | crate::ui::InputMode::DeviceOptionInput { .. }
             );
         self.engine.set_panel_hidden("footer", hide_footer);
         // The width this frame is drawn at, for the panels that give way on
         // a narrow screen and the ones that take over what they showed.
         let size = terminal.size().unwrap_or_default();
         let size = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-        m.ui.screen_cols = size.width;
+        ui.screen_cols = size.width;
+        let ui = ui;
         // The Frames capture is as long as the river's lanes on this screen,
         // and the NET worker takes it: written on the shared side, and only
         // when it changed, so most frames take no second lock.
         let cells = self
             .engine
-            .area_of("net_wifi_river", size, &m)
+            .area_of("net_wifi_river", size, &crate::ui::View::new(&m, &ui))
             .map_or(0, ui::panels::net::wifi::river::capture_cells);
         if cells != m.net.wifi.scope.window_cells {
             m.net.wifi.scope.window_cells = cells;
@@ -458,21 +472,22 @@ impl App {
         // Measurement labs wear "instrument mode": the resting frames cool toward
         // steel-blue. One per-frame tint at the draw root keeps every lab panel
         // (and its chrome) cohesive without each panel knowing about lab mode.
-        let frame_theme = if m.ui.is_lab_mode() {
+        let frame_theme = if ui.is_lab_mode() {
             self.theme.steeled()
         } else {
             self.theme.clone()
         };
+        let view = crate::ui::View::new(&m, &ui);
         let drawn = terminal.draw(|f| {
-            self.engine.draw(f, &m, &frame_theme);
+            self.engine.draw(f, &view, &frame_theme);
             // The rail's full-log overlay only floats while the rail is focused.
-            if m.ui.log_overlay && m.ui.focused_panel.as_deref() == Some("command_rail") {
-                ui::overlay::render_log(f, &m, &frame_theme);
+            if ui.log_overlay && ui.focused_panel.as_deref() == Some("command_rail") {
+                ui::overlay::render_log(f, &view, &frame_theme);
             }
             // The menu floats over the deck, the same way the log overlay does.
             // Drawn last so nothing else lands on top of it, and outside the
             // layout engine because it is not a panel.
-            if let Some(menu_state) = m.ui.menu {
+            if let Some(menu_state) = ui.menu {
                 let full = f.area();
                 // Startup gets the whole terminal, because there is no deck
                 // behind it worth showing yet. Afterwards it is a box over the
@@ -488,18 +503,18 @@ impl App {
                 };
                 f.render_widget(ratatui::widgets::Clear, area);
                 let section = ui::menu::keys_section(&self.engine, &menu_state);
-                let controls = self.engine.section_controls(section, &m);
+                let controls = self.engine.section_controls(section, &view);
                 ui::menu::render(
                     f,
                     area,
-                    &m,
+                    &view,
                     &self.engine,
                     &menu_state,
                     &controls,
                     &frame_theme,
                 );
             }
-            if m.ui.device_option_update.quit_requested() {
+            if ui.device_option_update.quit_requested() {
                 let full = f.area();
                 let area = ratatui::layout::Rect::new(
                     full.x,
@@ -520,7 +535,9 @@ impl App {
         drawn.map_err(backend_error)?;
         // The deck is behind the menu from the moment it has been drawn once
         // without one in front of it.
-        if m.ui.menu.is_none() {
+        let menu_up = ui.menu.is_some();
+        drop(ui);
+        if !menu_up {
             self.deck_shown = true;
         }
 
@@ -602,7 +619,7 @@ impl App {
             };
             let radio = RadioConfig {
                 // The recall slots are the terminal's own.
-                recall_hz: crate::state::recall_to_hz(&m.ui.recall),
+                recall_hz: crate::ui::recall_to_hz(&self.screen.ui.borrow().recall),
                 ..crate::engine::boot::radio_block(&m, &loaded)
             };
             (
@@ -732,7 +749,7 @@ mod tests {
     }
     use super::*;
     use crate::hardware::{DeviceCapabilities, DeviceInfo, RateSet};
-    use crate::state::DeviceOptionUpdate;
+    use crate::ui::DeviceOptionUpdate;
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc, Mutex};
@@ -845,10 +862,6 @@ mod tests {
             let mut m = state.lock().unwrap();
             m.radio.frequency = 200_000_000;
             m.sweep.pre_sweep_hz = Some(100_000_000);
-            m.ui.device_option_update = DeviceOptionUpdate::Pending {
-                request: pending_request(),
-                quit_requested: false,
-            };
         }
         let device = Arc::new(QuitDevice::new(state.lock().unwrap().caps.as_ref().clone()));
         let path = std::env::temp_dir().join(format!(
@@ -868,6 +881,10 @@ mod tests {
             None,
         )
         .unwrap();
+        app.screen.ui.borrow_mut().device_option_update = DeviceOptionUpdate::Pending {
+            request: pending_request(),
+            quit_requested: false,
+        };
         let (tx, rx) = mpsc::channel();
         app.events = EventStream::from_channel(tx.clone(), rx);
         (app, tx, device, path)
@@ -903,7 +920,7 @@ mod tests {
         let m = app.state.lock().unwrap();
         assert_eq!(m.device_options[0].selected_choice, "Wide");
         assert!(matches!(
-            m.ui.device_option_update,
+            app.screen.ui.borrow().device_option_update,
             DeviceOptionUpdate::Idle
         ));
         assert!(m
@@ -1155,13 +1172,13 @@ mod tests {
 
     #[test]
     fn numeric_menu_entry_preserves_the_deck_footer_setting() {
-        use crate::state::{InputMode, MenuFocus, MenuState, MenuTile};
+        use crate::ui::{InputMode, MenuFocus, MenuState, MenuTile};
         let (mut app, _, _, _) = quit_test_app();
         app.engine.set_preset("command_rail");
         {
-            let mut m = app.state.lock().unwrap();
-            m.ui.device_option_update = DeviceOptionUpdate::Idle;
-            m.ui.menu = Some(MenuState {
+            let mut ui = app.screen.ui.borrow_mut();
+            ui.device_option_update = DeviceOptionUpdate::Idle;
+            ui.menu = Some(MenuState {
                 tile: MenuTile::Options,
                 focus: MenuFocus::Below,
                 ..Default::default()
@@ -1188,7 +1205,7 @@ mod tests {
                         mode,
                         InputMode::Normal | InputMode::DeviceOptionInput { .. }
                     );
-                app.state.lock().unwrap().ui.input_mode = mode;
+                app.screen.ui.borrow_mut().input_mode = mode;
                 app.draw(&mut terminal).unwrap();
                 assert_eq!(app.engine.is_panel_visible("footer"), expected);
                 assert_eq!(app.show_footer, show_footer);
@@ -1214,7 +1231,7 @@ mod tests {
         assert!(path.exists());
         let m = app.state.lock().unwrap();
         assert!(matches!(
-            &m.ui.device_option_update,
+            &app.screen.ui.borrow().device_option_update,
             DeviceOptionUpdate::Failed { id } if id == "bandwidth"
         ));
         assert!(m.log.back().is_some_and(|entry| entry
@@ -1230,7 +1247,7 @@ mod tests {
     #[test]
     fn control_c_quits_without_saving() {
         let (mut app, tx, _device, path) = quit_test_app();
-        app.state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Idle;
+        app.screen.ui.borrow_mut().device_option_update = DeviceOptionUpdate::Idle;
         tx.send(AppEvent::Key(KeyEvent::new(
             KeyCode::Char('c'),
             KeyModifiers::CONTROL,
@@ -1239,11 +1256,11 @@ mod tests {
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
         app.run(&mut terminal).unwrap();
         assert!(!path.exists(), "Ctrl+C wrote the config");
-        assert_eq!(app.state.lock().unwrap().ui.focused_panel, None);
+        assert_eq!(app.screen.ui.borrow_mut().focused_panel, None);
 
         // And `q`, for contrast, does write it.
         let (mut app, tx, _device, path) = quit_test_app();
-        app.state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Idle;
+        app.screen.ui.borrow_mut().device_option_update = DeviceOptionUpdate::Idle;
         tx.send(AppEvent::Key(KeyEvent::from(KeyCode::Char('q'))))
             .unwrap();
         app.run(&mut terminal).unwrap();
@@ -1271,12 +1288,7 @@ mod tests {
             assert_eq!(device.tune_calls.load(Ordering::Relaxed), 0);
             assert!(!path.exists());
             assert!(
-                app.state
-                    .lock()
-                    .unwrap()
-                    .ui
-                    .device_option_update
-                    .is_pending(),
+                app.screen.ui.borrow().device_option_update.is_pending(),
                 "forced exit must not pretend the worker was cancelled"
             );
             let drops = Arc::clone(&device.drops);
@@ -1292,13 +1304,14 @@ mod tests {
 
     #[test]
     fn slow_device_option_work_runs_off_the_event_thread() {
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let screen = crate::ui::Screen::of(SdrMetrics::fixture());
+        let state = Arc::clone(&screen.m);
         let request = DeviceOptionRequest {
             id: "bandwidth".into(),
             label: "Bandwidth".into(),
             choice: "Wide".into(),
         };
-        state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Pending {
+        screen.ui.borrow_mut().device_option_update = DeviceOptionUpdate::Pending {
             request: request.clone(),
             quit_requested: false,
         };
@@ -1362,7 +1375,7 @@ mod tests {
         else {
             panic!("worker sent the wrong event");
         };
-        input::complete_device_option(&state, completion);
+        input::complete_device_option(&screen, completion);
 
         let m = state.lock().unwrap();
         assert_eq!(m.device_options.len(), 2);
@@ -1413,7 +1426,8 @@ mod tests {
     #[test]
     fn an_option_that_moves_the_tuning_retunes_and_keeps_the_answer() {
         let device = GridDevice(SdrMetrics::fixture().caps.as_ref().clone());
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let screen = crate::ui::Screen::of(SdrMetrics::fixture());
+        let state = Arc::clone(&screen.m);
         state.lock().unwrap().radio.frequency = 7_074_300;
         assert_eq!(
             crate::engine::option::retune_after(&device, "other", &state),
@@ -1428,12 +1442,12 @@ mod tests {
             choice: "On".into(),
         };
         let complete = |retune| {
-            state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Pending {
+            screen.ui.borrow_mut().device_option_update = DeviceOptionUpdate::Pending {
                 request: request.clone(),
                 quit_requested: false,
             };
             input::complete_device_option(
-                &state,
+                &screen,
                 DeviceOptionCompletion {
                     result: Ok(Vec::new()),
                     retune,
@@ -1506,12 +1520,10 @@ mod tests {
             guard_side.contains("guard.show_view(&section, &active_preset)"),
             "the view must be set on the shared state, where the engine reads its mode"
         );
-        for late in [
-            "show_view(",
-            "ui.section =",
-            "ui.active_preset =",
-            ".mode =",
-        ] {
+        // The screen's own record of what it shows is written after the
+        // clone, into its own state, which no other thread reads: only the
+        // engine's mode has to be on the shared side.
+        for late in ["show_view(", ".mode ="] {
             assert!(
                 !snapshot_side.contains(late),
                 "`{late}` after the clone reaches only the snapshot, never the engine"
@@ -1535,6 +1547,44 @@ mod tests {
         let q_rms = (200_000_f64 / n).sqrt();
         let imbalance = (20.0 * (i_rms / q_rms).log10()) as f32;
         assert!(imbalance > 0.0, "expected positive, got {}", imbalance);
+    }
+
+    /// **The recall slots are the screen's, filled from the config**, and
+    /// empty when another process holds the radio: a recall jump retunes it,
+    /// which observer mode cannot do.
+    #[test]
+    fn recall_slots_come_from_the_config_and_stay_empty_in_observer_mode() {
+        let mut config = AppConfig::default();
+        config.radio.recall_hz = [100_000_000, 0, 0];
+        let open = App::assemble(
+            config.clone(),
+            None,
+            Arc::new(Mutex::new(SdrMetrics::fixture())),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(open.screen.ui.borrow().recall[0], Some(100_000_000));
+
+        let mut observed = SdrMetrics::fixture();
+        observed.observer.active = true;
+        let watching = App::assemble(
+            config,
+            None,
+            Arc::new(Mutex::new(observed)),
+            None,
+            None,
+            Some("observer"),
+        )
+        .unwrap();
+        assert!(watching
+            .screen
+            .ui
+            .borrow()
+            .recall
+            .iter()
+            .all(|s| s.is_none()));
     }
 
     #[test]

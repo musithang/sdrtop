@@ -29,7 +29,6 @@ use ratatui::{
 };
 
 use crate::signal::rf_calc::{adc_loading, staging_verdict_for};
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 
 use super::rf_bench::severity_color;
@@ -48,7 +47,7 @@ impl Panel for AdcLoadingPanel {
         (30, 18)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         // Behind digital gain the samples are the word it produces, not what
         // the converter saw: the panel is named for what it reads.
         PanelChrome::new(if state.caps.gain.stages_are_digital() {
@@ -64,7 +63,7 @@ impl Panel for AdcLoadingPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -167,6 +166,7 @@ impl Panel for AdcLoadingPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SdrMetrics;
 
     /// **The radio's own overload is shown beside the clip counter**, as the
     /// radio's word: on, with how often; off, with how often and when last;

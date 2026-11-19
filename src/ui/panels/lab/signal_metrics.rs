@@ -9,7 +9,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 // `snr_color` shared rather than re-declared: one measurement, one scale.
 // See `state::SAT_WARN_PCT` for what a second copy costs.
@@ -31,7 +30,7 @@ impl Panel for SignalMetricsPanel {
         &[("C", "Snapshot to log")]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Sig_nal Metrics").stale_when(Staleness::FftAge)
     }
 
@@ -39,7 +38,7 @@ impl Panel for SignalMetricsPanel {
         &self,
         f: &mut Frame,
         inner: ratatui::layout::Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -117,6 +116,7 @@ impl Panel for SignalMetricsPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SdrMetrics;
 
     /// The channel figures are the quarter-second frame's and the S-meter's
     /// readout, as on the Lab Signal bench: one account for one quantity.

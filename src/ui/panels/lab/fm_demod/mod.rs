@@ -111,7 +111,7 @@ impl Panel for FmDemodPanel {
         ]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         // The marker sits on the M of MPX, not the M of FM: it is the start of a
         // word, so the eye lands on it instead of hunting inside an initialism.
         PanelChrome::new("FM _MPX \u{00b7} Demod").stale_when(Staleness::NotStreaming)
@@ -121,7 +121,7 @@ impl Panel for FmDemodPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

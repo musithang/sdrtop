@@ -5,7 +5,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::state::InputMode;
+use crate::ui::InputMode;
 
 use super::{global, metrics, InputCtx, KeyAction};
 

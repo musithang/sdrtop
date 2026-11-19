@@ -287,7 +287,7 @@ impl Panel for SignalStripPanel {
         (60, 3)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::deck("Signal")
     }
 
@@ -295,7 +295,7 @@ impl Panel for SignalStripPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

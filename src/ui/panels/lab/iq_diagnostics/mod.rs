@@ -41,7 +41,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 use reading::Reading;
@@ -68,7 +67,7 @@ impl Panel for IqDiagnosticsPanel {
         ]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("_IQ Diagnostics").stale_when(Staleness::NotStreaming)
     }
 
@@ -76,7 +75,7 @@ impl Panel for IqDiagnosticsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -114,6 +113,7 @@ impl Panel for IqDiagnosticsPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     fn bench() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();

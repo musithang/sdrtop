@@ -158,6 +158,10 @@ impl App {
         // here. `menu::model::build` collects these instead of logging them so it
         // can stay a pure function; this is the one place that has both the
         // warnings and the lock.
+        // The screen's own state: the menu in front of the first screen, and
+        // the recall slots, which retune the radio and so stay empty when
+        // another process holds it.
+        let mut ui = crate::ui::UiState::default();
         {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             for warning in engine.menu_warnings() {
@@ -174,13 +178,17 @@ impl App {
                 m.push_log(format!("Wi-Fi refused: {why}"));
             }
 
-            m.ui.menu = startup_menu(&engine, m.observer.active, saved);
+            ui.menu = startup_menu(&engine, m.observer.active, saved);
+            if !m.observer.active {
+                ui.recall = crate::ui::recall_from_hz(cfg.radio.recall_hz);
+            }
         }
 
         let core = device
             .as_ref()
             .map(|device| crate::engine::Engine::new(Arc::clone(&state), Arc::clone(device)));
         Ok(Self {
+            screen: crate::ui::Screen::new(Arc::clone(&state), ui),
             state,
             device,
             core,
@@ -224,7 +232,7 @@ fn startup_menu(
     engine: &crate::ui::LayoutEngine,
     observing: bool,
     saved: bool,
-) -> Option<crate::state::MenuState> {
+) -> Option<crate::ui::MenuState> {
     if observing {
         return None;
     }
@@ -256,7 +264,7 @@ mod tests {
         // Everywhere else the menu still comes first, on the restored layout.
         let spectrum = engine("spectrum");
         let menu = startup_menu(&spectrum, false, true).expect("the menu comes first");
-        assert_eq!(menu.tile, crate::state::MenuTile::Resume);
+        assert_eq!(menu.tile, crate::ui::MenuTile::Resume);
         let (_, path) = spectrum.menu_tree().locate("spectrum").unwrap();
         assert_eq!(menu.lab, (&path).into());
     }
@@ -267,7 +275,7 @@ mod tests {
         let spectrum = engine("spectrum");
         let menu = startup_menu(&spectrum, false, false).expect("the menu comes first");
         assert!(!menu.resume);
-        assert_eq!(menu.tile, crate::state::MenuTile::Lab);
+        assert_eq!(menu.tile, crate::ui::MenuTile::Lab);
     }
 
     /// What the header draws for a radio another process holds: its own

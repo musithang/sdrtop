@@ -36,7 +36,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
 
 use envelope::Envelope;
@@ -68,7 +67,7 @@ impl Panel for SweepPanel {
         ]
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         // `g` is not a letter of "Sweep", so the engine advertises it in
         // brackets. The scan parameters ride along as the suffix, rebuilt every
         // frame so the band, dwell and cycle number stay live.
@@ -96,7 +95,7 @@ impl Panel for SweepPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -186,6 +185,7 @@ impl Panel for SweepPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     fn swept() -> SdrMetrics {
         SdrMetrics::fixture()

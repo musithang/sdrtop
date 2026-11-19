@@ -69,7 +69,7 @@ impl Panel for Ft8LoadPanel {
         Some(7)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         let mut chrome = PanelChrome::new("Load").stale_when(Staleness::NotStreaming);
         chrome.suffix = Some("  decode time a cycle, on this machine".to_string());
         chrome
@@ -79,7 +79,7 @@ impl Panel for Ft8LoadPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

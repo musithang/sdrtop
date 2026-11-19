@@ -497,7 +497,7 @@ impl Panel for NetDecodeHealthPanel {
         (44, 12)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         // Every number here is a count of something that arrived, so it goes out
         // of date the moment the samples stop. The engine tags and cools it; the
         // panel only declares which rule it lives under.
@@ -510,7 +510,7 @@ impl Panel for NetDecodeHealthPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {

@@ -120,7 +120,6 @@ impl SdrMetrics {
             },
             timing: TimingState::default(),
             sweep: SweepState::default(),
-            ui: UiState::default(),
             log: std::collections::VecDeque::new(),
             events: Arc::default(),
             mode: crate::engine::mode::Mode::idle(),
@@ -728,7 +727,18 @@ pub(crate) fn draw(
     height: u16,
     state: &SdrMetrics,
 ) -> Vec<String> {
-    let buffer = draw_buffer(panel, width, height, state);
+    draw_view(panel, width, height, &crate::ui::View::of(state))
+}
+
+/// [`draw`] with the screen's own state given too: for a test of what a
+/// panel shows with a layout, a focus or a field being typed.
+pub(crate) fn draw_view(
+    panel: impl crate::ui::panel::Panel + 'static,
+    width: u16,
+    height: u16,
+    view: &crate::ui::View<'_>,
+) -> Vec<String> {
+    let buffer = draw_buffer_view(panel, width, height, view);
     (0..height)
         .map(|y| {
             (0..width)
@@ -748,6 +758,15 @@ pub(crate) fn draw_buffer(
     height: u16,
     state: &SdrMetrics,
 ) -> ratatui::buffer::Buffer {
+    draw_buffer_view(panel, width, height, &crate::ui::View::of(state))
+}
+
+fn draw_buffer_view(
+    panel: impl crate::ui::panel::Panel + 'static,
+    width: u16,
+    height: u16,
+    view: &crate::ui::View<'_>,
+) -> ratatui::buffer::Buffer {
     let name = panel.name();
     let mut registry = crate::ui::PanelRegistry::new();
     registry.register(panel);
@@ -758,7 +777,7 @@ pub(crate) fn draw_buffer(
     terminal
         .draw(|f| {
             let area = f.area();
-            registry.render_panel(name, f, area, state, &theme, false);
+            registry.render_panel(name, f, area, view, &theme, false);
         })
         .expect("test backend never fails");
     terminal.backend().buffer().clone()

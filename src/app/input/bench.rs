@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::state::RailMode;
 use crate::ui;
+use crate::ui::RailMode;
 
 use super::{global, metrics, InputCtx, KeyAction};
 
@@ -455,7 +455,6 @@ pub(super) fn timing_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAc
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
 
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
@@ -465,7 +464,7 @@ mod tests {
 
     use super::super::{metrics, InputCtx};
 
-    fn press_on_iq_bench(state: &Arc<Mutex<SdrMetrics>>, c: char) {
+    fn press_on_iq_bench(state: &crate::ui::Screen, c: char) {
         let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
         let mut show_footer = true;
         let focus_keys = HashMap::new();
@@ -485,7 +484,7 @@ mod tests {
     /// the LO is at the centre it captures as it always has.
     #[test]
     fn auto_cal_is_refused_where_the_balance_is_not_the_front_ends() {
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture().streaming());
         metrics(&state).radio.lo_offset_hz = 5_000;
         press_on_iq_bench(&state, 'c');
         {
@@ -507,7 +506,7 @@ mod tests {
     /// it measures no front end; no sweep is started.
     #[test]
     fn the_noise_step_is_refused_on_digital_stages() {
-        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming().airspyhf()));
+        let state = crate::ui::Screen::of(SdrMetrics::fixture().streaming().airspyhf());
         let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
         let mut show_footer = true;
         let focus_keys = HashMap::new();

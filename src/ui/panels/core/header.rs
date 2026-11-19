@@ -450,7 +450,11 @@ fn plain_separator(theme: &crate::Theme, outer_width: u16) -> Line<'static> {
 /// at the current frequency - and the **band name riding the needle** (e.g.
 /// `◆╴2m╶`), so the band you're in sits exactly where the eye lands. `outer_width`
 /// is the FULL panel width; rendered at the outer Rect so `├`/`┤` overwrite `│`.
-fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -> Line<'static> {
+fn band_strip_line(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    outer_width: u16,
+) -> Line<'static> {
     if state.ui.is_net_section() {
         return net_band_strip(state, theme, outer_width);
     }
@@ -518,7 +522,11 @@ fn receiver_view(state: &SdrMetrics) -> (f64, f64, Option<crate::state::Receiver
     }
 }
 
-fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -> Line<'static> {
+fn net_band_strip(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    outer_width: u16,
+) -> Line<'static> {
     use crate::signal::net::band::{HIGH_HZ, LOW_HZ};
     let lo_lbl = format!("{}", LOW_HZ / 1_000_000);
     let hi_lbl = format!("{}", HIGH_HZ / 1_000_000);
@@ -602,7 +610,11 @@ fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) ->
 /// different things about every number below them - then which decoder is
 /// running and on what channel, whether the feed has been interrupted, and how
 /// much of the worker's time the decoding costs.
-fn net_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> Line<'static> {
+fn net_band_line(
+    state: &crate::ui::View<'_>,
+    theme: &crate::Theme,
+    inner_width: u16,
+) -> Line<'static> {
     let value = Style::default().fg(theme.value);
     let health = &state.net.health;
     let (tuned, _, receiver) = receiver_view(state);
@@ -697,7 +709,7 @@ fn load_text(load: f64) -> String {
 /// everyone reads 2.4 GHz in. Between channels of every scheme there is no
 /// channel, and nothing is said rather than the nearest one rounded to.
 fn channel_fields(
-    state: &SdrMetrics,
+    state: &crate::ui::View<'_>,
     r: &crate::state::ReceiverNow,
     theme: &crate::Theme,
 ) -> Vec<BandField> {
@@ -1297,7 +1309,7 @@ impl Panel for HeaderPanel {
         (60, 5)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::deck("Radio")
     }
 
@@ -1305,7 +1317,7 @@ impl Panel for HeaderPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1378,11 +1390,11 @@ impl Panel for SlimHeaderPanel {
     fn min_size(&self) -> (u16, u16) {
         (60, 4)
     }
-    fn preferred_height(&self, _w: u16, _s: &SdrMetrics) -> u16 {
+    fn preferred_height(&self, _w: u16, _s: &crate::ui::View<'_>) -> u16 {
         4
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::deck("Radio")
     }
 
@@ -1390,7 +1402,7 @@ impl Panel for SlimHeaderPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1951,8 +1963,7 @@ mod tests {
     /// A `SdrMetrics` sitting in the NET section on Wi-Fi channel 6.
     fn net_fixture() -> SdrMetrics {
         let mut m = SdrMetrics::fixture();
-        m.ui.section = crate::signal::net::SECTION.to_string();
-        m.ui.active_preset = "net".to_string();
+        m.show_view(crate::signal::net::SECTION, "net");
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 20_000_000.0;
         m
@@ -1982,7 +1993,7 @@ mod tests {
 
     fn net_band_text(m: &SdrMetrics, width: u16) -> (String, Vec<Span<'static>>) {
         let theme = crate::Theme::sdr();
-        let line = net_band_line(m, &theme, width);
+        let line = net_band_line(&crate::ui::View::of(m), &theme, width);
         let text = line.spans.iter().map(|s| s.content.as_ref()).collect();
         (text, line.spans)
     }
@@ -2079,9 +2090,12 @@ mod tests {
             ("le", " Low Energy ·"),
             ("classic", " Classic ·"),
         ] {
-            let mut m = net_fixture();
-            m.ui.section = section.to_string();
-            let text: String = net_band_line(&m, &theme, 191)
+            let m = net_fixture();
+            let ui = crate::ui::UiState {
+                section: section.to_string(),
+                ..crate::ui::UiState::default()
+            };
+            let text: String = net_band_line(&crate::ui::View::new(&m, &ui), &theme, 191)
                 .spans
                 .iter()
                 .map(|s| s.content.as_ref())
@@ -2103,7 +2117,7 @@ mod tests {
         m.radio.bb_filter_hz = 0;
         m.net.ble_channel = Some(3);
         m.net.bt_channels_watched = (5..=11).collect();
-        let line = net_band_strip(&live(&m), &theme, 191);
+        let line = net_band_strip(&crate::ui::View::of(&live(&m)), &theme, 191);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text.chars().count(), 191, "{text}");
         let lit = |c: ratatui::style::Color| {
@@ -2137,8 +2151,8 @@ mod tests {
     fn the_net_band_tells_one_moment() {
         let theme = crate::Theme::sdr();
         let mut m = net_fixture();
+        m.show_section("classic");
         m.radio.hw_streaming = true;
-        m.ui.section = "classic".to_string();
         m.radio.frequency = 2_457_500_000;
         m.net.receiver = Some(crate::state::ReceiverNow {
             centre_hz: 2_441_500_000,
@@ -2155,7 +2169,7 @@ mod tests {
             "{text}"
         );
         let strip = |m: &SdrMetrics| -> String {
-            net_band_strip(m, &theme, 191)
+            net_band_strip(&crate::ui::View::of(m), &theme, 191)
                 .spans
                 .iter()
                 .map(|s| s.content.to_string())
@@ -2177,7 +2191,7 @@ mod tests {
     fn stopped_the_net_band_names_no_receiver() {
         let theme = crate::Theme::sdr();
         let mut m = net_fixture();
-        m.ui.section = "classic".to_string();
+        m.show_section("classic");
         m.radio.hw_streaming = false;
         m.radio.frequency = 2_426_000_000;
         m.net.receiver = Some(crate::state::ReceiverNow {
@@ -2195,7 +2209,7 @@ mod tests {
         for gone in ["BLE", "BT ", "decode", "gaps"] {
             assert!(!text.contains(gone), "{gone}: {text}");
         }
-        let line = net_band_strip(&m, &theme, 191);
+        let line = net_band_strip(&crate::ui::View::of(&m), &theme, 191);
         assert!(!line.spans.iter().any(|s| s.content == "\u{25cf}"));
         assert!(!line.spans.iter().any(|s| s.style.fg == Some(theme.net_bt)));
     }
@@ -2203,8 +2217,7 @@ mod tests {
     /// A Wi-Fi view on channel 6.
     fn wifi_fixture() -> SdrMetrics {
         let mut m = net_fixture();
-        m.ui.section = "wifi_channel".to_string();
-        m.ui.active_preset = "wifi_survey".to_string();
+        m.show_view("wifi_channel", "wifi_survey");
         m
     }
 
@@ -2243,7 +2256,7 @@ mod tests {
         m.radio.bb_filter_hz = 0;
         m.net.ble_channel = Some(38);
         m.net.bt_channels_watched = vec![35, 36];
-        let line = net_band_strip(&m, &theme, 191);
+        let line = net_band_strip(&crate::ui::View::of(&m), &theme, 191);
         let lit = |c: ratatui::style::Color| {
             line.spans
                 .iter()
@@ -2434,9 +2447,18 @@ mod tests {
             "the full tuning range leaked in:\n{net}"
         );
 
-        let mut plain = m.clone();
-        plain.ui.section = "lab".to_string();
-        let out = crate::state::fixture::draw(HeaderPanel, 100, 5, &plain).join("\n");
+        let plain = m.clone();
+        let plain_ui = crate::ui::UiState {
+            section: "lab".to_string(),
+            ..crate::ui::UiState::default()
+        };
+        let out = crate::state::fixture::draw_view(
+            HeaderPanel,
+            100,
+            5,
+            &crate::ui::View::new(&plain, &plain_ui),
+        )
+        .join("\n");
         assert!(out.contains(" 6G "), "{out}");
         assert!(!out.contains("2400"), "{out}");
     }

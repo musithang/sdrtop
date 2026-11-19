@@ -484,7 +484,7 @@ mod tests {
                     continue;
                 }
                 seen += 1;
-                let chrome = panel.chrome(&m);
+                let chrome = panel.chrome(&crate::ui::View::of(&m));
                 if chrome.staleness == Staleness::Never {
                     assert!(
                         !chrome.tags.contains(&crate::ui::panel::Tag::from(mode)),
@@ -549,7 +549,7 @@ mod tests {
             if !name.starts_with("net_") {
                 continue;
             }
-            let chrome = panel.chrome(&m);
+            let chrome = panel.chrome(&crate::ui::View::of(&m));
             if chrome.staleness == Staleness::Never || EXEMPT.iter().any(|(n, _)| *n == name) {
                 assert!(
                     chrome.feed.is_none(),
@@ -768,11 +768,15 @@ mod tests {
                 let backend = ratatui::backend::TestBackend::new(140, 30);
                 let mut terminal = ratatui::Terminal::new(backend).unwrap();
                 terminal
-                    .draw(|f| panel.render(f, f.area(), &m, &theme, false))
+                    .draw(|f| panel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false))
                     .unwrap();
                 let buffer = terminal.backend().buffer();
                 let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
-                (panel.name().to_string(), text, panel.chrome(&m))
+                (
+                    panel.name().to_string(),
+                    text,
+                    panel.chrome(&crate::ui::View::of(&m)),
+                )
             })
             .collect()
     }
@@ -801,7 +805,7 @@ mod tests {
                 &self,
                 _: &mut ratatui::Frame,
                 _: ratatui::layout::Rect,
-                _: &crate::state::SdrMetrics,
+                _: &crate::ui::View<'_>,
                 _: &crate::Theme,
                 _: bool,
             ) {
@@ -821,7 +825,7 @@ mod tests {
                 &self,
                 _: &mut ratatui::Frame,
                 _: ratatui::layout::Rect,
-                _: &crate::state::SdrMetrics,
+                _: &crate::ui::View<'_>,
                 _: &crate::Theme,
                 _: bool,
             ) {
@@ -1135,7 +1139,7 @@ mod tests {
         let (w, h) = (140u16, 50u16);
         let backend = ratatui::backend::TestBackend::new(w, h);
         let mut term = ratatui::Terminal::new(backend).unwrap();
-        term.draw(|f| engine.draw(f, &m, &crate::Theme::sdr()))
+        term.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &crate::Theme::sdr()))
             .unwrap();
         let buf = term.backend().buffer();
         let rows: Vec<String> = (0..h)
@@ -1319,7 +1323,8 @@ mod tests {
             let (engine, _) = App::build_ui("waterfall", &HashMap::new(), None, true);
             let backend = ratatui::backend::TestBackend::new(100, h);
             let mut term = ratatui::Terminal::new(backend).unwrap();
-            term.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            term.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &theme))
+                .unwrap();
             let buf = term.backend().buffer();
             let rows: Vec<String> = (0..h)
                 .map(|y| (0..100).map(|x| buf[(x, y)].symbol()).collect())
@@ -1540,7 +1545,10 @@ mod tests {
                 continue;
             };
             keys.push(key);
-            let title = panel.chrome(&m).title.replace('_', "");
+            let title = panel
+                .chrome(&crate::ui::View::of(&m))
+                .title
+                .replace('_', "");
             let lead = format!("| `{key}` | {title} |");
             let row = table
                 .lines()
@@ -1580,9 +1588,14 @@ mod tests {
             let mut t =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
             t.draw(|f| {
-                engine
-                    .registry()
-                    .render_panel(name, f, f.area(), m, &theme, false)
+                engine.registry().render_panel(
+                    name,
+                    f,
+                    f.area(),
+                    &crate::ui::View::of(m),
+                    &theme,
+                    false,
+                )
             })
             .unwrap();
             t.backend().buffer().clone()
@@ -1657,7 +1670,7 @@ mod tests {
                 let size = ratatui::layout::Rect::new(0, 0, w, h);
                 let names: Vec<&str> = engine.registered_panel_names().collect();
                 for name in names {
-                    if let Some(r) = engine.area_of(name, size, &m) {
+                    if let Some(r) = engine.area_of(name, size, &crate::ui::View::of(&m)) {
                         assert!(
                             r.right() <= w && r.bottom() <= h,
                             "{preset} at {w} x {h}: {name} at {r:?}"
@@ -1666,7 +1679,8 @@ mod tests {
                 }
                 let mut t =
                     ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-                t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+                t.draw(|f| engine.draw(f, &crate::ui::View::of(&m), &theme))
+                    .unwrap();
             }
         }
     }
@@ -1695,7 +1709,6 @@ mod tests {
             return;
         };
         let mut m = crate::ui::panels::radio::ft8::sample::evening();
-        m.ui.section = crate::signal::ft8::SECTION.to_string();
         m.ft8.view.selected = Some("JA1VQD".into());
         render_html("radio_ft8", m, &path);
     }
@@ -1708,11 +1721,10 @@ mod tests {
         let Ok(path) = std::env::var("FT8_LAB_HTML") else {
             return;
         };
-        let mut m = crate::state::SdrMetrics::fixture()
+        let m = crate::state::SdrMetrics::fixture()
             .airspyhf()
             .streaming()
             .ft8_traced();
-        m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
         render_html("lab_ft8_signal", m, &path);
     }
 
@@ -1724,12 +1736,11 @@ mod tests {
         let Ok(path) = std::env::var("FT8_BAND_HTML") else {
             return;
         };
-        let mut m = crate::state::SdrMetrics::fixture()
+        let m = crate::state::SdrMetrics::fixture()
             .airspyhf()
             .streaming()
             .ft8_traced()
             .ft8_hour();
-        m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
         render_html("lab_ft8_band", m, &path);
     }
 
@@ -1746,6 +1757,7 @@ mod tests {
             .with_carrier(25_000.0, 40.0)
             .ft8_traced()
             .ft8_hour();
+        m.show_section(crate::signal::ft8::LAB_SECTION);
         // The capture centred on the dial, the carrier 25 kHz off it, so the
         // radio's slice reads as it would on the air.
         let dial = m.radio.frequency;
@@ -1768,23 +1780,28 @@ mod tests {
             };
             m.ft8.cycles.push_back(c);
         }
-        m.ui.section = crate::signal::ft8::LAB_SECTION.to_string();
         render_html("lab_ft8_receiver", m, &path);
     }
 
     /// `preset` through the real engine at the three reference sizes, as
     /// HTML with every cell's colours, and as text beside it.
-    fn render_html(preset: &str, mut m: crate::state::SdrMetrics, path: &str) {
+    fn render_html(preset: &str, m: crate::state::SdrMetrics, path: &str) {
         use ratatui::style::Color;
         let (mut engine, _) = App::build_ui(preset, &HashMap::new(), None, true);
         engine.set_preset(preset);
-        m.ui.active_preset = preset.into();
+        // What the app gives the screen before every frame.
+        let ui = crate::ui::UiState {
+            active_preset: preset.into(),
+            section: engine.scope().map(|s| s.id.clone()).unwrap_or_default(),
+            ..crate::ui::UiState::default()
+        };
         let theme = crate::Theme::sdr();
         let mut out = String::new();
         let mut text = String::new();
         for (w, h) in [(191u16, 41u16), (152, 32), (100, 30)] {
             let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            t.draw(|f| engine.draw(f, &crate::ui::View::new(&m, &ui), &theme))
+                .unwrap();
             let buf = t.backend().buffer().clone();
             out.push_str(&format!("<h2>{w} x {h}</h2><div class=g>"));
             text.push_str(&format!("{w} x {h}\n"));

@@ -35,7 +35,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 use rows::Rows;
@@ -56,7 +55,7 @@ impl Panel for TimingVitalsPanel {
         &[("R", "Reset drop counter"), ("C", "Clear history")]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("Hardware _Vitals").stale_when(Staleness::NotStreaming)
     }
 
@@ -64,7 +63,7 @@ impl Panel for TimingVitalsPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -96,6 +95,7 @@ impl Panel for TimingVitalsPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     const W: u16 = 56;
     const H: u16 = 26;

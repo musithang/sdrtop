@@ -606,7 +606,7 @@ impl Panel for NetOccupancyPanel {
         &self,
         f: &mut Frame,
         area: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         focused: bool,
         _bond: Bond,
@@ -633,7 +633,7 @@ impl Panel for NetOccupancyPanel {
         f.render_widget(Paragraph::new(out), inner);
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let chrome = PanelChrome::new("Band Occupancy")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.into());
@@ -650,7 +650,7 @@ impl Panel for NetOccupancyPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -1013,8 +1013,17 @@ mod tests {
         let m = surveyed();
         let theme = crate::Theme::sdr();
         let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
-        term.draw(|f| NetOccupancyPanel.render_bonded(f, f.area(), &m, &theme, false, Bond::Below))
-            .unwrap();
+        term.draw(|f| {
+            NetOccupancyPanel.render_bonded(
+                f,
+                f.area(),
+                &crate::ui::View::of(&m),
+                &theme,
+                false,
+                Bond::Below,
+            )
+        })
+        .unwrap();
         let buf = term.backend().buffer();
         let bar_rows = (0..20u16)
             .filter(|&y| {

@@ -345,7 +345,7 @@ mod tests {
                                     name,
                                     f,
                                     Rect::new(2, 2, w, h),
-                                    m,
+                                    &crate::ui::View::of(m),
                                     &theme,
                                     false,
                                 )

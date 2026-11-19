@@ -30,7 +30,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 use zones::{Zones, BINS};
@@ -45,7 +44,7 @@ impl Panel for IqHistogramPanel {
         (36, 9)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, _state: &crate::ui::View<'_>) -> PanelChrome {
         PanelChrome::new("IQ Amplitude Distribution").stale_when(Staleness::NotStreaming)
     }
 
@@ -53,7 +52,7 @@ impl Panel for IqHistogramPanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -90,6 +89,7 @@ impl Panel for IqHistogramPanel {
 mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
 
     fn with_hist(fill: impl Fn(usize) -> u64) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();

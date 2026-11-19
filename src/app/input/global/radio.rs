@@ -7,7 +7,7 @@
 //! waterfall's fall-through safe: `handle_no_device` hides the radio and every
 //! one of these returns immediately.
 
-use crate::state::InputMode;
+use crate::ui::InputMode;
 
 use super::super::{metrics, InputCtx};
 

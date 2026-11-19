@@ -67,7 +67,7 @@ impl Panel for PagerFacePanel {
         (60, 21)
     }
 
-    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+    fn chrome(&self, state: &crate::ui::View<'_>) -> PanelChrome {
         let v = &state.pager.view;
         PanelChrome::new("Pager")
             .stale_when(Staleness::NotStreaming)
@@ -79,7 +79,7 @@ impl Panel for PagerFacePanel {
         &self,
         f: &mut Frame,
         inner: Rect,
-        state: &SdrMetrics,
+        state: &crate::ui::View<'_>,
         theme: &crate::Theme,
         _focused: bool,
     ) {
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn nothing_heard_says_so() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::pocsag::SECTION.to_string();
+        m.show_section(crate::signal::pocsag::SECTION);
         m.radio.frequency = 439_987_500;
         let all = face_text(&m, 120, 34);
         assert!(all.contains("SEARCHING"), "{all}");
@@ -595,7 +595,7 @@ mod tests {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 34)).unwrap();
         terminal
-            .draw(|f| PagerFacePanel.render(f, f.area(), &m, &theme, false))
+            .draw(|f| PagerFacePanel.render(f, f.area(), &crate::ui::View::of(&m), &theme, false))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let found = (0..34u16)

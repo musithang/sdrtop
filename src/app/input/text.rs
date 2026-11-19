@@ -8,16 +8,15 @@
 //! they are the one place a key is **not** case-folded - a marker label is typed,
 //! capitals and all.
 
-use std::sync::{Arc, Mutex};
-
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::engine::command::{Command, Reply};
-use crate::state::{InputMode, RailMode, SdrMetrics, SpectrumMarker, StationField};
+use crate::state::{SpectrumMarker, StationField};
+use crate::ui::{InputMode, RailMode};
 
 use super::{menu, metrics, KeyAction};
 
-pub(super) fn device_option(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, id: &str) -> KeyAction {
+pub(super) fn device_option(key: KeyEvent, state: &crate::ui::Screen, id: &str) -> KeyAction {
     let mut m = metrics(state);
     if m.ui.device_option_update.is_pending() {
         return KeyAction::Continue;
@@ -77,9 +76,9 @@ pub(super) fn device_option(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, id: &
 
 /// Typing a `[station]` setting in the Options pane. A value that is not
 /// one keeps the old and says why; Esc leaves without changing anything.
-pub(super) fn station(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, field: StationField) {
+pub(super) fn station(key: KeyEvent, state: &crate::ui::Screen, field: StationField) {
     let mut m = metrics(state);
-    let clear_error = |m: &mut SdrMetrics| {
+    let clear_error = |m: &mut crate::ui::screen::Locked<'_>| {
         if let InputMode::StationInput { error, .. } = &mut m.ui.input_mode {
             *error = None;
         }
@@ -116,7 +115,7 @@ pub(super) fn station(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, field: Stat
     }
 }
 
-fn clear_option_error(m: &mut SdrMetrics) {
+fn clear_option_error(m: &mut crate::ui::screen::Locked<'_>) {
     if let InputMode::DeviceOptionInput { error, .. } = &mut m.ui.input_mode {
         *error = None;
     }
@@ -124,7 +123,7 @@ fn clear_option_error(m: &mut SdrMetrics) {
 
 pub(super) fn frequency(
     key: KeyEvent,
-    state: &Arc<Mutex<SdrMetrics>>,
+    state: &crate::ui::Screen,
     core: Option<&crate::engine::Engine>,
 ) {
     match key.code {
@@ -186,7 +185,7 @@ pub(super) fn frequency(
 
 pub(super) fn sample_rate(
     key: KeyEvent,
-    state: &Arc<Mutex<SdrMetrics>>,
+    state: &crate::ui::Screen,
     core: Option<&crate::engine::Engine>,
 ) {
     match key.code {
@@ -299,7 +298,7 @@ pub(super) fn sample_rate(
 /// `[` / `]` focus keys. Validates the new bound against the other one and the
 /// HackRF tuning range before committing, and clears the stale frame so the next
 /// cycle rebuilds over the new band.
-pub(super) fn sweep_range(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, is_start: bool) {
+pub(super) fn sweep_range(key: KeyEvent, state: &crate::ui::Screen, is_start: bool) {
     match key.code {
         KeyCode::Esc => {
             let mut m = metrics(state);
@@ -372,7 +371,7 @@ pub(super) fn sweep_range(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, is_star
     }
 }
 
-pub(super) fn marker_name(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>) {
+pub(super) fn marker_name(key: KeyEvent, state: &crate::ui::Screen) {
     match key.code {
         KeyCode::Esc => {
             let mut m = metrics(state);
@@ -422,7 +421,7 @@ pub(super) fn marker_name(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>) {
 /// built by [`crate::state::FrequencyReference::from_trusted`] from the
 /// device's offset as it stands, replaces whatever reference there was, and
 /// expires on the same declared interval every reference does.
-pub(super) fn reference_accuracy(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, address: [u8; 6]) {
+pub(super) fn reference_accuracy(key: KeyEvent, state: &crate::ui::Screen, address: [u8; 6]) {
     match key.code {
         KeyCode::Esc => {
             let mut m = metrics(state);
@@ -479,7 +478,10 @@ pub(super) fn reference_accuracy(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, 
 mod tests {
     use super::*;
     use crate::hardware;
+    use crate::state::SdrMetrics;
     use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
     use crate::config::LayoutConfig;
     use crate::ui::{LayoutEngine, PanelRegistry};
@@ -518,7 +520,7 @@ mod tests {
         }
     }
 
-    fn two_bands() -> (Arc<Mutex<SdrMetrics>>, Arc<TwoBands>) {
+    fn two_bands() -> (crate::ui::Screen, Arc<TwoBands>) {
         let caps = hardware::DeviceCapabilities {
             freq_min_hz: 9_000,
             freq_max_hz: 260_000_000,
@@ -532,11 +534,11 @@ mod tests {
             caps,
             tuned: Mutex::new(Vec::new()),
         });
-        (Arc::new(Mutex::new(m)), radio)
+        (crate::ui::Screen::of(m), radio)
     }
 
-    fn type_frequency(state: &Arc<Mutex<SdrMetrics>>, radio: &Arc<TwoBands>, text: &str) {
-        let core = crate::engine::Engine::new(Arc::clone(state), radio.clone());
+    fn type_frequency(state: &crate::ui::Screen, radio: &Arc<TwoBands>, text: &str) {
+        let core = crate::engine::Engine::new(Arc::clone(&state.m), radio.clone());
         metrics(state).ui.input_buf = text.to_string();
         frequency(KeyEvent::from(KeyCode::Enter), state, Some(&core));
     }
@@ -564,7 +566,7 @@ mod tests {
     #[test]
     fn the_arrows_stop_at_the_bands_edge() {
         let (state, radio) = two_bands();
-        let core = crate::engine::Engine::new(Arc::clone(&state), radio.clone());
+        let core = crate::engine::Engine::new(Arc::clone(&state.m), radio.clone());
         let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
         let mut show_footer = true;
         let focus_keys = HashMap::new();
@@ -585,7 +587,7 @@ mod tests {
             .all(|&hz| hz == 31_000_000));
     }
 
-    fn rate_key(state: &Arc<Mutex<SdrMetrics>>, code: KeyCode) {
+    fn rate_key(state: &crate::ui::Screen, code: KeyCode) {
         sample_rate(KeyEvent::from(code), state, None);
     }
 
@@ -594,9 +596,12 @@ mod tests {
     /// no list they leave the field alone.
     #[test]
     fn the_arrows_step_a_listed_rate_into_the_field() {
-        let mut m = SdrMetrics::fixture().airspyhf();
-        m.ui.input_mode = InputMode::SampleRateInput;
-        let state = Arc::new(Mutex::new(m));
+        let m = SdrMetrics::fixture().airspyhf();
+        let ui = crate::ui::UiState {
+            input_mode: InputMode::SampleRateInput,
+            ..crate::ui::UiState::default()
+        };
+        let state = crate::ui::Screen::new(Arc::new(Mutex::new(m)), ui);
         rate_key(&state, KeyCode::Right);
         assert_eq!(metrics(&state).ui.input_buf, "0.912");
         rate_key(&state, KeyCode::Right);
@@ -607,9 +612,12 @@ mod tests {
         rate_key(&state, KeyCode::Up);
         assert_eq!(metrics(&state).ui.input_buf, "0.768");
 
-        let mut hackrf = SdrMetrics::fixture();
-        hackrf.ui.input_mode = InputMode::SampleRateInput;
-        let state = Arc::new(Mutex::new(hackrf));
+        let hackrf = SdrMetrics::fixture();
+        let hackrf_ui = crate::ui::UiState {
+            input_mode: InputMode::SampleRateInput,
+            ..crate::ui::UiState::default()
+        };
+        let state = crate::ui::Screen::new(Arc::new(Mutex::new(hackrf)), hackrf_ui);
         rate_key(&state, KeyCode::Right);
         assert_eq!(metrics(&state).ui.input_buf, "");
     }
@@ -651,10 +659,11 @@ mod tests {
             Mutex::new(Vec::new()),
         ));
         let mut m = SdrMetrics::fixture().airspyhf();
+        let mut ui = crate::ui::UiState::default();
         m.radio.config_sample_rate = 912_000.0;
-        m.ui.input_mode = InputMode::SampleRateInput;
-        let state = Arc::new(Mutex::new(m));
-        let core = crate::engine::Engine::new(Arc::clone(&state), radio.clone());
+        ui.input_mode = InputMode::SampleRateInput;
+        let state = crate::ui::Screen::new(Arc::new(Mutex::new(m)), ui);
+        let core = crate::engine::Engine::new(Arc::clone(&state.m), radio.clone());
         rate_key(&state, KeyCode::Left);
         sample_rate(KeyEvent::from(KeyCode::Enter), &state, Some(&core));
         assert_eq!(*radio.1.lock().unwrap(), vec![768_000.0]);

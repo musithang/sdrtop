@@ -26,8 +26,8 @@ use crate::config::{AppConfig, RadioConfig};
 use crate::hardware::{self, DeviceCapabilities, GainModel};
 use crate::state::{
     Accumulators, IqState, ObserverState, RadioState, SdrMetrics, SignalState, SpectrumMarker,
-    SpectrumState, SweepConfig, SweepState, SystemState, TimingState, UiState, WaterfallState,
-    DEFAULT_LNA_GAIN, DEFAULT_VGA_GAIN, RECALL_SLOTS, THROUGHPUT_HISTORY_LEN, WATERFALL_MIN_ROWS,
+    SpectrumState, SweepConfig, SweepState, SystemState, TimingState, WaterfallState,
+    DEFAULT_LNA_GAIN, DEFAULT_VGA_GAIN, THROUGHPUT_HISTORY_LEN, WATERFALL_MIN_ROWS,
 };
 
 /// The radio settings a session starts at, after the startup clamp.
@@ -81,9 +81,6 @@ pub(crate) struct Boot {
     /// annotate an axis that never draws - and `save_config` is a no-op in
     /// observer mode, so there is no path back for them either.
     pub markers: Vec<SpectrumMarker>,
-    /// Command Rail recall slots. Empty in observer mode for the same reason:
-    /// a recall jump retunes the radio, which observer mode cannot do.
-    pub recall: [Option<u64>; RECALL_SLOTS],
 }
 
 impl Boot {
@@ -113,7 +110,6 @@ impl Boot {
             },
             observer: ObserverState::default(),
             markers: cfg.display.spectrum_markers.clone(),
-            recall: crate::state::recall_from_hz(cfg.radio.recall_hz),
         }
     }
 
@@ -181,7 +177,6 @@ impl Boot {
                 ..Default::default()
             },
             markers: vec![],
-            recall: [None; RECALL_SLOTS],
         }
     }
 }
@@ -352,7 +347,6 @@ pub(crate) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         identity,
         observer,
         markers,
-        recall,
     } = boot;
 
     caps.validate_display()?;
@@ -462,10 +456,6 @@ pub(crate) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
                 dwell_ms: cfg.sweep.dwell_ms,
             },
             ..SweepState::default()
-        },
-        ui: UiState {
-            recall,
-            ..UiState::default()
         },
         log: VecDeque::new(),
         events: Arc::default(),
@@ -939,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn observer_mode_starts_without_markers_or_recall() {
+    fn observer_mode_starts_without_markers() {
         let mut cfg = AppConfig::default();
         cfg.display.spectrum_markers = vec![SpectrumMarker {
             freq_hz: 100_000_000,
@@ -947,8 +937,6 @@ mod tests {
             channel_bw_hz: None,
             measured_bw_hz: None,
         }];
-        cfg.radio.recall_hz = [100_000_000, 0, 0];
-
         let live = initial_metrics(
             &cfg,
             Boot::normal(
@@ -961,7 +949,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(live.spectrum.markers.len(), 1);
-        assert_eq!(live.ui.recall[0], Some(100_000_000));
 
         let obs = initial_metrics(
             &cfg,
@@ -969,7 +956,6 @@ mod tests {
         )
         .unwrap();
         assert!(obs.spectrum.markers.is_empty());
-        assert!(obs.ui.recall.iter().all(|s| s.is_none()));
         assert!(obs.observer.active);
     }
 
