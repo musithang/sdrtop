@@ -27,7 +27,8 @@ pub mod detect;
 pub mod ext;
 pub mod fer;
 pub mod follow;
-pub mod gfsk;
+/// The GFSK modulator, a building block of its own, named here as it always was.
+pub use monas_dsp::gfsk;
 pub mod interval;
 pub mod llcp;
 pub mod measure;

@@ -58,9 +58,10 @@ button. There is no undo. There is no kindly maintainer at the other end of a
 ticket who will make an exception, because there is no exception to make. The
 number is spent. It is gone. It is on the internet with your name on it.
 
-And there are three of them now: `monas`, the engine; `sdrtop`, the terminal;
-`monasd`, the engine with no screen. One version number, three crates, three
-spent numbers every time. Once the Rite of the First Offering below has been
+And there are several of them now: `monas`, the engine, and the `monas-*`
+crates it is made of; `sdrtop`, the terminal; `monasd`, the engine with no
+screen. One version number, every crate, a spent number for each of them every
+time. Once the Rite of the First Offering below has been
 performed, each is set to **Trusted Publishing only** on crates.io, so the only
 hand that can publish one is the workflow's, and a token that leaks out of
 somebody's shell history publishes nothing at all.
@@ -317,12 +318,19 @@ publishes nothing, names it, and points here.
 1. **Make a token** on crates.io, scoped to `publish-new` and nothing else, with
    an expiry measured in hours.
 
-2. **Offer the new crates, the engine first:**
+2. **Offer the new crates, the deepest first:** the building blocks, then the
+   signal crates made of them, then the engine, then any program that is new.
+   The `publish` job's message names exactly which ones are missing; offer
+   those, in this order, and no others:
 
    ```sh
-   cargo publish -p monas --locked     # every program depends on it
-   cargo publish -p monasd --locked    # and then any program that is new
+   cargo publish -p monas-dsp --locked   # everything stands on it
+   cargo publish -p monas --locked       # every program depends on it
+   cargo publish -p monasd --locked      # and then any program that is new
    ```
+
+   A crate offered before one it depends on is refused by crates.io, which is
+   at least a refusal you can undo by doing it in the right order.
 
    Not `sdrtop`, which already exists and already trusts the workflow. It goes
    up with the rerun in step 5, the way it always has.

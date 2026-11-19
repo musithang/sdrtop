@@ -185,7 +185,7 @@ pub fn recover(x: &[f32], start: f64, sps: f64, gain: f64, symbols: usize) -> Ve
 /// Test-only since the receiver searches a growing capture with
 /// [`PhaseSearch`]: this is the definition that search is held to, bit for
 /// bit.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64 {
     let resolution = resolution.max(1);
     let mut best_phase = 0.0;
@@ -268,7 +268,7 @@ impl PhaseSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use crate::testkit::Rng;
 
     /// The growing search is [`find_phase`], exactly, at every length of a
     /// buffer fed in ragged pieces: what a capture growing an octet at a
@@ -469,7 +469,7 @@ mod tests {
         // its shaping filter, so this signal has the same kind of transition
         // shape without depending on that module.
         const SPS: f64 = 4.0;
-        let taps = crate::signal::dsp::fir::gaussian_taps(0.5, SPS as usize, 4);
+        let taps = crate::fir::gaussian_taps(0.5, SPS as usize, 4);
         let half = (taps.len() as isize - 1) / 2;
         let mut rng_state = 7u64;
         let mut next_bit = || {

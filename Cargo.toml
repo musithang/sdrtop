@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-# A workspace only: `monas`, the engine, and the two programs built on it:
+# A workspace only: `monas`, the engine, the `monas-*` crates it is made of,
+# and the two programs built on it:
 # `sdrtop`, the terminal, and `monasd`, the engine with no screen.
 # Every member takes its version, edition, toolchain floor and licence from
 # here, and its internal dependencies from `[workspace.dependencies]`, so a
@@ -28,6 +29,7 @@ authors = ["MusiThang <viktor.laszlo92@protonmail.com>"]
 # misses one.
 [workspace.dependencies]
 monas = { path = "crates/monas", version = "=0.7.4" }
+monas-dsp = { path = "crates/monas-dsp", version = "=0.7.4" }
 
 ratatui = "0.30"
 libc = "0.2"

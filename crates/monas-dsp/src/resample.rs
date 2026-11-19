@@ -195,7 +195,7 @@ impl Resampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::nco::Nco;
+    use crate::nco::Nco;
     use std::f64::consts::TAU;
 
     const ROLLOFF: f64 = 0.1;

@@ -460,10 +460,10 @@ mod tests {
         let w = Uncertain::exact(20.0).written(f64::INFINITY, 1);
         assert_eq!((w.value.as_deref(), w.sigma), (Some("20.0"), None));
     }
-    use crate::signal::dsp::correlate::DelayedAutocorrelator;
-    use crate::signal::dsp::estimate::{moose_offset, moose_variance};
-    use crate::signal::dsp::nco::Nco;
-    use crate::signal::dsp::testkit::Rng;
+    use crate::correlate::DelayedAutocorrelator;
+    use crate::estimate::{moose_offset, moose_variance};
+    use crate::nco::Nco;
+    use crate::testkit::Rng;
 
     #[test]
     fn the_bound_is_the_closed_form_it_claims() {

@@ -16,9 +16,10 @@ readme = "README.md"
 # The test fixtures other crates' tests build on: a state to draw panels
 # from, a test radio, the native backends' test support. Switched on only
 # from `[dev-dependencies]`, so no release build carries them.
-testing = []
+testing = ["monas-dsp/testing"]
 
 [dependencies]
+monas-dsp.workspace = true
 libc.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -30,3 +31,8 @@ rustfft.workspace = true
 num-complex.workspace = true
 libloading.workspace = true
 serialport.workspace = true
+
+[dev-dependencies]
+# The building blocks' test kit, for this crate's own tests: a dependency's
+# `cfg(test)` is off when its dependent's tests compile.
+monas-dsp = { workspace = true, features = ["testing"] }

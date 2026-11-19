@@ -36,7 +36,7 @@ pub(crate) fn finite_ema(previous: f32, sample: f32, alpha: f32) -> f32 {
 ///
 /// All three slices must have equal lengths.
 /// A mismatch panics before either output is mutated.
-pub(crate) fn average_and_peak(
+pub fn average_and_peak(
     samples: &[f32],
     smoothed: &mut [f32],
     peak: &mut [f32],
@@ -85,7 +85,7 @@ pub(crate) fn average_and_peak(
 ///
 /// `scratch` must hold at least `values.len()` entries, including unavailable values.
 /// Insufficient capacity panics before `scratch` is mutated.
-pub(crate) fn quietest_mean(values: &[f32], scratch: &mut [f32], fraction: usize) -> f32 {
+pub fn quietest_mean(values: &[f32], scratch: &mut [f32], fraction: usize) -> f32 {
     assert!(
         scratch.len() >= values.len(),
         "scratch is shorter than values"

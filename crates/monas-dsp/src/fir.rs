@@ -381,7 +381,7 @@ mod tests {
     /// already cost.
     #[test]
     fn the_f32_sum_is_the_f64_sum() {
-        use crate::signal::dsp::testkit::Rng;
+        use crate::testkit::Rng;
         let mut rng = Rng::new(21);
         // A tone and noise, quantised to the 8-bit grid at half scale.
         let x: Vec<Complex<f32>> = rng

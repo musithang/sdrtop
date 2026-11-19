@@ -57,7 +57,7 @@ pub fn initial(at: impl Fn(f64) -> f32, first: usize, preamble_bits: usize) -> f
 /// the two, which converges to it), and a bit's carrier is its reading less
 /// its context's offset: a linear drift then leaves nothing behind, and a
 /// curved one only its bend.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn by_bit(bits: &[bool], at: impl Fn(f64) -> f32) -> Vec<Option<f64>> {
     by_bit_from(bits, &BitReadings::read(bits.len(), at))
 }
@@ -277,7 +277,7 @@ mod tests {
     /// zeros in a block, and a drifting carrier is followed.
     #[test]
     fn each_bit_gives_the_carrier_under_it() {
-        let mut rng = crate::signal::dsp::testkit::Rng::new(4);
+        let mut rng = crate::testkit::Rng::new(4);
         let bits: Vec<bool> = (0..200).map(|_| rng.next_u64() & 1 == 1).collect();
         let carrier = |x: f64| 10_000.0 + 20.0 * x;
         let at = |x: f64| {

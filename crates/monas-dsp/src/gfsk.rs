@@ -4,7 +4,7 @@
 //! The GFSK waveform: turning bits into the IQ samples LE 1M actually
 //! transmits.
 //!
-//! **One function, two callers.** [`detect`](super::detect) calls it to build
+//! **One function, two callers.** The BLE advertising detector calls it to build
 //! the known reference a matched filter correlates against - real production
 //! use, since the advertising access address is fixed and known in advance.
 //! This module's own tests call it to check the round trip. Neither role
@@ -14,7 +14,7 @@
 
 use num_complex::Complex;
 
-use crate::signal::dsp::fir::gaussian_taps;
+use crate::fir::gaussian_taps;
 
 /// How many symbol periods the shaping filter spans. 4 is the common choice
 /// in the references [`gaussian_taps`] cites; nothing here depends on the
@@ -90,8 +90,8 @@ pub fn modulate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::discriminate::discriminate;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use crate::discriminate::discriminate;
+    use crate::testkit::{at_snr, Rng};
 
     const SPS: usize = 4;
     const SYMBOL_RATE: f64 = 1_000_000.0;

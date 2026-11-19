@@ -175,7 +175,7 @@ pub fn correlation(readings: &[f32], k: usize, a: bool, b: bool) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use crate::testkit::Rng;
 
     const LE_CODED: Code = Code::new(4, 0o17, 0o13);
     const WIFI: Code = Code::new(7, 0o133, 0o171);

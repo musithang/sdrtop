@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+[package]
+name = "monas-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "sdrtop's DSP building blocks: filters, the sample vocabulary, GFSK. Internal; no stability promise."
+readme = "README.md"
+
+[features]
+# The test kit other crates' tests build their signals with (a seeded noise
+# source, a signal at a stated SNR). Switched on only from
+# `[dev-dependencies]`, so no release build carries it.
+testing = []
+
+[dependencies]
+num-complex.workspace = true
+rustfft.workspace = true

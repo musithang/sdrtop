@@ -120,7 +120,7 @@ mod tests {
     /// beside what the 8 bits themselves already cost at that amplitude.
     #[test]
     fn the_f32_discriminator_is_the_f64_one() {
-        use crate::signal::dsp::testkit::Rng;
+        use crate::testkit::Rng;
         use std::f64::consts::TAU;
         let rate = 4e6;
         let mut rng = Rng::new(8);

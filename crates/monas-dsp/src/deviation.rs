@@ -62,7 +62,7 @@ pub const READINGS_PER_BIT: usize = 32;
 /// puts on the carrier just the same. A drift over the span moves the
 /// midpoint to the middle of it, and one polarity's readings up and the
 /// other's down by the same amount, which the averages of both then cancel.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn suite_readings(bits: &[bool], at: impl Fn(f64) -> f32) -> Option<(Vec<f32>, Vec<f32>)> {
     suite_readings_from(bits, &BitReadings::read(bits.len(), at))
 }

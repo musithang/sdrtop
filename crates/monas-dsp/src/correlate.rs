@@ -178,7 +178,7 @@ impl DelayedAutocorrelator {
 /// instead. Wi-Fi symbol timing from the L-LTF cross-correlation would be a
 /// second consumer.
 #[derive(Clone, Copy, Debug)]
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub struct Match {
     /// The correlation with the reference sequence.
     pub value: Complex<f64>,
@@ -187,7 +187,7 @@ pub struct Match {
     reference_energy: f64,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl Match {
     /// `|y|^2 / (E_reference * E_window)`, in `[0, 1]` by Cauchy-Schwarz.
     ///
@@ -207,7 +207,7 @@ impl Match {
 /// Correlation of a signal with a sequence known in advance.
 ///
 /// See [`Match`] for who uses it.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub struct MatchedFilter {
     /// The reference, conjugated, in its own order: applying it is a dot
     /// product with the window oldest sample first.
@@ -275,7 +275,7 @@ impl BlockPlan {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl MatchedFilter {
     pub fn new(reference: &[Complex<f32>]) -> Self {
         let wide: Vec<Complex<f64>> = reference
@@ -546,7 +546,7 @@ mod tests {
         assert_eq!(again, fresh);
     }
     use super::*;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use crate::testkit::{at_snr, Rng};
 
     /// The honest form: recompute both sums over the window, from scratch.
     fn direct(x: &[Complex<f32>], n: usize, window: usize, lag: usize) -> Coherence {

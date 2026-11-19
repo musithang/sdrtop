@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Continuity accounting for a [`crate::hardware::StreamBlock`] feed.
+//! Continuity accounting for a [`crate::sample::StreamBlock`] feed.
 //!
 //! Every consumer of one of those channels asks the same two questions of every
 //! block - does this one continue the last, and how many never arrived - and

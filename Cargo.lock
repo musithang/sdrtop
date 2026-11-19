@@ -1032,6 +1032,7 @@ dependencies = [
  "crossbeam-channel",
  "libc",
  "libloading",
+ "monas-dsp",
  "num-complex",
  "rustfft",
  "serde",
@@ -1039,6 +1040,14 @@ dependencies = [
  "serialport",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "monas-dsp"
+version = "0.7.4"
+dependencies = [
+ "num-complex",
+ "rustfft",
 ]
 
 [[package]]

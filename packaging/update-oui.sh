@@ -41,7 +41,16 @@ done
 (cd "$DIR" && sha256sum oui.csv mam.csv oui36.csv iab.csv > SHA256SUMS)
 date -u +%Y-%m-%d > "$DIR/FETCHED"
 
-SDRTOP_IEEE_DIR="$DIR" cargo test --locked --manifest-path "$ROOT/Cargo.toml" \
-    -- --ignored --exact signal::net::vendor::tests::regenerate_the_oui_snapshot
+# In the engine's crate, and asserted to have run: with a name that matches
+# nothing, cargo reports success for zero tests and the snapshot is never
+# rewritten, while this script says it was.
+SDRTOP_IEEE_DIR="$DIR" cargo test -p monas --locked --manifest-path "$ROOT/Cargo.toml" \
+    -- --ignored --exact signal::net::vendor::tests::regenerate_the_oui_snapshot \
+    > "$DIR/test.log" 2>&1 || { cat "$DIR/test.log" >&2; exit 1; }
+grep -q 'test result: ok. 1 passed' "$DIR/test.log" || {
+    cat "$DIR/test.log" >&2
+    echo "update-oui.sh: the generator did not run; nothing was rewritten" >&2
+    exit 1
+}
 
 echo "update-oui.sh: crates/monas/src/signal/net/ieee_oui.tsv rewritten from the listing of $(cat "$DIR/FETCHED")"

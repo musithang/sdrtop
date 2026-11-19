@@ -216,9 +216,9 @@ pub fn schmidl_cox_plateau(metric: &[f64], fraction: f64) -> Option<Plateau> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::correlate::DelayedAutocorrelator;
-    use crate::signal::dsp::nco::Nco;
-    use crate::signal::dsp::testkit::Rng;
+    use crate::correlate::DelayedAutocorrelator;
+    use crate::nco::Nco;
+    use crate::testkit::Rng;
 
     const D: usize = 64;
 

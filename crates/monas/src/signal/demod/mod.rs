@@ -28,7 +28,6 @@ use std::time::Duration;
 
 use num_complex::Complex;
 
-use crate::hardware::{SampleFormat, SampleGeometry};
 use crate::state::{AmMeasure, CtcssMeasure, FmMeasure, Modulation};
 
 /// Channel rate targeted for wide-band FM.
@@ -94,80 +93,11 @@ pub fn channel_rate(sample_rate: f64, d: usize) -> f64 {
     sample_rate / d as f64
 }
 
-/// Tap count for a decimate-by-`d` channel filter.
-///
-/// A Hamming-windowed sinc has a transition width of roughly `3.3 / taps`
-/// (normalised to the input rate). Holding that to about a fifth of the channel
-/// bandwidth needs ~16.5 × `d` taps. Clamped: below 31 the filter is too soft to
-/// reject a neighbouring station, and above 511 the cost stops buying quality -
-/// at very high sample rates the filter degrades gracefully, which is why the
-/// panel advises dropping the sample rate rather than pretending otherwise.
-pub fn tap_count(d: usize) -> usize {
-    let n = ((d as f64) * 16.5).round() as usize;
-    let n = n.clamp(31, 511);
-    n | 1 // odd → a symmetric filter with an exact centre tap
-}
-
-/// Decimation factor beyond which [`tap_count`] saturates at its 511-tap cap and
-/// the channel filter stops sharpening. Past this the panel advises a lower
-/// sample rate rather than silently returning a softer measurement.
-pub const FILTER_QUALITY_D_LIMIT: usize = 31;
-
-/// Decode raw wire bytes into complex samples, taking at most `max_pairs`.
-///
-/// Deliberately unwindowed - this is a time-domain signal path, not an FFT input.
-pub fn decode(buf: &[u8], geometry: SampleGeometry, max_pairs: usize, out: &mut Vec<Complex<f32>>) {
-    out.clear();
-    // Bytes per pair, not a constant 2: a 16-bit block holds half as many pairs
-    // as its length suggests, and slicing it as though it held twice as many
-    // would read past the end.
-    let stride = geometry.bytes_per_pair();
-    let pairs = (buf.len() / stride).min(max_pairs);
-    out.reserve(pairs);
-    let bytes = &buf[..pairs * stride];
-    match geometry.format {
-        SampleFormat::Int8 => {
-            let fs = geometry.full_scale;
-            for pair in bytes.as_chunks::<2>().0 {
-                out.push(Complex {
-                    re: pair[0] as i8 as f32 / fs,
-                    im: pair[1] as i8 as f32 / fs,
-                });
-            }
-        }
-        // Half a count below mid-scale, for the reason spelled out in
-        // `signal::fft::frame::decode_into`.
-        SampleFormat::Uint8 => {
-            let bias = geometry.full_scale - 0.5;
-            for pair in bytes.as_chunks::<2>().0 {
-                out.push(Complex {
-                    re: (pair[0] as f32 - bias) / bias,
-                    im: (pair[1] as f32 - bias) / bias,
-                });
-            }
-        }
-        SampleFormat::Int16 => {
-            let fs = geometry.full_scale;
-            for quad in bytes.as_chunks::<4>().0 {
-                out.push(Complex {
-                    re: i16::from_le_bytes([quad[0], quad[1]]) as f32 / fs,
-                    im: i16::from_le_bytes([quad[2], quad[3]]) as f32 / fs,
-                });
-            }
-        }
-        // Exact in f32 up to 2^24 counts, and the full scale is a power of
-        // two, so nothing the container carries is rounded here.
-        SampleFormat::Int32 => {
-            let fs = geometry.full_scale;
-            for oct in bytes.as_chunks::<8>().0 {
-                out.push(Complex {
-                    re: i32::from_le_bytes([oct[0], oct[1], oct[2], oct[3]]) as f32 / fs,
-                    im: i32::from_le_bytes([oct[4], oct[5], oct[6], oct[7]]) as f32 / fs,
-                });
-            }
-        }
-    }
-}
+/// The decimation filter's size, and the wire decoder: building blocks, kept
+/// where the rest of the signal chain shares them, and named here as they
+/// always were.
+pub use monas_dsp::filter::{tap_count, FILTER_QUALITY_D_LIMIT};
+pub use monas_dsp::sample::decode;
 
 /// Envelope floor, as a fraction of the block's RMS amplitude, below which a
 /// sample's phase carries no usable information and is discarded.
@@ -725,16 +655,6 @@ mod tests {
     }
 
     #[test]
-    fn tap_count_is_odd_and_clamped() {
-        assert_eq!(tap_count(1) % 2, 1);
-        assert!(tap_count(1) >= 31);
-        assert!(tap_count(1000) <= 511);
-        for d in [2usize, 8, 40, 80] {
-            assert_eq!(tap_count(d) % 2, 1, "d={d} must give an odd tap count");
-        }
-    }
-
-    #[test]
     fn discriminator_recovers_a_constant_offset() {
         let rate = 250_000.0;
         let iq = fm_signal(rate, 4096, 10_000.0, 0.0, 0.0);
@@ -1283,75 +1203,5 @@ mod tests {
         // Far off the tone the detector must read near zero.
         let off = goertzel_amplitude(&x, &window, 500.0, rate);
         assert!(off < 20.0, "off-tone leakage = {off}");
-    }
-
-    fn geom(format: SampleFormat) -> SampleGeometry {
-        SampleGeometry {
-            format,
-            full_scale: 128.0,
-            converter_bits: None,
-        }
-    }
-
-    #[test]
-    fn decode_respects_the_slice_cap_and_format() {
-        let bytes: Vec<u8> = (0..200u16).map(|v| v as u8).collect();
-        let mut out = Vec::new();
-        decode(&bytes, geom(SampleFormat::Int8), 10, &mut out);
-        assert_eq!(out.len(), 10, "must stop at the slice cap");
-
-        // Uint8 decodes around the 127.5 bias: 0x80 is ~zero.
-        decode(&[0x80, 0x80], geom(SampleFormat::Uint8), 8, &mut out);
-        assert_eq!(out.len(), 1);
-        assert!(out[0].re.abs() < 0.01 && out[0].im.abs() < 0.01);
-    }
-
-    /// A 16-bit block holds half as many pairs as its length suggests. The cap
-    /// and the slice both have to use the stride, or the decoder reads past the
-    /// end of what it was given.
-    #[test]
-    fn decode_counts_sixteen_bit_pairs_by_stride() {
-        let wide = SampleGeometry {
-            format: SampleFormat::Int16,
-            full_scale: 32768.0,
-            converter_bits: None,
-        };
-        // 16 bytes: four 16-bit pairs, or eight 8-bit ones.
-        let bytes = vec![0u8; 16];
-        let mut out = Vec::new();
-        decode(&bytes, wide, 100, &mut out);
-        assert_eq!(out.len(), 4);
-        decode(&bytes, geom(SampleFormat::Int8), 100, &mut out);
-        assert_eq!(out.len(), 8);
-        let deep = SampleGeometry {
-            format: SampleFormat::Int32,
-            full_scale: 8_388_608.0,
-            converter_bits: Some(16),
-        };
-        decode(&bytes, deep, 100, &mut out);
-        assert_eq!(out.len(), 2, "two 32-bit pairs");
-        let mut one = (-(1i32 << 21)).to_le_bytes().to_vec();
-        one.extend_from_slice(&(1i32 << 22).to_le_bytes());
-        decode(&one, deep, 100, &mut out);
-        assert_eq!((out[0].re, out[0].im), (-0.25, 0.5));
-    }
-
-    /// The normalisation follows the device's full scale rather than a constant.
-    /// Exercised with a fabricated wider geometry, so the scaling is proven
-    /// before any real device reports one.
-    #[test]
-    fn decode_normalises_against_the_declared_full_scale() {
-        let wide = SampleGeometry {
-            format: SampleFormat::Int8,
-            full_scale: 512.0,
-            converter_bits: None,
-        };
-        let mut out = Vec::new();
-        // 0x40 is +64 counts. Against 128 that is half scale; against 512 it is
-        // an eighth. Same bytes, different device, different answer.
-        decode(&[0x40, 0x40], geom(SampleFormat::Int8), 1, &mut out);
-        assert!((out[0].re - 0.5).abs() < 1e-6, "got {}", out[0].re);
-        decode(&[0x40, 0x40], wide, 1, &mut out);
-        assert!((out[0].re - 0.125).abs() < 1e-6, "got {}", out[0].re);
     }
 }

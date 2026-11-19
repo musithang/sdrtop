@@ -199,7 +199,7 @@ impl Nco {
     }
 
     /// Fill a block with the oscillator, continuing from the current phase.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn fill(&mut self, out: &mut [Complex<f32>]) {
         self.walk(out.len(), |k, o| {
             out[k] = Complex::new(o.re as f32, o.im as f32)

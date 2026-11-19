@@ -2,21 +2,14 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 pub mod assigned;
-pub mod ballistics;
 pub mod ble;
 pub mod bt;
 pub mod demod;
-// Public because `ui::widgets::reading` needs `dsp::uncertainty`: the
-// rule that a value is printed to no more precision than its uncertainty
-// supports is a numerical decision the UI has to be able to ask about.
-pub mod dsp;
-pub mod errors;
 pub mod fft;
 // Read only by tests until the FT8 worker and view use it. `expect` fails the
 // build once nothing in it is unread, so this line cannot outlive its reason.
 #[cfg_attr(not(test), expect(dead_code))]
 pub mod ft8;
-pub mod iq;
 pub mod net;
 pub mod noise_slope;
 pub mod pocsag;
@@ -26,9 +19,11 @@ pub mod rds_demod;
 pub mod reference;
 pub mod retune;
 pub mod rf_calc;
-mod stats;
-pub mod stream;
 pub mod wifi;
+
+/// The building blocks, under the names the engine has always used for them.
+pub use monas_dsp as dsp;
+pub use monas_dsp::{ballistics, errors, iq, stats, stream};
 
 pub use demod::DemodWorker;
 pub use fft::FftWorker;
