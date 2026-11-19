@@ -26,15 +26,12 @@ tokio.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 toml.workspace = true
-serde_json.workspace = true
 clap.workspace = true
-axum.workspace = true
 
 [dev-dependencies]
 # The engine's test fixtures (a state, a test radio), which no release build
 # carries: resolver 2 keeps a dev-dependency's features out of it.
 monas = { workspace = true, features = ["testing"] }
-tower.workspace = true
 
 [build-dependencies]
 # The man page is generated from the same `Parser` derive `main.rs` parses with,

@@ -1,0 +1,112 @@
+[airspy]
+packing = true
+
+[airspyhf]
+dsp = false
+
+[display]
+active_preset = "net_survey"
+spectrum_style = "fill"
+waterfall_max_rows = 512
+waterfall_palette = "amber"
+
+[[display.spectrum_markers]]
+freq_hz = 92800000
+label = "FM Radio"
+
+[[display.spectrum_markers]]
+channel_bw_hz = 25000
+freq_hz = 156800000
+label = "Marine ch16"
+
+[ft8]
+long_path = true
+names = "this cycle"
+range = "3000"
+rays = false
+this_band = true
+window = "15 min"
+
+[monasd]
+listen = "0.0.0.0:7373"
+mode = "net_survey"
+recordings_dir = "/srv/rec"
+token = "s3cret"
+
+[net]
+bt_channels = 6
+
+[pager]
+display = "amber"
+night = true
+
+[plutosky]
+agc = "fast_attack"
+
+[presets.my_view]
+section = "lab"
+slot = 9
+title = "Mine"
+
+[[presets.my_view.panels]]
+height = 5
+name = "header"
+position = "top"
+
+[[presets.my_view.panels]]
+name = "spectrum"
+position = "body"
+
+[[presets.my_view.panels]]
+name = "footer"
+position = "bottom"
+
+[radio]
+frequency_hz = 92800000
+gain = "LNA=24,VGA=30"
+recall_hz = [
+    433920000,
+    0,
+    145500000,
+]
+sample_rate = 2000000.0
+
+[radio.boost]
+"HackRF One" = true
+RTL-SDR = false
+
+[record]
+max_gb = 2.0
+max_seconds = 30.0
+
+[sdrplay]
+corrections = false
+dab_notch = true
+fm_notch = true
+
+[somebody_else]
+kept = "verbatim"
+
+[station]
+callsign = "HA5ZZT"
+latitude = 47.497
+longitude = 19.04
+
+[sweep]
+dwell_ms = 200
+start_hz = 400000000
+stop_hz = 500000000
+
+[theme]
+base = "nord"
+border_accent = "#88c0d0"
+
+[tinysa]
+attenuation = "auto"
+basic_input = "high"
+ext_gain_db = -10
+high_attenuation = true
+lna = true
+points = 900
+rbw = "10"
+spur = "on"

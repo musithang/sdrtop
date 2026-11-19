@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+[package]
+name = "monasd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "sdrtop's engine with no screen: an HTTP and WebSocket API to the radio and its measurements."
+readme = "../../README.md"
+keywords = ["sdr", "hackrf", "rtl-sdr", "soapysdr", "tui"]
+categories = ["command-line-utilities", "hardware-support", "science"]
+
+[dependencies]
+monas.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+clap.workspace = true
+axum.workspace = true
+
+[dev-dependencies]
+# The engine's test fixtures (a state, a test radio), which no release build
+# carries: resolver 2 keeps a dev-dependency's features out of it.
+monas = { workspace = true, features = ["testing"] }
+# The API's tests drive the router in memory, with no socket.
+tower.workspace = true
+
+[build-dependencies]
+# The man page is generated from the same `Parser` derive `main.rs` parses with,
+# so it cannot describe a flag the binary does not have. See `src/cli.rs`.
+clap.workspace = true
+clap_mangen.workspace = true

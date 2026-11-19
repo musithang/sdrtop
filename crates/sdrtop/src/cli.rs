@@ -71,20 +71,4 @@ pub struct Cli {
     /// solarized) or the name of a file in ~/.config/sdrtop/themes/
     #[arg(long, value_name = "THEME")]
     pub theme: Option<String>,
-
-    /// Run with no terminal: the radio and the measurements only, until
-    /// SIGTERM or Ctrl-C
-    #[arg(long)]
-    pub headless: bool,
-
-    /// With --headless: the address to serve on, host:port (default
-    /// 127.0.0.1:7373; anywhere else needs the token in the config's monasd block)
-    #[arg(long, value_name = "ADDR", requires = "headless")]
-    pub listen: Option<String>,
-
-    /// With --headless: what to compute, by the name of the view that shows
-    /// it, e.g. net_survey (default spectrum; a name it does not know is
-    /// refused with the list)
-    #[arg(long, value_name = "MODE", requires = "headless")]
-    pub mode: Option<String>,
 }

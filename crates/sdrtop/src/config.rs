@@ -2,9 +2,8 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! The terminal's blocks of the config file (`[display]`, `[theme]`,
-//! `[presets]`), the layouts, and `[monasd]` while the headless runner lives
-//! here. The engine's blocks are Monas's, re-exported beside them so the
-//! whole file is read through one module.
+//! `[presets]`) and the layouts. The engine's blocks are Monas's, re-exported
+//! beside them so the whole file is read through one module.
 
 pub use monas::config::*;
 
@@ -119,31 +118,6 @@ impl ThemeConfig {
     }
 }
 
-/// `[monasd]`: how the engine runs with no terminal. Every field optional; a
-/// command-line flag wins over the file.
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]
-pub struct MonasdSettings {
-    /// The address the API listens on, `host:port`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub listen: Option<String>,
-    /// What a client off this machine must present. Required to listen
-    /// anywhere but loopback.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    /// The view to compute for, by its layout name, e.g. `net_survey`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
-    /// Where recordings and logs go; the export directory when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recordings_dir: Option<PathBuf>,
-}
-
-impl MonasdSettings {
-    pub fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
 /// The blocks the terminal owns: how it shows what the engine measures.
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct TuiConfig {
@@ -248,24 +222,6 @@ impl SdrtopConfig {
     /// where it is.
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         save_blocks(self, path, &[ENGINE_BLOCKS, TUI_BLOCKS].concat())
-    }
-}
-
-/// The config as the headless server reads it: the engine's blocks and
-/// `[monasd]`. It writes back only the engine's ([`EngineConfig::save`]):
-/// `[monasd]` is the operator's, and no command changes it.
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
-pub struct MonasdConfig {
-    #[serde(flatten)]
-    pub engine: EngineConfig,
-    #[serde(default, skip_serializing_if = "MonasdSettings::is_default")]
-    pub monasd: MonasdSettings,
-}
-
-impl MonasdConfig {
-    /// See [`load_or_default`].
-    pub fn load_or_default(path: &Path) -> Self {
-        load_or_default(path)
     }
 }
 
@@ -1457,28 +1413,6 @@ panels = [{ name = "spectrum", position = "body" }]
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
-    /// **The headless server reads its block and the engine's, and writes
-    /// back only the engine's**: the display, the theme and the layouts it
-    /// never read are not reset by its save.
-    #[test]
-    fn the_server_writes_back_the_full_config_unchanged() {
-        let path = full_copy("monasd");
-        let cfg = MonasdConfig::load_or_default(&path);
-        assert_eq!(
-            cfg.monasd,
-            MonasdSettings {
-                listen: Some("0.0.0.0:7373".into()),
-                token: Some("s3cret".into()),
-                mode: Some("net_survey".into()),
-                recordings_dir: Some(PathBuf::from("/srv/rec")),
-            }
-        );
-        assert_eq!(cfg.engine.tinysa.points, 900);
-        cfg.engine.save(&path).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), FULL);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
     /// A save at the defaults removes its own blocks and only those.
     #[test]
     fn an_engine_at_its_defaults_removes_only_its_own_blocks() {
@@ -1507,26 +1441,21 @@ panels = [{ name = "spectrum", position = "body" }]
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
-    /// **Every block of the file has exactly one owner**, and each of the
-    /// terminal's halves holds exactly the blocks it owns: a block in two
-    /// lists would have two writers again, and one in a struct but in no list
-    /// would never be saved. Read off the structs' source, so a block added
-    /// to a struct and not to its list fails here; the engine's own struct is
-    /// held to [`ENGINE_BLOCKS`] by its own crate's test.
+    /// **The terminal's struct holds exactly the blocks it owns**, and none
+    /// of them is the engine's: a block in two lists would have two writers
+    /// again, and one in a struct but in no list would never be saved. Read
+    /// off the structs' source, so a block added to a struct and not to its
+    /// list fails here. The engine's struct is held to [`ENGINE_BLOCKS`] by
+    /// its own crate's test.
     #[test]
     fn every_block_has_one_owner() {
         let mut tui = blocks_of("TuiConfig");
-        let mut monasd = blocks_of("MonasdConfig");
-        for (struct_blocks, list) in [(&mut tui, TUI_BLOCKS), (&mut monasd, &["monasd"])] {
-            let mut list = list.to_vec();
-            struct_blocks.sort_unstable();
-            list.sort_unstable();
-            assert_eq!(*struct_blocks, list);
-        }
-        let all = [ENGINE_BLOCKS, TUI_BLOCKS, &["monasd"]].concat();
-        for block in &all {
-            let owners = all.iter().filter(|b| *b == block).count();
-            assert_eq!(owners, 1, "{block} has {owners} owners");
+        let mut list = TUI_BLOCKS.to_vec();
+        tui.sort_unstable();
+        list.sort_unstable();
+        assert_eq!(tui, list);
+        for block in TUI_BLOCKS {
+            assert!(!ENGINE_BLOCKS.contains(block), "{block} has two owners");
         }
         assert_eq!(blocks_of("SdrtopConfig"), Vec::<&str>::new());
     }

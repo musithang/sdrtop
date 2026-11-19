@@ -2,11 +2,11 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! The engine over the network: HTTP and JSON for commands and readings, a
-//! WebSocket for events. A client of the engine like the terminal is, and
-//! held by the same test to never reach for the screen.
+//! WebSocket for events. A client of the engine like the terminal is, in a
+//! crate that cannot reach for the screen: monasd does not depend on sdrtop.
 //!
 //! **Who may ask.** On loopback anyone on this machine may, as anyone on it
-//! may already run sdrtop. Anywhere else a token is required on every
+//! may already run sdrtop or monasd. Anywhere else a token is required on every
 //! request (`Authorization: Bearer <token>`): a command retunes a radio
 //! somebody may be relying on, which is not an anonymous operation.
 //!

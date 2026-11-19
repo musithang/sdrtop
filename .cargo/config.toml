@@ -5,3 +5,4 @@
 # them. `cargo sdrtop -- --device hackrf` is `cargo run -p sdrtop -- --device hackrf`.
 [alias]
 sdrtop = "run -p sdrtop --"
+monasd = "run -p monasd --"

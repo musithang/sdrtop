@@ -12,9 +12,7 @@ mod config;
 mod theme;
 pub use theme::Theme;
 mod event;
-mod headless;
 mod palette;
-mod server;
 mod ui;
 
 /// The engine, under the names the terminal has always used for its parts:
@@ -25,7 +23,7 @@ use anyhow::{Context, Result};
 use app::App;
 use clap::Parser;
 use cli::Cli;
-use config::{MonasdConfig, SdrtopConfig};
+use config::SdrtopConfig;
 use ratatui::crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -123,23 +121,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config_path = cli.config.or_else(default_config_path);
-    // One read of the file, as the front end that runs reads it: the
-    // terminal its blocks and the engine's, a headless run `[monasd]` and the
-    // engine's.
-    let (mut app_cfg, monasd) = match config_path.as_deref() {
-        Some(path) if cli.headless => {
-            let MonasdConfig { engine, monasd } = MonasdConfig::load_or_default(path);
-            (
-                SdrtopConfig {
-                    engine,
-                    ..SdrtopConfig::default()
-                },
-                monasd,
-            )
-        }
-        Some(path) => (SdrtopConfig::load_or_default(path), Default::default()),
-        None => Default::default(),
-    };
+    // One read of the file: the terminal's blocks and the engine's.
+    let mut app_cfg = config_path
+        .as_deref()
+        .map(SdrtopConfig::load_or_default)
+        .unwrap_or_default();
 
     if let Some(f) = cli.frequency {
         app_cfg.engine.radio.frequency_hz = f;
@@ -165,20 +151,6 @@ async fn main() -> Result<()> {
     if let Some(t) = cli.theme {
         app_cfg.tui.theme.base = t;
     }
-
-    // Decided before any radio is looked for: a headless run that could not
-    // run as asked says so at once.
-    let headless = if cli.headless {
-        match headless::plan::plan(cli.listen.as_deref(), cli.mode.as_deref(), &monasd) {
-            Ok(plan) => Some(plan),
-            Err(why) => {
-                eprintln!("sdrtop: {why}");
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
 
     let themes_dir = config_path
         .as_deref()
@@ -222,20 +194,6 @@ async fn main() -> Result<()> {
             )
         );
         std::process::exit(1);
-    }
-
-    if let Some(plan) = headless {
-        let labels: Vec<String> = devices.iter().map(|d| d.label.clone()).collect();
-        let chosen = match headless::plan::pick(&labels) {
-            Ok(i) => i,
-            Err(why) => {
-                eprintln!("sdrtop: {why}");
-                std::process::exit(1);
-            }
-        };
-        return headless::run(app_cfg.engine, config_path, &devices, chosen, plan)
-            .await
-            .context("Headless error");
     }
 
     enable_raw_mode()?;
@@ -404,28 +362,6 @@ mod cli_tests {
                         .all(|c| c.is_ascii_hexdigit())),
             "--version suffix {suffix:?} is not a parenthesised short commit"
         );
-    }
-
-    /// `--listen` and `--mode` say how a headless run runs, so they mean
-    /// nothing without `--headless`, and saying one alone is an error rather
-    /// than a flag quietly ignored.
-    #[test]
-    fn the_headless_flags_need_headless() {
-        use clap::Parser;
-        assert!(Cli::try_parse_from(["sdrtop", "--listen", "127.0.0.1:7373"]).is_err());
-        assert!(Cli::try_parse_from(["sdrtop", "--mode", "net_survey"]).is_err());
-        let cli = Cli::try_parse_from([
-            "sdrtop",
-            "--headless",
-            "--listen",
-            "0.0.0.0:7373",
-            "--mode",
-            "net_survey",
-        ])
-        .unwrap();
-        assert!(cli.headless);
-        assert_eq!(cli.listen.as_deref(), Some("0.0.0.0:7373"));
-        assert_eq!(cli.mode.as_deref(), Some("net_survey"));
     }
 
     /// The man page describes exactly the flags the binary has - no more, no less.
@@ -614,76 +550,6 @@ mod source_tests {
         assert!(
             found.is_empty(),
             "comments pointing at plans:\n{}",
-            found.join("\n")
-        );
-    }
-
-    /// What the engine may not reach for: the drawing libraries and the
-    /// modules that draw or take keys.
-    const SCREEN_PATHS: [&str; 6] = [
-        "ratatui",
-        "crossterm",
-        "crate::ui",
-        "crate::app",
-        "crate::theme",
-        "crate::palette",
-    ];
-
-    /// The lines of the code (not of its comments) under `dirs` that name a
-    /// screen path, as `file:line: text`.
-    fn screen_references(dirs: &[&str]) -> Vec<String> {
-        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            if dir.is_file() {
-                out.push(dir.to_path_buf());
-                return;
-            }
-            let Ok(entries) = std::fs::read_dir(dir) else {
-                return;
-            };
-            for entry in entries {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    walk(&path, out);
-                } else if path.extension().is_some_and(|e| e == "rs") {
-                    out.push(path);
-                }
-            }
-        }
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let mut files = Vec::new();
-        for dir in dirs {
-            walk(&root.join(dir), &mut files);
-        }
-        let mut found = Vec::new();
-        for file in files {
-            let text = std::fs::read_to_string(&file).unwrap();
-            for (n, line) in text.lines().enumerate() {
-                let code = line.split("//").next().unwrap_or("");
-                if SCREEN_PATHS.iter().any(|path| code.contains(path)) {
-                    let at = file.strip_prefix(root).unwrap_or(&file).display();
-                    found.push(format!("{at}:{}: {}", n + 1, line.trim()));
-                }
-            }
-        }
-        found
-    }
-
-    /// **The headless front end never sees the screen.** The engine cannot:
-    /// it is a crate of its own, and does not depend on this one. The server
-    /// and the headless runner live in this crate beside the screen, so here
-    /// it is this test that keeps them to the engine alone, and a headless
-    /// instance's clients get exactly what the TUI gets.
-    #[test]
-    fn the_engine_never_imports_the_ui() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        assert!(
-            root.join("src/server/mod.rs").is_file(),
-            "the server module was not found"
-        );
-        let found = screen_references(&["src/server", "src/headless"]);
-        assert!(
-            found.is_empty(),
-            "the engine reaches for the screen:\n{}",
             found.join("\n")
         );
     }

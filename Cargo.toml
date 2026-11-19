@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-# A workspace only: `monas`, the engine, and `sdrtop`, the terminal built on it.
+# A workspace only: `monas`, the engine, and the two programs built on it:
+# `sdrtop`, the terminal, and `monasd`, the engine with no screen.
 # Every member takes its version, edition, toolchain floor and licence from
 # here, and its internal dependencies from `[workspace.dependencies]`, so a
 # version bump edits this file and nothing else.
@@ -43,7 +44,7 @@ num-complex = "0.4"
 # HackRF, RTL-SDR and SoapySDR runtimes are optional
 libloading = "0.9"
 serialport = { version = "4", default-features = false }
-# The headless API: HTTP and a WebSocket, pure Rust, on the tokio runtime
+# monasd's API: HTTP and a WebSocket, pure Rust, on the tokio runtime
 # already here. Only the pieces used.
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json", "query", "ws"] }
 # The API's tests drive the router in memory, with no socket.

@@ -139,7 +139,7 @@ mod tests {
         let plan = plan(None, Some("net_survey"), &file).unwrap();
         assert_eq!(
             plan.mode,
-            crate::engine::mode::Mode::for_view(crate::signal::net::SECTION, "net_survey")
+            crate::engine::mode::Mode::for_view(monas::signal::net::SECTION, "net_survey")
         );
     }
 
