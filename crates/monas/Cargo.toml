@@ -16,10 +16,11 @@ readme = "README.md"
 # The test fixtures other crates' tests build on: a state to draw panels
 # from, a test radio, the native backends' test support. Switched on only
 # from `[dev-dependencies]`, so no release build carries them.
-testing = ["monas-ble/testing", "monas-dsp/testing", "monas-wifi/testing"]
+testing = ["monas-ble/testing", "monas-bt/testing", "monas-dsp/testing", "monas-wifi/testing"]
 
 [dependencies]
 monas-ble.workspace = true
+monas-bt.workspace = true
 monas-dsp.workspace = true
 monas-rds.workspace = true
 monas-wifi.workspace = true
@@ -39,5 +40,6 @@ serialport.workspace = true
 # The building blocks' test kit, for this crate's own tests: a dependency's
 # `cfg(test)` is off when its dependent's tests compile.
 monas-ble = { workspace = true, features = ["testing"] }
+monas-bt = { workspace = true, features = ["testing"] }
 monas-dsp = { workspace = true, features = ["testing"] }
 monas-wifi = { workspace = true, features = ["testing"] }

@@ -72,7 +72,7 @@ impl Detector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::bt::access_code::access_code_bits;
+    use crate::access_code::access_code_bits;
 
     /// A clean access code fed one
     /// bit at a time, with real content ahead of it, is found at the instant

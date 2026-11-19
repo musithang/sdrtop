@@ -210,8 +210,7 @@ mod tests {
             out.push_str(&row);
             out.push('\n');
         }
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/signal/sig_numbers.tsv");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sig_numbers.tsv");
         std::fs::write(&path, out).unwrap();
     }
 

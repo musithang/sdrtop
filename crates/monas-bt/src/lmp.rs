@@ -34,8 +34,8 @@
 //! going the way it forbids are each named in its own words.
 
 use super::piconet::Direction;
-use crate::signal::assigned;
-use crate::signal::errors::error_name;
+use crate::assigned;
+use monas_dsp::errors::error_name;
 
 /// An LMP opcode: seven bits, or an escape (124 to 127) and the byte after.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -810,7 +810,7 @@ mod tests {
     /// CLK1 parity, is named with the table's words; both ways, never.
     #[test]
     fn a_direction_the_table_forbids_is_named() {
-        use crate::signal::bt::piconet::Direction;
+        use crate::piconet::Direction;
         let start = parse(&[17 << 1; 17]).unwrap(); // start_encryption_req, C -> P
         assert_eq!(start.against(Direction::Master), None);
         assert_eq!(

@@ -24,7 +24,7 @@
 //! with the number of periods tried counted against it) and a grid that
 //! could be chance is refused as one (rule 2).
 
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 /// The nominal slot, µs (2.2.3).
 pub const SLOT_US: f64 = 625.0;
@@ -362,7 +362,7 @@ pub fn pace(times_us: &[f64]) -> Pace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     /// `n` access codes on random slots of a piconet whose slots run `ppm`
     /// long on our clock, over `span_s`, each `jitter_us` (Gaussian) off.

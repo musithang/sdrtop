@@ -3,7 +3,7 @@
 
 //! Classic Bluetooth (BR/EDR)'s own RF channel plan: 79 channels, 1 MHz
 //! apart, `f(k) = 2402 + k` MHz for `k` = 0 to 78. Unlike
-//! [`crate::signal::ble::channel`], numeric order and frequency order agree
+//! the Bluetooth LE channel plan, numeric order and frequency order agree
 //! here - nothing about BR/EDR's hop sequence, unknown to a passive
 //! receiver, needs any channel pulled out of line the way BLE's
 //! three advertising channels are.

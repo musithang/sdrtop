@@ -81,9 +81,9 @@ impl Inquiry {
 use super::header::{Header, PacketType};
 use super::lmp::LmpMessage;
 use super::payload;
-use crate::signal::dsp::carrier::Drift;
-use crate::signal::dsp::deviation::Sums;
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::carrier::Drift;
+use monas_dsp::deviation::Sums;
+use monas_dsp::uncertainty::Uncertain;
 
 /// A piconet's deviation readings, gathered from
 /// the access code, trailer and header of every header captured on its
@@ -686,7 +686,7 @@ mod tests {
         assert_eq!(p.per_channel[10], 2);
 
         // A header counts once, and is read only when resolved.
-        use crate::signal::bt::header::PacketType;
+        use crate::header::PacketType;
         let poll = Header {
             lt_addr: 3,
             packet_type: PacketType::Poll,
@@ -892,7 +892,7 @@ mod tests {
             f0_ppm: None,
             payload: PayloadVerdict::Crc(true),
             content: Some(PayloadContent::Lmp(
-                crate::signal::bt::lmp::parse(&[3 << 1, 15]).unwrap(),
+                crate::lmp::parse(&[3 << 1, 15]).unwrap(),
             )),
         }
     }
@@ -958,7 +958,7 @@ mod tests {
     /// a DM1.
     #[test]
     fn content_needs_a_pass_and_lmp_a_dm1() {
-        use crate::signal::bt::payload::Payload;
+        use crate::payload::Payload;
         let lmp = Payload {
             crc_ok: true,
             llid: 3,

@@ -213,7 +213,7 @@ pub fn decode_payload_header(bits: &[bool]) -> Option<PayloadHeader> {
 /// own tests can build a real, correctly-CRC'd synthetic payload through
 /// the full GFSK chain, the same reason `header::uap_from_hec` and
 /// friends are `pub(crate)` rather than private.
-pub(crate) fn crcgen(bits: &[bool], uap: u8) -> u16 {
+pub fn crcgen(bits: &[bool], uap: u8) -> u16 {
     let mut reg: u16 = (header::reverse_bits(uap) as u16) << 8;
     for &bit in bits {
         let fed_bit = (reg & 0x0001) ^ (bit as u16);

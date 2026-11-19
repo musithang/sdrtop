@@ -1033,6 +1033,7 @@ dependencies = [
  "libc",
  "libloading",
  "monas-ble",
+ "monas-bt",
  "monas-dsp",
  "monas-rds",
  "monas-wifi",
@@ -1047,6 +1048,14 @@ dependencies = [
 
 [[package]]
 name = "monas-ble"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
+]
+
+[[package]]
+name = "monas-bt"
 version = "0.7.4"
 dependencies = [
  "monas-dsp",

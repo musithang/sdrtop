@@ -31,7 +31,13 @@
 //!   the Core's names;
 //! - [`piconet`] and [`slots`]: the roster, and slot timing.
 
+// The documentation is its developers', so a public item's comment may
+// point at the private one that explains it. rustdoc still resolves every
+// such link, and a broken one fails the doc build as it always did.
+#![allow(rustdoc::private_intra_doc_links)]
+
 pub mod access_code;
+pub mod assigned;
 pub mod channel;
 pub mod detect;
 pub mod header;

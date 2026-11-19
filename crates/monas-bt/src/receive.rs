@@ -18,7 +18,7 @@
 //! ~20 MHz capture already contains on the order of 20 of the 79 classic BT
 //! channels at once, each only 1 MHz wide.
 //! `signal::net::worker` builds one [`Receiver`] per channel it decides to
-//! watch, each with its own [`crate::signal::dsp::nco::Nco`] mixing that one
+//! watch, each with its own [`monas_dsp::nco::Nco`] mixing that one
 //! channel down to its own baseband - unlike BLE's receiver, which only ever
 //! runs when the radio is tuned exactly to the channel it decodes.
 //!
@@ -52,13 +52,13 @@
 
 use num_complex::Complex;
 
+use monas_dsp::discriminate::instantaneous_freq_hz;
+use monas_dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
+use monas_dsp::nco::Nco;
 #[cfg(test)]
-use crate::hardware::SampleGeometry;
+use monas_dsp::sample::decode as decode_iq;
 #[cfg(test)]
-use crate::signal::demod::decode as decode_iq;
-use crate::signal::dsp::discriminate::instantaneous_freq_hz;
-use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
-use crate::signal::dsp::nco::Nco;
+use monas_dsp::sample::SampleGeometry;
 
 use super::channel;
 use super::detect::Detector;
@@ -99,7 +99,7 @@ pub struct HeaderHit {
     /// The channel it was heard on.
     pub ch: u8,
     /// Where on the stream the last sync-word bit was sliced, in raw sample
-    /// pairs ([`crate::hardware::StreamBlock::first_pair`]'s clock),
+    /// pairs ([`monas_dsp::sample::StreamBlock::first_pair`]'s clock),
     /// fractional: where the measurement finds the burst in the raw samples.
     /// Taken at the lane that fired, so within a symbol of the bit's centre,
     /// not at it; the measurement times the burst from its own sync word.
@@ -209,7 +209,7 @@ const WORKING_RATE_HZ: f64 = SYMBOL_RATE_HZ * PHASES as f64;
 /// Msps this design (121 taps) costs on the order of 484 million complex
 /// multiply-adds a second *per channel* - measured directly, not estimated -
 /// which for
-/// [`super::super::net::worker::SAFE_BT_CHANNELS`]
+/// the NET worker's `SAFE_BT_CHANNELS`
 /// simultaneous channels is still well past a budget of a few operations per
 /// sample for always-on detection; a 40 dB stopband at the same transition would cost
 /// close to three times that. `NetWorker` additionally caps *how many* channels
@@ -319,7 +319,7 @@ impl Receiver {
     /// *this* capture depends on where the radio is tuned right now.
     ///
     /// `first_pair` is the stream position of the first block this receiver
-    /// will be given ([`crate::hardware::StreamBlock::first_pair`]); it
+    /// will be given ([`monas_dsp::sample::StreamBlock::first_pair`]); it
     /// anchors the receiver's times to the stream's own clock.
     pub fn new(
         raw_rate: f64,
@@ -500,10 +500,10 @@ impl Receiver {
 mod tests {
     use super::super::payload;
     use super::*;
-    use crate::hardware::SampleFormat;
-    use crate::signal::ble::gfsk::modulate;
-    use crate::signal::bt::access_code::access_code_bits;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use crate::access_code::access_code_bits;
+    use monas_dsp::gfsk::modulate;
+    use monas_dsp::sample::SampleFormat;
+    use monas_dsp::testkit::{at_snr, Rng};
 
     fn eight_bit() -> SampleGeometry {
         SampleGeometry {

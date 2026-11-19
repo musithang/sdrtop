@@ -117,7 +117,7 @@ const WHITENING_DATA: [bool; 127] = {
 /// 0x3f`). The header is always dewhitened from its own first bit -
 /// `libbtbb`'s own `unwhiten(..., skip=0, ...)` for a header, as opposed to
 /// a payload, which starts further into the same LFSR sequence.
-pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HEADER_BITS] {
+pub fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HEADER_BITS] {
     unwhiten_at(bits, clk6, 0).try_into().unwrap()
 }
 
@@ -128,7 +128,7 @@ pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HE
 /// *same* stream as its own header, continuing from bit 18 rather than
 /// restarting - every `libbtbb` call site that dewhitens a payload or a
 /// payload header passes `skip = 18` (`HEADER_BITS`), never a fresh origin.
-pub(crate) fn unwhiten_at(bits: &[bool], clk6: u8, skip: usize) -> Vec<bool> {
+pub fn unwhiten_at(bits: &[bool], clk6: u8, skip: usize) -> Vec<bool> {
     let mut index =
         (WHITENING_INDICES[(clk6 & 0x3f) as usize] as usize + skip) % WHITENING_DATA.len();
     let mut out = Vec::with_capacity(bits.len());
@@ -162,7 +162,7 @@ pub(crate) fn reverse_bits(byte: u8) -> u8 {
 /// let through by chance - it is [`PiconetClock`]'s job to tell a genuine,
 /// recurring UAP apart from the essentially random answer a wrong CLK1-6
 /// guess or a corrupted capture produces.
-pub(crate) fn uap_from_hec(data: u16, hec: u8) -> u8 {
+pub fn uap_from_hec(data: u16, hec: u8) -> u8 {
     let mut hec = hec;
     for i in (0..10).rev() {
         if hec & 0x80 != 0 {

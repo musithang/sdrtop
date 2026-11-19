@@ -41,7 +41,7 @@ use monas_dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
 use monas_dsp::nco::Nco;
 #[cfg(test)]
 use monas_dsp::sample::decode as decode_iq;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 use monas_dsp::sample::SampleGeometry;
 
 use super::data::{self, DataPdu};
