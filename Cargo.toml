@@ -31,6 +31,7 @@ authors = ["MusiThang <viktor.laszlo92@protonmail.com>"]
 monas = { path = "crates/monas", version = "=0.7.4" }
 monas-dsp = { path = "crates/monas-dsp", version = "=0.7.4" }
 monas-rds = { path = "crates/monas-rds", version = "=0.7.4" }
+monas-wifi = { path = "crates/monas-wifi", version = "=0.7.4" }
 
 ratatui = "0.30"
 libc = "0.2"

@@ -26,9 +26,9 @@
 use num_complex::Complex;
 use rustfft::FftPlanner;
 
-use crate::signal::dsp::correlate::threshold_for_false_alarm;
-use crate::signal::dsp::estimate::{moose_offset, moose_variance, snr_from_metric};
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::correlate::threshold_for_false_alarm;
+use monas_dsp::estimate::{moose_offset, moose_variance, snr_from_metric};
+use monas_dsp::uncertainty::Uncertain;
 
 use super::ofdm::LONG;
 
@@ -227,11 +227,11 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, peak: u64) -> Option<V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::wifi::annex::MESSAGE;
-    use crate::signal::wifi::detect::StfDetector;
-    use crate::signal::wifi::ppdu::ppdu;
-    use crate::signal::wifi::signal_field::Rate;
+    use crate::annex::MESSAGE;
+    use crate::detect::StfDetector;
+    use crate::ppdu::ppdu;
+    use crate::signal_field::Rate;
+    use monas_dsp::testkit::Rng;
 
     const FS: f64 = 20e6;
 
@@ -250,7 +250,7 @@ mod tests {
         if shift_hz.abs() >= 1e6 {
             x = heard_shifted(&x, shift_hz);
         } else if shift_hz != 0.0 {
-            crate::signal::dsp::nco::Nco::new(shift_hz, FS).mix(&mut x);
+            monas_dsp::nco::Nco::new(shift_hz, FS).mix(&mut x);
         }
         let noise = rng.noise(x.len(), 10f64.powf(-snr_db / 10.0));
         x.iter().zip(noise).map(|(s, n)| s + n).collect()
@@ -519,11 +519,8 @@ mod tests {
         let Some(Verdict::ThisChannel(s)) = examine(cut, from, peak) else {
             panic!("not judged this channel's");
         };
-        assert!(matches!(
-            crate::signal::wifi::lsig::read(cut, from, &s),
-            Some(Ok(_))
-        ));
-        let after = 80 * crate::signal::wifi::sig::HELD;
+        assert!(matches!(crate::lsig::read(cut, from, &s), Some(Ok(_))));
+        let after = 80 * crate::sig::HELD;
         assert!(examine(&cut[..len - after], from, peak).is_some());
         assert!(examine(&cut[..len - after - 1], from, peak).is_none());
         assert_eq!(needs(100), None);

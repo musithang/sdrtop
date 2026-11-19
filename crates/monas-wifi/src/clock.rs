@@ -46,7 +46,7 @@ use super::format::{Format, Heard};
 use super::ofdm::{polarity, PILOTS};
 use super::sig::FIRST_AT;
 use super::sync::Sync;
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 /// The fewest DATA symbols a clock is read from. The uncertainty comes
 /// from the fit's own residuals, and with few of them it is itself
@@ -290,17 +290,80 @@ pub fn measure(
     })
 }
 
+/// A frame's symbol clock, beside its carrier over the same DATA field: two
+/// readings of what the standard requires to be one oscillator; and the
+/// preamble's carrier, which lies apart from them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WifiClock {
+    /// Its sample clock against ours, in ppm, positive when fast.
+    pub clock_ppm: monas_dsp::uncertainty::Uncertain,
+    /// Its carrier over the DATA field against our tuning, in ppm of the
+    /// channel centre.
+    pub carrier_ppm: monas_dsp::uncertainty::Uncertain,
+    /// Its carrier over the preamble's long training field, likewise.
+    pub preamble_ppm: monas_dsp::uncertainty::Uncertain,
+    /// The DATA symbols the clock was read over.
+    pub symbols: usize,
+    pub when: std::time::Instant,
+}
+
+/// Every clock read this session held against its carrier: the
+/// inverse-variance sums of clock minus carrier, so the mean, its error
+/// and how well the frames agree with one another can be said.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClockCheck {
+    pub frames: u64,
+    sum_w: f64,
+    sum_wd: f64,
+    sum_wdd: f64,
+}
+
+impl ClockCheck {
+    /// Count one frame's clock against its carrier.
+    pub fn add(&mut self, clock: &WifiClock) {
+        let d = clock.clock_ppm.value() - clock.carrier_ppm.value();
+        let var = clock.clock_ppm.sigma().powi(2) + clock.carrier_ppm.sigma().powi(2);
+        if !(var > 0.0 && var.is_finite() && d.is_finite()) {
+            return;
+        }
+        let w = 1.0 / var;
+        self.frames += 1;
+        self.sum_w += w;
+        self.sum_wd += w * d;
+        self.sum_wdd += w * d * d;
+    }
+
+    /// The weighted mean of clock minus carrier, in ppm, with its error.
+    pub fn mean(&self) -> Option<monas_dsp::uncertainty::Uncertain> {
+        (self.frames > 0).then(|| {
+            monas_dsp::uncertainty::Uncertain::from_variance(
+                self.sum_wd / self.sum_w,
+                1.0 / self.sum_w,
+            )
+        })
+    }
+
+    /// Chi-square per degree of freedom of the differences about their
+    /// mean: near one when every frame agrees within its own uncertainty,
+    /// well above when some transmitter's clocks are not one.
+    pub fn chi2_per_dof(&self) -> Option<f64> {
+        (self.frames > 1).then(|| {
+            (self.sum_wdd - self.sum_wd * self.sum_wd / self.sum_w) / (self.frames - 1) as f64
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::wifi::detect::StfDetector;
-    use crate::signal::wifi::format::{read, Format};
-    use crate::signal::wifi::htsig::{HtSig, SigFault};
-    use crate::signal::wifi::lsig::LSig;
-    use crate::signal::wifi::ppdu::{clocked, ht_mixed, ppdu};
-    use crate::signal::wifi::signal_field::Rate;
-    use crate::signal::wifi::sync::{examine, Verdict};
+    use crate::detect::StfDetector;
+    use crate::format::{read, Format};
+    use crate::htsig::{HtSig, SigFault};
+    use crate::lsig::LSig;
+    use crate::ppdu::{clocked, ht_mixed, ppdu};
+    use crate::signal_field::Rate;
+    use crate::sync::{examine, Verdict};
+    use monas_dsp::testkit::Rng;
 
     const LEAD: usize = 700;
     const CENTRE_HZ: f64 = 2_437e6;
@@ -424,7 +487,7 @@ mod tests {
             *o = Complex::new(z.re as f32, z.im as f32);
         }
         if locked {
-            crate::signal::dsp::nco::Nco::new(ppm * 1e-6 * CENTRE_HZ, 20e6).mix(&mut signal);
+            monas_dsp::nco::Nco::new(ppm * 1e-6 * CENTRE_HZ, 20e6).mix(&mut signal);
         }
         for (o, s) in x.iter_mut().zip(signal) {
             *o += s;

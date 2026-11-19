@@ -168,12 +168,12 @@ pub fn estimate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::wifi::annex::MESSAGE;
-    use crate::signal::wifi::detect::StfDetector;
-    use crate::signal::wifi::ppdu::ppdu;
-    use crate::signal::wifi::signal_field::Rate;
-    use crate::signal::wifi::sync::{examine, Verdict};
+    use crate::annex::MESSAGE;
+    use crate::detect::StfDetector;
+    use crate::ppdu::ppdu;
+    use crate::signal_field::Rate;
+    use crate::sync::{examine, Verdict};
+    use monas_dsp::testkit::Rng;
 
     const FS: f64 = 20e6;
 

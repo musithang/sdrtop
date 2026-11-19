@@ -43,7 +43,7 @@ impl Descrambler {
 
 /// The scrambler, for the tests' transmitter: seeded with Z1 to Z7 as the
 /// standard writes them (16.2.3.2).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn scramble(bits: &[bool], seed: [bool; 7]) -> Vec<bool> {
     // Bit 0 is Z1, the bit sent last; bit 6 is Z7.
     let mut sent = seed
@@ -206,7 +206,7 @@ impl Header {
 }
 
 /// A header's 48 bits as sent, before scrambling, with its CRC.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn bits(h: &Header) -> [bool; 48] {
     let mut b = [false; 48];
     for (i, bit) in b.iter_mut().take(8).enumerate() {

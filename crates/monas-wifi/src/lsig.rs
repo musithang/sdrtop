@@ -136,12 +136,12 @@ pub fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::dsp::uncertainty::Uncertain;
-    use crate::signal::wifi::detect::StfDetector;
-    use crate::signal::wifi::ppdu::{long_training, ppdu, short_training, signal_from_bits};
-    use crate::signal::wifi::signal_field::{self, Rate};
-    use crate::signal::wifi::sync::{examine, Verdict};
+    use crate::detect::StfDetector;
+    use crate::ppdu::{long_training, ppdu, short_training, signal_from_bits};
+    use crate::signal_field::{self, Rate};
+    use crate::sync::{examine, Verdict};
+    use monas_dsp::testkit::Rng;
+    use monas_dsp::uncertainty::Uncertain;
 
     const RATES: [Rate; 8] = [
         Rate::R6,
@@ -281,7 +281,7 @@ mod tests {
             25.0,
             &mut rng,
         );
-        crate::signal::dsp::nco::Nco::new(50e3, 20e6).mix(&mut x);
+        monas_dsp::nco::Nco::new(50e3, 20e6).mix(&mut x);
         let sync = Sync {
             offset: Uncertain::from_sigma(0.0, 50e3),
             ..placed()
@@ -365,7 +365,7 @@ mod tests {
         for rate in RATES {
             for length in lengths() {
                 let l = LSig { rate, length };
-                let n = crate::signal::wifi::scrambler::Layout::new(rate, length as usize).n_sym;
+                let n = crate::scrambler::Layout::new(rate, length as usize).n_sym;
                 assert_eq!(l.n_sym(), n, "{rate:?} {length}");
                 assert_eq!(l.airtime_us(), 20 + 4 * n as u32, "{rate:?} {length}");
             }

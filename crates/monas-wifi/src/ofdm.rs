@@ -6,17 +6,17 @@
 //!
 //! A symbol's spectrum is held as 64 values indexed by subcarrier from -32
 //! to 31 (`at(k)` is where subcarrier `k` sits), the way the annex prints
-//! them; [`crate::signal::wifi`]'s time-domain stages turn it into samples.
+//! them; [the crate's](crate) time-domain stages turn it into samples.
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use num_complex::Complex;
 
 /// A symbol's 64 subcarriers, -32 first.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub type Spectrum = [Complex<f64>; 64];
 
 /// Where subcarrier `k`, -32 to 31, sits in a [`Spectrum`].
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn at(k: i32) -> usize {
     (k + 32) as usize
 }
@@ -60,7 +60,7 @@ pub fn polarity(n: usize) -> f64 {
 }
 
 /// The 48 points on their subcarriers, nothing else.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn data_only(points: &[Complex<f64>]) -> Spectrum {
     assert_eq!(points.len(), 48, "a symbol carries 48 points");
     let mut out = [Complex::new(0.0, 0.0); 64];
@@ -72,7 +72,7 @@ pub fn data_only(points: &[Complex<f64>]) -> Spectrum {
 
 /// Symbol `n`'s spectrum: its 48 points and the four pilots at that
 /// symbol's polarity (Equation 17-22).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
     let mut out = data_only(points);
     let p = polarity(n);
@@ -84,7 +84,7 @@ pub fn symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
 
 /// A 52-tone signalling symbol's spectrum (HE-SIG-A, U-SIG): its points on
 /// [`wide_data_subcarriers`] and the four pilots at polarity p_n.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn wide_symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
     assert_eq!(points.len(), 52, "a wide symbol carries 52 points");
     let mut out = [Complex::new(0.0, 0.0); 64];
@@ -101,7 +101,7 @@ pub fn wide_symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
 /// The short training symbol's tones (Equation 17-6): every fourth
 /// subcarrier from -24 to 24, each `+(1+j)` or `-(1+j)`, scaled by
 /// `sqrt(13/6)` so twelve tones carry the power of 52.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 const SHORT: [(i32, f64); 12] = [
     (-24, 1.0),
     (-20, -1.0),
@@ -127,7 +127,7 @@ pub const LONG: [i8; 53] = [
 ];
 
 /// The short training symbol's spectrum.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn short_spectrum() -> Spectrum {
     let scale = (13.0f64 / 6.0).sqrt();
     let mut out = [Complex::new(0.0, 0.0); 64];
@@ -138,7 +138,7 @@ pub fn short_spectrum() -> Spectrum {
 }
 
 /// The long training symbol's spectrum.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn long_spectrum() -> Spectrum {
     let mut out = [Complex::new(0.0, 0.0); 64];
     for (i, &v) in LONG.iter().enumerate() {
@@ -150,12 +150,12 @@ pub fn long_spectrum() -> Spectrum {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::annex::{self, MESSAGE};
-    use crate::signal::wifi::bcc::{encode, puncture};
-    use crate::signal::wifi::interleave::interleave;
-    use crate::signal::wifi::map::map;
-    use crate::signal::wifi::scrambler::scrambled;
-    use crate::signal::wifi::signal_field::{self, Rate};
+    use crate::annex::{self, MESSAGE};
+    use crate::bcc::{encode, puncture};
+    use crate::interleave::interleave;
+    use crate::map::map;
+    use crate::scrambler::scrambled;
+    use crate::signal_field::{self, Rate};
 
     /// The SIGNAL field's points, before the pilots, are Table I-10 (its
     /// pilot positions printed as X); with the pilots at polarity p0, I-11.

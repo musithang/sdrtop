@@ -54,9 +54,9 @@ pub fn psdu(symbols: &[Vec<Complex<f64>>], rate: Rate, length: usize) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::code::conv::{correlation, hamming};
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::wifi::bcc::CODE;
+    use crate::bcc::CODE;
+    use monas_dsp::code::conv::{correlation, hamming};
+    use monas_dsp::testkit::Rng;
 
     const RATES: [Rate; 8] = [
         Rate::R6,

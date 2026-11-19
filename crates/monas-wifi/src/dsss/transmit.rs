@@ -16,7 +16,7 @@ pub fn symbols(
     preamble: Preamble,
     header: &Header,
     data: usize,
-    rng: &mut crate::signal::dsp::testkit::Rng,
+    rng: &mut monas_dsp::testkit::Rng,
 ) -> Vec<Complex<f64>> {
     let (sync, sfd, seed) = match preamble {
         Preamble::Long => (
@@ -70,7 +70,7 @@ pub fn frame(
     header: &Header,
     data: usize,
     pad: usize,
-    rng: &mut crate::signal::dsp::testkit::Rng,
+    rng: &mut monas_dsp::testkit::Rng,
 ) -> Vec<Complex<f64>> {
     chips(&symbols(preamble, header, data, rng), pad, true)
 }

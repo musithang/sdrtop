@@ -61,7 +61,7 @@ fn wide_positions() -> Vec<usize> {
 }
 
 /// A 52-tone signalling symbol's coded bits, interleaved.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn interleave_wide<T: Copy + Default>(bits: &[T]) -> Vec<T> {
     let mut out = vec![T::default(); bits.len()];
     for (k, j) in wide_positions().into_iter().enumerate() {
@@ -78,10 +78,10 @@ pub fn deinterleave_wide<T: Copy>(bits: &[T]) -> Vec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::annex::{self, MESSAGE};
-    use crate::signal::wifi::bcc::{encode, puncture};
-    use crate::signal::wifi::scrambler::scrambled;
-    use crate::signal::wifi::signal_field::{self, Rate};
+    use crate::annex::{self, MESSAGE};
+    use crate::bcc::{encode, puncture};
+    use crate::scrambler::scrambled;
+    use crate::signal_field::{self, Rate};
 
     /// The two permutations for 16-QAM, against Tables I-17 and I-18, and
     /// the annex's own worked index: k = 17 goes to i = 13, then j = 12.

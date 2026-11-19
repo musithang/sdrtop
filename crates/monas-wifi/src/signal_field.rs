@@ -110,7 +110,7 @@ impl Rate {
 /// The SIGNAL field's 24 bits in transmit order (17.3.4, Figure 17-5): RATE,
 /// a reserved zero, the 12-bit LENGTH in octets LSB first, even parity over
 /// bits 0 to 16, and six tail zeros.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn bits(rate: Rate, length: u16) -> [bool; 24] {
     debug_assert!(length < 4096, "LENGTH is 12 bits");
     let mut out = [false; 24];
@@ -125,7 +125,7 @@ pub fn bits(rate: Rate, length: u16) -> [bool; 24] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::annex;
+    use crate::annex;
 
     /// The example's SIGNAL field: 36 Mb/s and 100 octets, against Table I-7.
     #[test]

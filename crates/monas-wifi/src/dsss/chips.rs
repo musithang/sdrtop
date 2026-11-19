@@ -127,7 +127,7 @@ mod tests {
         let et: f64 = t.iter().map(|v| (*v as f64).powi(2)).sum();
         let kept = dot * dot / et / SYMBOL as f64;
         let loss_db = -10.0 * kept.log10();
-        let mut rng = crate::signal::dsp::testkit::Rng::new(140);
+        let mut rng = monas_dsp::testkit::Rng::new(140);
         let sent: Vec<Complex<f64>> = (0..400)
             .map(|_| {
                 if rng.next_u64() & 1 == 0 {

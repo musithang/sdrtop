@@ -3,68 +3,9 @@
 
 //! Wi-Fi's receiver, as the worker last left it: where it runs, or why not.
 
-/// A frame's symbol clock, beside its carrier over the same DATA field: two
-/// readings of what the standard requires to be one oscillator; and the
-/// preamble's carrier, which lies apart from them.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WifiClock {
-    /// Its sample clock against ours, in ppm, positive when fast.
-    pub clock_ppm: crate::signal::dsp::uncertainty::Uncertain,
-    /// Its carrier over the DATA field against our tuning, in ppm of the
-    /// channel centre.
-    pub carrier_ppm: crate::signal::dsp::uncertainty::Uncertain,
-    /// Its carrier over the preamble's long training field, likewise.
-    pub preamble_ppm: crate::signal::dsp::uncertainty::Uncertain,
-    /// The DATA symbols the clock was read over.
-    pub symbols: usize,
-    pub when: std::time::Instant,
-}
-
-/// Every clock read this session held against its carrier: the
-/// inverse-variance sums of clock minus carrier, so the mean, its error
-/// and how well the frames agree with one another can be said.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ClockCheck {
-    pub frames: u64,
-    sum_w: f64,
-    sum_wd: f64,
-    sum_wdd: f64,
-}
-
-impl ClockCheck {
-    /// Count one frame's clock against its carrier.
-    pub fn add(&mut self, clock: &WifiClock) {
-        let d = clock.clock_ppm.value() - clock.carrier_ppm.value();
-        let var = clock.clock_ppm.sigma().powi(2) + clock.carrier_ppm.sigma().powi(2);
-        if !(var > 0.0 && var.is_finite() && d.is_finite()) {
-            return;
-        }
-        let w = 1.0 / var;
-        self.frames += 1;
-        self.sum_w += w;
-        self.sum_wd += w * d;
-        self.sum_wdd += w * d * d;
-    }
-
-    /// The weighted mean of clock minus carrier, in ppm, with its error.
-    pub fn mean(&self) -> Option<crate::signal::dsp::uncertainty::Uncertain> {
-        (self.frames > 0).then(|| {
-            crate::signal::dsp::uncertainty::Uncertain::from_variance(
-                self.sum_wd / self.sum_w,
-                1.0 / self.sum_w,
-            )
-        })
-    }
-
-    /// Chi-square per degree of freedom of the differences about their
-    /// mean: near one when every frame agrees within its own uncertainty,
-    /// well above when some transmitter's clocks are not one.
-    pub fn chi2_per_dof(&self) -> Option<f64> {
-        (self.frames > 1).then(|| {
-            (self.sum_wdd - self.sum_wd * self.sum_wd / self.sum_w) / (self.frames - 1) as f64
-        })
-    }
-}
+/// A frame's symbol clock and every clock read this session held against its
+/// carrier: the Wi-Fi receiver's own measurement, named here as it always was.
+pub use crate::signal::wifi::clock::{ClockCheck, WifiClock};
 
 /// What a frame of this channel is, by the format its signalling named:
 /// the classes every Wi-Fi view colours alike. A frame of another channel

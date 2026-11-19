@@ -182,7 +182,7 @@ pub struct HtData {
 
 /// The 48 bits of `sig` as sent, with its CRC and a zero tail: Smoothing
 /// and Not Sounding set, the reserved bit 1 as transmitted, no aggregation.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn bits(sig: &HtSig) -> [bool; 48] {
     let mut b = [false; 48];
     let mut put = |at: usize, width: usize, v: u32| {

@@ -26,8 +26,8 @@
 
 use num_complex::Complex;
 
-use crate::signal::dsp::correlate::threshold_for_false_alarm;
-use crate::signal::dsp::estimate::schmidl_cox_plateau;
+use monas_dsp::correlate::threshold_for_false_alarm;
+use monas_dsp::estimate::schmidl_cox_plateau;
 
 /// The lag and each window, in samples: four of the short training field's
 /// periods, so the two windows are disjoint and noise in one says nothing
@@ -271,11 +271,11 @@ impl StfDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::nco::Nco;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::wifi::annex::MESSAGE;
-    use crate::signal::wifi::ppdu::ppdu;
-    use crate::signal::wifi::signal_field::Rate;
+    use crate::annex::MESSAGE;
+    use crate::ppdu::ppdu;
+    use crate::signal_field::Rate;
+    use monas_dsp::nco::Nco;
+    use monas_dsp::testkit::Rng;
 
     /// The annex's frame, at unit average power over its first 16 us.
     fn frame() -> Vec<Complex<f32>> {
@@ -351,7 +351,7 @@ mod tests {
         let mut rng = Rng::new(3);
         let mut d = StfDetector::new();
         for rate in [0.2, 0.05] {
-            let t = crate::signal::dsp::correlate::threshold_for_false_alarm(WINDOW, rate);
+            let t = monas_dsp::correlate::threshold_for_false_alarm(WINDOW, rate);
             let (mut above, mut trials, mut n) = (0usize, 0usize, 0usize);
             while trials < 8_000 {
                 for c in d
@@ -428,7 +428,7 @@ mod tests {
     /// `LAG` readings back, to within the rounding of either.
     #[test]
     fn the_block_sums_read_what_the_running_sums_read() {
-        use crate::signal::dsp::correlate::DelayedAutocorrelator;
+        use monas_dsp::correlate::DelayedAutocorrelator;
         let mut rng = Rng::new(9);
         let x = on_air(3000, 8.0, 0.0, &mut rng);
         let mut running = DelayedAutocorrelator::new(WINDOW, LAG);

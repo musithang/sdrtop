@@ -107,7 +107,7 @@ pub fn two_sig_symbols(
 /// A symbol of 48 random points from `points`, pilots at polarity p_n: a
 /// DATA symbol's stand-in.
 pub fn random_symbol(
-    rng: &mut crate::signal::dsp::testkit::Rng,
+    rng: &mut monas_dsp::testkit::Rng,
     points: &[Complex<f64>],
     n: usize,
 ) -> Vec<Complex<f64>> {
@@ -242,10 +242,7 @@ pub fn clocked(x: &[Complex<f64>], ppm: f64) -> Vec<Complex<f64>> {
 /// `sig.data()`'s DATA symbols, random points on the 52 data tones and the
 /// pilots Psi rotated per symbol at polarity p_(n+3) (Equation 19-54), each
 /// behind a 0.8 or 0.4 us guard.
-pub fn ht_mixed(
-    sig: &super::htsig::HtSig,
-    rng: &mut crate::signal::dsp::testkit::Rng,
-) -> Vec<Complex<f64>> {
+pub fn ht_mixed(sig: &super::htsig::HtSig, rng: &mut monas_dsp::testkit::Rng) -> Vec<Complex<f64>> {
     use super::ofdm::{at, polarity, wide_data_subcarriers, PILOTS};
     let d = sig.data().expect("a DATA field this builds");
     assert_eq!((d.n_sts, d.n_ltf), (1, 1), "one stream, one HT-LTF");
@@ -329,9 +326,9 @@ pub fn ppdu(psdu: &[u8], rate: Rate, initial: u8) -> Vec<Complex<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::annex::{self, MESSAGE};
-    use crate::signal::wifi::ofdm::{long_spectrum, short_spectrum};
-    use crate::signal::wifi::signal_field::Rate;
+    use crate::annex::{self, MESSAGE};
+    use crate::ofdm::{long_spectrum, short_spectrum};
+    use crate::signal_field::Rate;
 
     /// The training sequences in frequency, Tables I-2 and I-5.
     #[test]
@@ -394,7 +391,7 @@ mod tests {
             Rate::R48,
             Rate::R54,
         ] {
-            let n_sym = crate::signal::wifi::scrambler::Layout::new(rate, psdu.len()).n_sym;
+            let n_sym = crate::scrambler::Layout::new(rate, psdu.len()).n_sym;
             assert_eq!(
                 ppdu(psdu, rate, 0x5d).len(),
                 400 + 80 * n_sym + 1,

@@ -8,5 +8,5 @@
 pub mod chips;
 pub mod header;
 pub mod receive;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub mod transmit;

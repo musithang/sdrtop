@@ -10,13 +10,13 @@
 //! test of the sequence's own properties notices and every real frame does.
 //! So the sequence is checked against the annex's own, bit for bit.
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use super::signal_field::Rate;
 
 /// The DATA field's sizes for a PSDU of `length` octets at `rate`
 /// (17.3.5.4, Equations 17-11 to 17-13): 16 SERVICE bits, the PSDU, six
 /// tail bits, then pad to a whole number of symbols.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub n_sym: usize,
@@ -24,7 +24,7 @@ pub struct Layout {
     pub n_pad: usize,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl Layout {
     pub fn new(rate: Rate, length: usize) -> Self {
         let need = 16 + 8 * length + 6;
@@ -41,7 +41,7 @@ impl Layout {
 /// The DATA field before scrambling: SERVICE (16 zeros, 17.3.5.2), the PSDU
 /// with each octet bit 0 first (17.3.5.5), six tail zeros (17.3.5.3) and
 /// the pad zeros (17.3.5.4).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn data_bits(psdu: &[u8], rate: Rate) -> Vec<bool> {
     let layout = Layout::new(rate, psdu.len());
     let mut bits = vec![false; 16];
@@ -56,7 +56,7 @@ pub fn data_bits(psdu: &[u8], rate: Rate) -> Vec<bool> {
 /// (SCRAMBLER_INITIAL_VALUE, Table 17-7), continued by the generator
 /// `x^7 + x^4 + 1` (Equation 17-14, Figure 17-7): each bit is the one seven
 /// back XOR the one four back.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn sequence(initial: u8, n: usize) -> Vec<bool> {
     let mut s: Vec<bool> = (0..7).map(|i| initial >> i & 1 == 1).collect();
     extend(&mut s, n);
@@ -81,7 +81,7 @@ fn extend(s: &mut Vec<bool>, n: usize) {
 }
 
 /// `bits` XOR `sequence`, bit by bit: scrambling and descrambling alike.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn apply(bits: &[bool], sequence: &[bool]) -> Vec<bool> {
     bits.iter().zip(sequence).map(|(&b, &s)| b ^ s).collect()
 }
@@ -89,7 +89,7 @@ pub fn apply(bits: &[bool], sequence: &[bool]) -> Vec<bool> {
 /// The DATA field as transmitted before coding: scrambled from `initial`,
 /// then the six tail bits set back to zero so the encoder ends in its zero
 /// state (17.3.5.3).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn scrambled(psdu: &[u8], rate: Rate, initial: u8) -> Vec<bool> {
     let bits = data_bits(psdu, rate);
     let mut out = apply(&bits, &sequence(initial, bits.len()));
@@ -103,8 +103,8 @@ pub fn scrambled(psdu: &[u8], rate: Rate, initial: u8) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::annex::{self, MESSAGE};
-    use crate::signal::wifi::signal_field::Rate;
+    use crate::annex::{self, MESSAGE};
+    use crate::signal_field::Rate;
 
     /// The example's sizes, as I.1.5.1 states them: six symbols of 144 data
     /// bits, 864 in all, 42 of them pad.

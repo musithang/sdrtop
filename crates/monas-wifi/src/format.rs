@@ -245,17 +245,17 @@ pub fn read(samples: &[Complex<f32>], first_pair: u64, sync: &Sync) -> Option<He
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::dsp::uncertainty::Uncertain;
-    use crate::signal::wifi::detect::StfDetector;
-    use crate::signal::wifi::hesig::{self, Bss, HeKind, HePpdu, HeSigA, USig};
-    use crate::signal::wifi::htsig;
-    use crate::signal::wifi::ppdu::{
+    use crate::detect::StfDetector;
+    use crate::hesig::{self, Bss, HeKind, HePpdu, HeSigA, USig};
+    use crate::htsig;
+    use crate::ppdu::{
         assemble, greenfield_ltf, l_sig_at, long_training, random_symbol, short_training,
         two_sig_symbols, wide_l_sig_at, wide_sig_symbols,
     };
-    use crate::signal::wifi::signal_field::Rate;
-    use crate::signal::wifi::sync::{examine, Verdict};
+    use crate::signal_field::Rate;
+    use crate::sync::{examine, Verdict};
+    use monas_dsp::testkit::Rng;
+    use monas_dsp::uncertainty::Uncertain;
 
     const LEAD: usize = 700;
 
@@ -552,15 +552,15 @@ mod tests {
         let Some(Verdict::ThisChannel(s)) = examine(&x, 0, peak) else {
             panic!("not judged this channel's");
         };
-        let h = crate::signal::wifi::sig::header(&x, 0, &s).unwrap();
+        let h = crate::sig::header(&x, 0, &s).unwrap();
         let edges = h.edges().unwrap();
         let centre = |k: i32| {
-            let e = crate::signal::wifi::channel::estimate(
+            let e = crate::channel::estimate(
                 &x,
                 0,
                 s.ltf_start,
                 s.offset.value(),
-                &crate::signal::wifi::channel::Floor::flat(),
+                &crate::channel::Floor::flat(),
             )
             .unwrap();
             e.h[if k < 0 { 0 } else { 51 }]
@@ -721,14 +721,10 @@ mod tests {
     #[test]
     fn a_refused_l_sig_names_no_format() {
         let mut rng = Rng::new(94);
-        let mut bits = crate::signal::wifi::signal_field::bits(Rate::R6, 100);
+        let mut bits = crate::signal_field::bits(Rate::R6, 100);
         bits[17] = !bits[17];
         let symbols = vec![
-            crate::signal::wifi::ppdu::sig_symbol(
-                &crate::signal::wifi::bcc::encode(&bits),
-                false,
-                0,
-            ),
+            crate::ppdu::sig_symbol(&crate::bcc::encode(&bits), false, 0),
             random_symbol(&mut rng, &bpsk(), 1),
             random_symbol(&mut rng, &bpsk(), 2),
         ];
@@ -798,7 +794,7 @@ mod tests {
         let mut detector = StfDetector::new();
         for at in (0..pairs).step_by(131_072) {
             for d in detector.push(at as u64, &stretch(at, 131_072)) {
-                let Some((from, len)) = crate::signal::wifi::sync::needs(d.peak) else {
+                let Some((from, len)) = crate::sync::needs(d.peak) else {
                     continue;
                 };
                 let x = stretch(from as usize, len);
@@ -815,11 +811,9 @@ mod tests {
                         }
                         Some(f) => format!("{f:?}"),
                     };
-                    if let Some(p) = crate::signal::wifi::clock::plan(&heard) {
+                    if let Some(p) = crate::clock::plan(&heard) {
                         let full = stretch(s.ltf_start as usize, p.end());
-                        if let Some(c) =
-                            crate::signal::wifi::clock::measure(&full, s.ltf_start, &s, &p)
-                        {
+                        if let Some(c) = crate::clock::measure(&full, s.ltf_start, &s, &p) {
                             let data = c.carrier_hz.value() / centre * 1e6;
                             if p.count >= 100 {
                                 eprintln!(
@@ -836,13 +830,9 @@ mod tests {
                             clocks.push((p.count, name.clone(), c, carrier, 10.0 * s.snr.log10()));
                         }
                     }
-                    if let Some(p) =
-                        crate::signal::wifi::clock::layout(&heard).filter(|p| p.count >= 8)
-                    {
+                    if let Some(p) = crate::clock::layout(&heard).filter(|p| p.count >= 8) {
                         let full = stretch(s.ltf_start as usize, p.end());
-                        if let Some(r) =
-                            crate::signal::wifi::clock::measure(&full, s.ltf_start, &s, &p)
-                        {
+                        if let Some(r) = crate::clock::measure(&full, s.ltf_start, &s, &p) {
                             if r.carrier_hz.sigma() / centre * 1e6 < 0.5 {
                                 let pull = s.offset.value() - r.carrier_hz.value();
                                 pulls_ppm.push((pull / centre * 1e6, p.count));
@@ -901,10 +891,10 @@ mod tests {
         // read over, the worst pulls, and by carrier (a transmitter's
         // likeness until the MAC header names it).
         let summary = |sel: &dyn Fn(usize) -> bool| {
-            let mut c = crate::state::SdrMetrics::fixture().net.wifi.clock_check;
+            let mut c = crate::clock::ClockCheck::default();
             let mut big = 0;
             for (n, _, clock, carrier, _) in clocks.iter().filter(|r| sel(r.0)) {
-                c.add(&crate::state::WifiClock {
+                c.add(&crate::clock::WifiClock {
                     clock_ppm: *clock,
                     carrier_ppm: *carrier,
                     preamble_ppm: *carrier,
@@ -951,10 +941,10 @@ mod tests {
                 .push(i);
         }
         for (ppm, idx) in by_carrier.iter().filter(|(_, v)| v.len() >= 20) {
-            let mut c = crate::state::SdrMetrics::fixture().net.wifi.clock_check;
+            let mut c = crate::clock::ClockCheck::default();
             for &i in idx {
                 let r = &clocks[i];
-                c.add(&crate::state::WifiClock {
+                c.add(&crate::clock::WifiClock {
                     clock_ppm: r.2,
                     carrier_ppm: r.3,
                     preamble_ppm: r.3,

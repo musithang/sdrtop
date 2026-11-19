@@ -32,7 +32,7 @@ use num_complex::Complex;
 
 use super::chips::{template, SYMBOL};
 use super::header::{Descrambler, Fault, Header, Preamble, LONG_SFD, SHORT_SFD};
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 /// The chance that noise passes for a SYNC at one timing and one start.
 pub const SYNC_FALSE_ALARM: f64 = 1e-9;
@@ -630,9 +630,9 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::wifi::dsss::header::Rate;
-    use crate::signal::wifi::dsss::transmit::frame;
+    use crate::dsss::header::Rate;
+    use crate::dsss::transmit::frame;
+    use monas_dsp::testkit::Rng;
 
     const LEAD: usize = 700;
 
@@ -883,8 +883,8 @@ mod tests {
     /// another timing, then one at the first one's: each found, once.
     #[test]
     fn frames_in_a_row_are_each_found_once() {
-        use crate::signal::wifi::ppdu::ppdu;
-        use crate::signal::wifi::signal_field::Rate as OfdmRate;
+        use crate::ppdu::ppdu;
+        use crate::signal_field::Rate as OfdmRate;
         let mut rng = Rng::new(138);
         let h = header(Rate::M2, true, 400);
         let unit = |f: Vec<Complex<f64>>| {
@@ -1014,8 +1014,8 @@ mod tests {
     /// OFDM frames, whatever their rate, are never a SYNC.
     #[test]
     fn ofdm_is_never_a_sync() {
-        use crate::signal::wifi::ppdu::ppdu;
-        use crate::signal::wifi::signal_field::Rate as OfdmRate;
+        use crate::ppdu::ppdu;
+        use crate::signal_field::Rate as OfdmRate;
         let mut rng = Rng::new(133);
         let psdu: Vec<u8> = (0..300).map(|i| (i * 13) as u8).collect();
         for rate in [OfdmRate::R6, OfdmRate::R24, OfdmRate::R54] {

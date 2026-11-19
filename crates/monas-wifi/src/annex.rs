@@ -36,6 +36,7 @@ pub const MESSAGE: [u8; 100] = [
     b'e', b' ', b't', b'r', b'e', b'a', 0x67, 0x33, 0x21, 0xB6,
 ];
 
+#[cfg(test)]
 /// FNV-1a, 64 bits: small, published, and the same on every machine.
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
@@ -43,11 +44,13 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
+#[cfg(test)]
 /// The digest of a bit stream, one byte a bit.
 pub fn digest_bits(bits: &[bool]) -> u64 {
     fnv1a(&bits.iter().map(|&b| b as u8).collect::<Vec<u8>>())
 }
 
+#[cfg(test)]
 /// The annex's tables, when `SDRTOP_ANNEX_I1` names a file of them.
 pub fn full() -> Option<serde_json::Value> {
     let path = std::env::var_os("SDRTOP_ANNEX_I1")?;
@@ -56,6 +59,7 @@ pub fn full() -> Option<serde_json::Value> {
     Some(serde_json::from_str(&text).expect("SDRTOP_ANNEX_I1 is not the tables' JSON"))
 }
 
+#[cfg(test)]
 /// Hold a stage's bits to the annex: to `table` in full when a copy is at
 /// hand (printing the digest it certifies), and to `digest` always.
 pub fn check_bits(table: &str, bits: &[bool], digest: u64) {
@@ -76,6 +80,7 @@ pub fn check_bits(table: &str, bits: &[bool], digest: u64) {
     assert_eq!(got, digest, "{table}: digest {got:#018x}");
 }
 
+#[cfg(test)]
 /// Hold a permutation to the annex the same way: `map[k]` is where input
 /// index `k` goes.
 pub fn check_map(table: &str, map: &[usize], digest: u64) {
@@ -94,6 +99,7 @@ pub fn check_map(table: &str, map: &[usize], digest: u64) {
     assert_eq!(got, digest, "{table}: digest {got:#018x}");
 }
 
+#[cfg(test)]
 /// The digest of complex values, each part rounded to four decimals: one
 /// place finer than the annex prints, and far coarser than any difference
 /// between two correct computations of the same value.
@@ -107,6 +113,7 @@ pub fn digest_values(values: &[num_complex::Complex<f64>]) -> u64 {
     fnv1a(&bytes)
 }
 
+#[cfg(test)]
 /// Hold complex values to the annex: to `table` in full when a copy is at
 /// hand, each part within half a unit of the third decimal it is printed
 /// to (a position the annex marks as a pilot's, printed `X`, is skipped),

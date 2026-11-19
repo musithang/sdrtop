@@ -4,7 +4,7 @@
 //! The binary convolutional code, and the puncturing that raises its rate.
 
 use super::signal_field::Coding;
-use crate::signal::dsp::code::conv::{correlation, Code};
+use monas_dsp::code::conv::{correlation, Code};
 
 /// The code: constraint length 7, generators g0 = 133 and g1 = 171 octal,
 /// A before B (17.3.5.6, Figure 17-8), in `dsp::code::conv`'s convention,
@@ -29,7 +29,7 @@ fn sent(coding: Coding) -> &'static [bool] {
 }
 
 /// Puncture rate-1/2 output to `coding`.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn puncture(coded: &[bool], coding: Coding) -> Vec<bool> {
     coded
         .iter()
@@ -79,9 +79,9 @@ pub fn decode(readings: &[f32], coding: Coding, terminated: bool) -> Option<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::annex::{self, MESSAGE};
-    use crate::signal::wifi::scrambler::scrambled;
-    use crate::signal::wifi::signal_field::{self, Coding, Rate};
+    use crate::annex::{self, MESSAGE};
+    use crate::scrambler::scrambled;
+    use crate::signal_field::{self, Coding, Rate};
 
     /// The SIGNAL field at rate 1/2, against Table I-8.
     #[test]

@@ -1034,6 +1034,7 @@ dependencies = [
  "libloading",
  "monas-dsp",
  "monas-rds",
+ "monas-wifi",
  "num-complex",
  "rustfft",
  "serde",
@@ -1057,6 +1058,16 @@ version = "0.7.4"
 dependencies = [
  "monas-dsp",
  "num-complex",
+]
+
+[[package]]
+name = "monas-wifi"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
+ "rustfft",
+ "serde_json",
 ]
 
 [[package]]

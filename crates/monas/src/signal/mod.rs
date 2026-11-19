@@ -17,7 +17,6 @@ pub mod power;
 pub mod reference;
 pub mod retune;
 pub mod rf_calc;
-pub mod wifi;
 
 /// The building blocks, under the names the engine has always used for them.
 pub use monas_dsp as dsp;
@@ -25,6 +24,8 @@ pub use monas_dsp::{ballistics, errors, iq, stats, stream};
 /// The RDS decoder and the demodulator that feeds it, under their old names.
 pub use monas_rds as rds;
 pub use monas_rds::demod as rds_demod;
+/// The 802.11 receive chain, under its old name.
+pub use monas_wifi as wifi;
 
 pub use demod::DemodWorker;
 pub use fft::FftWorker;
