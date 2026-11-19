@@ -499,9 +499,7 @@ impl Message {
 #[cfg(any(test, feature = "testing"))]
 pub mod pack {
     use super::*;
-    use crate::signal::ft8::fields::{
-        c58_encode, f71_encode, g15_encode, g25_encode, std_call_c28, NTOKENS,
-    };
+    use crate::fields::{c58_encode, f71_encode, g15_encode, g25_encode, std_call_c28, NTOKENS};
 
     /// Writes fields from the top of a 77-bit payload down.
     #[derive(Default)]
@@ -693,7 +691,7 @@ pub mod pack {
 mod tests {
     use super::pack::pack;
     use super::*;
-    use crate::signal::ft8::fields::hashes;
+    use crate::fields::hashes;
 
     fn std(call: &str) -> Call {
         Call::Std {

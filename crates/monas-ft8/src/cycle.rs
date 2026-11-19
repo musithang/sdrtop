@@ -735,7 +735,7 @@ fn try_candidate(
             if before.contains(&decoded.payload) {
                 return Some(Hit::Before);
             }
-            let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);
+            let word91 = crate::crc::with_crc(decoded.payload);
             let tones = demod::tones_of(word91);
             // Read at the Costas arrays' place, the codeword may have come
             // from a rough one (OSD decodes there too): measured there and
@@ -873,7 +873,7 @@ pub(super) fn take_out_decode(x: &mut [Complex<f32>], d: &Decode) {
     } else {
         GAIN_SECONDS
     };
-    let tones = demod::tones_of(crate::signal::ft8::crc::with_crc(d.payload));
+    let tones = demod::tones_of(crate::crc::with_crc(d.payload));
     take_out(x, &tones, &w, seconds);
 }
 
@@ -971,7 +971,7 @@ fn take_out_reference(x: &mut [Complex<f32>], tones: &[u8; SYMBOLS], w: &Wavefor
 #[cfg(test)]
 #[test]
 fn the_subtraction_over_its_span_is_the_whole_cycles_bit_for_bit() {
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
     let mut rng = Rng::new(11);
     let n = (15.0 * RATE) as usize;
     let mut tried = 0;

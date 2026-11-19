@@ -75,7 +75,9 @@ struct Code {
     /// Check `c` as a mask over the codeword: the word fails `c` when the
     /// bits under the mask hold an odd number of ones.
     masks: [Bits; M],
-    /// Bit `v`: its three checks.
+    /// Bit `v`: its three checks. Only the tests ask a bit for them; the
+    /// decoder works from the checks' side.
+    #[cfg(test)]
     bit_checks: [[usize; 3]; N],
     /// The systematic generator, one row per message bit: the codeword of a
     /// message with only that bit set.
@@ -127,6 +129,7 @@ fn code() -> &'static Code {
             checks,
             slots,
             masks,
+            #[cfg(test)]
             bit_checks,
             rows,
         }
@@ -495,7 +498,7 @@ fn osd_by(by: &[f32; N], llr: &[f32; N], hard: &Bits, order: u8) -> Option<(Bits
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     fn random_payload(rng: &mut Rng) -> u128 {
         (u128::from(rng.next_u64()) << 64 | u128::from(rng.next_u64())) & ((1u128 << 77) - 1)

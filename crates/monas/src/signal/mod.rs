@@ -3,9 +3,6 @@
 
 pub mod demod;
 pub mod fft;
-// Read only by tests until the FT8 worker and view use it. `expect` fails the
-// build once nothing in it is unread, so this line cannot outlive its reason.
-#[cfg_attr(not(test), expect(dead_code))]
 pub mod ft8;
 pub mod net;
 pub mod noise_slope;

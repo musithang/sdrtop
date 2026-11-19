@@ -170,7 +170,7 @@ fn at_quantile(cells: &[f32], q: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     const CYCLE: usize = 15 * RATE as usize;
 

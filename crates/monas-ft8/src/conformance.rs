@@ -29,7 +29,7 @@ use super::modulate::{self, Waveform, NOMINAL_START, SYMBOLS};
 #[cfg(test)]
 use super::search::DOWN_RATE;
 use super::search::{self, Baseband, Spectrogram, RATE};
-use crate::signal::dsp::testkit::Rng;
+use monas_dsp::testkit::Rng;
 
 /// One 15 s cycle at [`RATE`].
 pub const CYCLE_SAMPLES: usize = 15 * RATE as usize;
@@ -186,6 +186,7 @@ pub fn search_rows(x: &[Complex<f32>], sent: &[Sent]) -> (usize, Vec<(f64, f64)>
     (cands.len(), errors)
 }
 
+#[cfg(test)]
 fn rms(v: impl Iterator<Item = f64> + Clone) -> f64 {
     let n = v.clone().count().max(1) as f64;
     (v.map(|x| x * x).sum::<f64>() / n).sqrt()
@@ -480,10 +481,12 @@ impl DecodeRows {
     }
 }
 
+#[cfg(test)]
 fn mean(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len().max(1) as f64
 }
 
+#[cfg(test)]
 fn rms_of(v: &[f64]) -> f64 {
     rms(v.iter().copied())
 }
@@ -842,6 +845,7 @@ fn measure_the_llr_scale() {
     }
 }
 
+#[cfg(test)]
 /// The decoder's settings with any of these from the environment, to try
 /// other numbers on the rows and on a recording: `FT8_CANDS` (the most
 /// candidates a pass reads), `FT8_PASSES`, `FT8_MIN_POWER`, `FT8_GATE` (the
@@ -1061,6 +1065,7 @@ fn measure_the_power_gate() {
     }
 }
 
+#[cfg(test)]
 /// Unoptimised test builds are slow; these settings keep the plain tests
 /// quick by examining only the strongest candidates.
 const QUICK: cycle::Settings = cycle::Settings {

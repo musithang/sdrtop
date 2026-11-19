@@ -18,7 +18,7 @@ use std::f64::consts::{PI, TAU};
 use num_complex::Complex;
 
 use super::ldpc;
-use crate::signal::dsp::special::erf;
+use monas_dsp::special::erf;
 
 /// Symbols in a transmission: 58 carrying data, 21 of sync.
 pub const SYMBOLS: usize = 79;
@@ -200,7 +200,7 @@ pub fn add_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ft8::crc;
+    use crate::crc;
 
     const RATE: f64 = 12_000.0;
 

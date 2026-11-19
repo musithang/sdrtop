@@ -1035,6 +1035,7 @@ dependencies = [
  "monas-ble",
  "monas-bt",
  "monas-dsp",
+ "monas-ft8",
  "monas-rds",
  "monas-wifi",
  "num-complex",
@@ -1068,6 +1069,16 @@ version = "0.7.4"
 dependencies = [
  "num-complex",
  "rustfft",
+]
+
+[[package]]
+name = "monas-ft8"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
+ "rustfft",
+ "serde_json",
 ]
 
 [[package]]

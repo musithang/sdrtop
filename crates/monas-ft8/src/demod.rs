@@ -679,7 +679,7 @@ mod tests {
     /// other bit as one symbol at a time reads it.
     #[test]
     fn a_stretch_unread_is_its_own_bits_at_zero() {
-        let mut rng = crate::signal::dsp::testkit::Rng::new(3);
+        let mut rng = monas_dsp::testkit::Rng::new(3);
         let mut z: Correlations = [[Complex::new(0.0, 0.0); 8]; SYMBOLS];
         for row in &mut z {
             row.copy_from_slice(&rng.noise(8, 1.0));

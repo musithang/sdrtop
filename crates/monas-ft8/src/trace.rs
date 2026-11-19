@@ -274,12 +274,12 @@ fn envelope(m: &Measured) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
-    use crate::signal::ft8::conformance::{self, Sent, CYCLE_SAMPLES};
-    use crate::signal::ft8::cycle::{self, Decode};
-    use crate::signal::ft8::hash::HashBook;
-    use crate::signal::ft8::modulate::{self, Waveform, COSTAS, COSTAS_AT};
-    use crate::signal::ft8::search::RATE;
+    use crate::conformance::{self, Sent, CYCLE_SAMPLES};
+    use crate::cycle::{self, Decode};
+    use crate::hash::HashBook;
+    use crate::modulate::{self, Waveform, COSTAS, COSTAS_AT};
+    use crate::search::RATE;
+    use monas_dsp::testkit::Rng;
 
     /// One standard CQ with a locator, at 1000 Hz, 0.1 s late.
     fn sent(snr_db: f64, drift: f64) -> Sent {

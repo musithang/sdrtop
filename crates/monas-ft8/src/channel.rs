@@ -24,8 +24,8 @@
 
 use num_complex::Complex;
 
-use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
-use crate::signal::dsp::resample::Resampler;
+use monas_dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
+use monas_dsp::resample::Resampler;
 
 /// FT8's rate.
 pub const RATE_HZ: u64 = 12_000;
@@ -211,7 +211,7 @@ impl Channel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::nco::Nco;
+    use monas_dsp::nco::Nco;
 
     fn tone(hz: f64, rate: f64, n: usize) -> Vec<Complex<f32>> {
         let mut nco = Nco::new(hz, rate);

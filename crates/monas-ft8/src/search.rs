@@ -469,7 +469,7 @@ pub fn refine(bb: &Baseband, c: &Candidate) -> Synced {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     /// The offsets side by side give, lane by lane, the very bits one offset
     /// alone gives: inside the slice, at its edges where symbols fall out,

@@ -119,7 +119,7 @@ impl StreamClock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     #[test]
     fn the_fastest_delivery_sets_the_time() {

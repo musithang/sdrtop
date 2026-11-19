@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+[package]
+name = "monas-ft8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "sdrtop's FT8 decoder. Internal; no stability promise."
+readme = "README.md"
+
+[features]
+# The encoders and the conformance bench other crates' tests build their
+# signals and their states with. Switched on only from `[dev-dependencies]`,
+# so no release build carries them.
+testing = ["monas-dsp/testing"]
+
+[dependencies]
+monas-dsp.workspace = true
+num-complex.workspace = true
+rustfft.workspace = true
+
+[dev-dependencies]
+monas-dsp = { workspace = true, features = ["testing"] }
+# A recording's metadata, read by the tests that replay one.
+serde_json.workspace = true
