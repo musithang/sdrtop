@@ -3,7 +3,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-# Install sdrtop on any Linux distribution, or on macOS.
+# Install sdrtop, and monasd beside it, on any Linux distribution, or on macOS.
+#
+# monasd is sdrtop's engine with no screen, serving the radio over HTTP and a
+# WebSocket. It comes along by default: it is small next to the terminal, and a
+# server is the program people forget they wanted until they are at one.
 #
 #   curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 #   sh install.sh --prefix ~/.local        # no root anywhere
@@ -54,7 +58,7 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
-sdrtop installer
+sdrtop installer (installs sdrtop, and monasd beside it)
 
   --prefix DIR    install under DIR (default /usr/local, or ~/.local without root)
   --version TAG   install a specific release, e.g. v0.4.1 (default: the latest)
@@ -168,7 +172,8 @@ DOC_DIR="$PREFIX/share/doc/sdrtop"
 
 if [ "$UNINSTALL" -eq 1 ]; then
     step "Removing sdrtop from $PREFIX"
-    as_root rm -f "$BIN_DIR/sdrtop" "$MAN_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1.gz"
+    as_root rm -f "$BIN_DIR/sdrtop" "$MAN_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1.gz" \
+        "$BIN_DIR/monasd" "$MAN_DIR/monasd.1" "$MAN_DIR/monasd.1.gz"
     as_root rm -rf "$DOC_DIR"
     say "done. Config and logs in ~/.config/sdrtop were left alone."
     exit 0
@@ -497,6 +502,9 @@ if [ "$RAW_DEPS_ONLY" -eq 1 ]; then
 fi
 
 BINARY=""
+# monasd, when the source at hand has one: a release from before it existed
+# installs sdrtop alone.
+MONASD=""
 SRC_DIR=""
 
 WORK=$(mktemp -d)
@@ -518,6 +526,7 @@ case "$0" in
             if "$d/sdrtop" --version >/dev/null 2>&1; then
                 BINARY="$d/sdrtop"
                 SRC_DIR="$d"
+                if "$d/monasd" --version >/dev/null 2>&1; then MONASD="$d/monasd"; fi
             else
                 say "that binary does not run here; fetching a release instead"
             fi
@@ -616,6 +625,9 @@ if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
             if "$WORK/$NAME/sdrtop" --version >/dev/null 2>&1; then
                 BINARY="$WORK/$NAME/sdrtop"
                 SRC_DIR="$WORK/$NAME"
+                if "$WORK/$NAME/monasd" --version >/dev/null 2>&1; then
+                    MONASD="$WORK/$NAME/monasd"
+                fi
             else
                 say "the prebuilt binary does not run on this system:"
                 if [ "$OS" = Linux ]; then
@@ -702,12 +714,18 @@ if [ -z "$BINARY" ]; then
     # temporary directory, which stops existing seconds later, and this script
     # prints the correct PATH line about $BIN_DIR at the end anyway. Two pieces
     # of contradictory advice is worse than one.
+    #
+    # One target directory for every crate this installs: sdrtop and monasd
+    # are built on the same engine, and compiling it twice on a Raspberry Pi
+    # is a quarter of an hour nobody asked for.
     run_cargo_install() {
+        crate=${1:-$CRATE}
         (
             # The status file preserves Cargo's result across the tee pipeline
             # shellcheck disable=SC2086 # deliberate: $src_args is an argument list
             if PATH="$WORK/cargo/bin:$PATH" CARGO_TERM_COLOR=never \
-                cargo install "$CRATE" --locked --root "$WORK/cargo" $src_args; then
+                CARGO_TARGET_DIR="$WORK/target" \
+                cargo install "$crate" --locked --root "$WORK/cargo" $src_args; then
                 echo 0 > "$WORK/cargo.status"
             else
                 echo "$?" > "$WORK/cargo.status"
@@ -757,6 +775,16 @@ if [ -z "$BINARY" ]; then
     [ -x "$BINARY" ] || die "cargo reported success but produced no binary"
     "$BINARY" --version >/dev/null 2>&1 \
         || die "the built binary does not run; the existing installation was left unchanged"
+
+    # monasd from the same source. A release older than monasd has none to
+    # build, and sdrtop is what was asked for first, so its absence is said
+    # rather than fatal.
+    say "building monasd from the same source"
+    if run_cargo_install monasd && "$WORK/cargo/bin/monasd" --version >/dev/null 2>&1; then
+        MONASD="$WORK/cargo/bin/monasd"
+    else
+        warn "monasd could not be built from this source (releases before it have none); installing sdrtop alone"
+    fi
     # No SRC_DIR: `cargo install` delivers a binary and nothing else, so this
     # path installs no README, man page or user_docs. That is what the command
     # means, and the documentation lives at github.com/musithang/sdrtop.
@@ -766,11 +794,17 @@ fi
 step "Installing into $PREFIX"
 put 755 "$BINARY" "$BIN_DIR/sdrtop"
 say "  $BIN_DIR/sdrtop"
+if [ -n "$MONASD" ]; then
+    put 755 "$MONASD" "$BIN_DIR/monasd"
+    say "  $BIN_DIR/monasd"
+fi
 if [ -n "$SRC_DIR" ]; then
-    if [ -f "$SRC_DIR/sdrtop.1" ]; then
-        put 644 "$SRC_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1"
-        say "  $MAN_DIR/sdrtop.1"
-    fi
+    for page in sdrtop.1 monasd.1; do
+        if [ -f "$SRC_DIR/$page" ]; then
+            put 644 "$SRC_DIR/$page" "$MAN_DIR/$page"
+            say "  $MAN_DIR/$page"
+        fi
+    done
     for f in "$SRC_DIR/README.md" "$SRC_DIR/LICENSE"; do
         if [ -f "$f" ]; then put 644 "$f" "$DOC_DIR/$(basename "$f")"; fi
     done
@@ -844,6 +878,13 @@ if "$BIN_DIR/sdrtop" --version >/dev/null 2>&1; then
 else
     die "$BIN_DIR/sdrtop was installed but will not run"
 fi
+if [ -n "$MONASD" ]; then
+    if "$BIN_DIR/monasd" --version >/dev/null 2>&1; then
+        say "$("$BIN_DIR/monasd" --version) installed in $BIN_DIR"
+    else
+        die "$BIN_DIR/monasd was installed but will not run"
+    fi
+fi
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
@@ -857,3 +898,7 @@ say "with --hackrf, --rtlsdr, --airspy or --airspyhf; for an SDRplay RSP1B,"
 say "--sdrplay checks SDRplay's API and its service."
 say "Run 'sdrtop'. It opens on its menu: Enter takes a layout, Space starts"
 say "receiving, Esc brings the menu back, q quits and saves."
+if [ -n "$MONASD" ]; then
+    say "Run 'monasd' for the same radio with no screen: an API on"
+    say "http://127.0.0.1:7373/v1 until Ctrl-C. 'man monasd' has the rest."
+fi

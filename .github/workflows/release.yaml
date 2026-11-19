@@ -70,45 +70,51 @@ jobs:
       - name: Build the tarball
         run: packaging/build-tarball.sh
 
-      # build-tarball.sh checks startup at the glibc floor without SDR libraries
+      # build-tarball.sh checks startup at the glibc floor without SDR libraries.
+      # Every check below holds for both programs in the tarball, sdrtop and
+      # monasd: a user installs both, so either one breaking is a broken release.
       - name: Check what came out
         run: |
           out="$RUNNER_TEMP/unpacked"
           mkdir -p "$out"
           tar -xzf target/dist/*.tar.gz -C "$out"
-          bin=$(find "$out" -name sdrtop -type f | head -1)
-          [ -n "$bin" ] || { echo "::error::no sdrtop binary in the tarball"; exit 1; }
-          file "$bin"
-          readelf -h "$bin" | grep -q 'X86-64' || {
-            echo "::error::the tarball does not contain an x86-64 binary"; exit 1; }
+          for program in sdrtop monasd; do
+            test -f "$out"/*/"$program.1" || {
+              echo "::error::no $program.1 man page in the tarball"; exit 1; }
+            bin=$(find "$out" -name "$program" -type f | head -1)
+            [ -n "$bin" ] || { echo "::error::no $program binary in the tarball"; exit 1; }
+            file "$bin"
+            readelf -h "$bin" | grep -q 'X86-64' || {
+              echo "::error::the tarball does not contain an x86-64 $program"; exit 1; }
 
-          # What the binary asks a machine for, asserted rather than printed.
-          # The glibc floor below this was already checked while the library
-          # list was only echoed into a log nobody reads, and that asymmetry was
-          # the bug: if a future dependency pulls in a link to something Debian
-          # 12 happens to have and a user's machine does not, the tarball
-          # silently stops working for them with every check still green.
-          #
-          # Changing this list is a deliberate act, and the edit belongs in the
-          # same commit as the dependency that caused it.
-          expected="libc.so.6 libgcc_s.so.1 libm.so.6"
-          actual=$(readelf -d "$bin" \
-            | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | sort | tr '\n' ' ')
-          actual=${actual% }
-          echo "needs: $actual"
-          test "$actual" = "$expected" || {
-            echo "::error::the set of shared libraries changed"
-            echo "::error::libhackrf and librtlsdr must remain optional runtime loads; remove native link directives"
-            echo "::error::expected: $expected"
-            echo "::error::actual:   $actual"
-            exit 1; }
+            # What the binary asks a machine for, asserted rather than printed.
+            # The glibc floor below this was already checked while the library
+            # list was only echoed into a log nobody reads, and that asymmetry was
+            # the bug: if a future dependency pulls in a link to something Debian
+            # 12 happens to have and a user's machine does not, the tarball
+            # silently stops working for them with every check still green.
+            #
+            # Changing this list is a deliberate act, and the edit belongs in the
+            # same commit as the dependency that caused it.
+            expected="libc.so.6 libgcc_s.so.1 libm.so.6"
+            actual=$(readelf -d "$bin" \
+              | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | sort | tr '\n' ' ')
+            actual=${actual% }
+            echo "needs: $actual"
+            test "$actual" = "$expected" || {
+              echo "::error::the set of shared libraries changed"
+              echo "::error::libhackrf and librtlsdr must remain optional runtime loads; remove native link directives"
+              echo "::error::expected: $expected"
+              echo "::error::actual:   $actual"
+              exit 1; }
 
-          # The floor this whole container exists to keep. If a newer base image
-          # ever raises it, the tarball silently stops working on Debian 12.
-          need=$(objdump -T "$bin" | sed -n 's/.*GLIBC_\([0-9.]*\).*/\1/p' | sort -V | tail -1)
-          echo "highest glibc symbol required: $need"
-          test "$(printf '%s\n2.37\n' "$need" | sort -V | tail -1)" = 2.37 || {
-            echo "::error::binary needs glibc $need, above the Debian 12 floor"; exit 1; }
+            # The floor this whole container exists to keep. If a newer base image
+            # ever raises it, the tarball silently stops working on Debian 12.
+            need=$(objdump -T "$bin" | sed -n 's/.*GLIBC_\([0-9.]*\).*/\1/p' | sort -V | tail -1)
+            echo "highest glibc symbol required: $need"
+            test "$(printf '%s\n2.37\n' "$need" | sort -V | tail -1)" = 2.37 || {
+              echo "::error::$program needs glibc $need, above the Debian 12 floor"; exit 1; }
+          done
 
           # An unpacked tarball can install itself with no network, which only
           # works while it actually carries the installer.
@@ -166,46 +172,50 @@ jobs:
           out="$RUNNER_TEMP/unpacked"
           mkdir -p "$out"
           tar -xzf target/dist/*.tar.gz -C "$out"
-          bin=$(find "$out" -name sdrtop -type f | head -1)
-          [ -n "$bin" ] || { echo "::error::no sdrtop binary in the tarball"; exit 1; }
-          file "$bin"
-          test "$(lipo -archs "$bin")" = "${{ matrix.arch }}" || {
-            echo "::error::the tarball does not contain a ${{ matrix.arch }} binary"; exit 1; }
+          for program in sdrtop monasd; do
+            test -f "$out"/*/"$program.1" || {
+              echo "::error::no $program.1 man page in the tarball"; exit 1; }
+            bin=$(find "$out" -name "$program" -type f | head -1)
+            [ -n "$bin" ] || { echo "::error::no $program binary in the tarball"; exit 1; }
+            file "$bin"
+            test "$(lipo -archs "$bin")" = "${{ matrix.arch }}" || {
+              echo "::error::the tarball does not contain a ${{ matrix.arch }} $program"; exit 1; }
 
-          # The counterpart of Linux's DT_NEEDED check: every library the
-          # binary is linked against must be part of macOS itself. The radio
-          # libraries are opened at run time, from Homebrew or MacPorts, and a
-          # link to one would make the binary refuse to start on a Mac without
-          # it. Listed by rule rather than by name, because which frameworks
-          # the system libraries pull in is Apple's business and changes with
-          # the SDK; where they come from is the property that matters.
-          libs=$(otool -L "$bin" | tail -n +2 | awk '{print $1}')
-          echo "links: $libs"
-          bad=$(printf '%s\n' "$libs" | grep -v -e '^/usr/lib/' -e '^/System/Library/' || true)
-          test -z "$bad" || {
-            echo "::error::linked against something that is not part of macOS: $bad"; exit 1; }
-          if printf '%s\n' "$libs" | grep -qi -e hackrf -e rtlsdr -e soapy; then
-            echo "::error::a radio library is linked; it must stay a runtime load"; exit 1
-          fi
+            # The counterpart of Linux's DT_NEEDED check: every library the
+            # binary is linked against must be part of macOS itself. The radio
+            # libraries are opened at run time, from Homebrew or MacPorts, and a
+            # link to one would make the binary refuse to start on a Mac without
+            # it. Listed by rule rather than by name, because which frameworks
+            # the system libraries pull in is Apple's business and changes with
+            # the SDK; where they come from is the property that matters.
+            libs=$(otool -L "$bin" | tail -n +2 | awk '{print $1}')
+            echo "links: $libs"
+            bad=$(printf '%s\n' "$libs" | grep -v -e '^/usr/lib/' -e '^/System/Library/' || true)
+            test -z "$bad" || {
+              echo "::error::linked against something that is not part of macOS: $bad"; exit 1; }
+            if printf '%s\n' "$libs" | grep -qi -e hackrf -e rtlsdr -e soapy; then
+              echo "::error::a radio library is linked; it must stay a runtime load"; exit 1
+            fi
 
-          # The oldest macOS it runs on, asserted: a newer SDK default would
-          # otherwise drop older Macs without a word.
-          # A target below 10.14 records it in LC_VERSION_MIN_MACOSX as
-          # `version`; from 10.14 on, LC_BUILD_VERSION records it as `minos`.
-          minos=$(otool -l "$bin" | awk '
-              /LC_BUILD_VERSION/ { b = 1 } /LC_VERSION_MIN_MACOSX/ { v = 1 }
-              b && $1 == "minos" { print $2; exit }
-              v && $1 == "version" { print $2; exit }')
-          echo "minimum macOS: $minos"
-          test "$minos" = "${{ matrix.minos }}" || {
-            echo "::error::minimum macOS is $minos, expected ${{ matrix.minos }}"; exit 1; }
+            # The oldest macOS it runs on, asserted: a newer SDK default would
+            # otherwise drop older Macs without a word.
+            # A target below 10.14 records it in LC_VERSION_MIN_MACOSX as
+            # `version`; from 10.14 on, LC_BUILD_VERSION records it as `minos`.
+            minos=$(otool -l "$bin" | awk '
+                /LC_BUILD_VERSION/ { b = 1 } /LC_VERSION_MIN_MACOSX/ { v = 1 }
+                b && $1 == "minos" { print $2; exit }
+                v && $1 == "version" { print $2; exit }')
+            echo "minimum macOS: $minos"
+            test "$minos" = "${{ matrix.minos }}" || {
+              echo "::error::minimum macOS is $minos, expected ${{ matrix.minos }}"; exit 1; }
 
-          # Signed, and signed validly: an ad-hoc signature that does not match
-          # the file is refused by the kernel at launch on Apple Silicon.
-          codesign --verify --strict --verbose=2 "$bin"
-          codesign -dv "$bin" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
-          grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt" || {
-            echo "::error::the binary carries no ad-hoc signature"; exit 1; }
+            # Signed, and signed validly: an ad-hoc signature that does not match
+            # the file is refused by the kernel at launch on Apple Silicon.
+            codesign --verify --strict --verbose=2 "$bin"
+            codesign -dv "$bin" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+            grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt" || {
+              echo "::error::$program carries no ad-hoc signature"; exit 1; }
+          done
 
           cmp -s "$out"/*/install.sh packaging/install.sh || {
             echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
@@ -219,10 +229,13 @@ jobs:
           out="$RUNNER_TEMP/unpacked"
           prefix="$RUNNER_TEMP/prefix"
           sh "$out"/*/install.sh --prefix "$prefix"
-          "$prefix/bin/sdrtop" --version
-          test -f "$prefix/share/man/man1/sdrtop.1"
+          for program in sdrtop monasd; do
+              "$prefix/bin/$program" --version
+              test -f "$prefix/share/man/man1/$program.1"
+          done
           sh "$out"/*/install.sh --prefix "$prefix" --uninstall
           test ! -e "$prefix/bin/sdrtop"
+          test ! -e "$prefix/bin/monasd"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -316,10 +329,13 @@ jobs:
       # a short-lived registry token, so no long-lived CRATES_IO_TOKEN has to
       # sit in this repository's secrets waiting to leak or expire.
       #
-      # Configured once, on 2026-08-29, at crates.io/crates/sdrtop under
-      # Settings, naming repository `musithang/sdrtop` and workflow
-      # `release.yaml`. Two things there have to keep matching this file or the
-      # token exchange is refused with an error that names neither:
+      # Configured once per crate at crates.io/crates/<crate> under Settings
+      # (sdrtop's on 2026-08-29), naming repository `musithang/sdrtop` and
+      # workflow `release.yaml`. A crate can only be configured once it exists,
+      # so the first version of each new crate is published by hand
+      # (RELEASING.md, the Rite of the First Offering). Two things there have
+      # to keep matching this file or the token exchange is refused with an
+      # error that names neither:
       #
       #   - the workflow filename is `release.yaml`, with an `a`. Nearly every
       #     example in the wild says `release.yml`.
@@ -339,10 +355,22 @@ jobs:
         id: auth
         uses: rust-lang/crates-io-auth-action@v1
 
+      # Every crate of the workspace, one version, in dependency order: the
+      # engine before the programs built on it. `cargo publish --workspace`
+      # keeps that order and waits for each crate to reach the index before
+      # the next needs it.
+      #
       # Idempotent in the only sense available: a published version can never be
-      # replaced, so "already there" and "done" are the same state. Without this
-      # a rerun of the workflow would fail here over work that already
-      # succeeded, after the whole build.
+      # replaced, so "already there" and "done" are the same state. Each crate is
+      # asked for first, and one already there is left out, so a rerun after a
+      # publish that stopped halfway publishes only what is missing, in order.
+      # Without this a rerun would fail over work that already succeeded, after
+      # the whole build.
+      #
+      # A crate crates.io has never seen stops the job before anything is
+      # published: its Trusted Publishing cannot exist yet, so the token would
+      # be refused for it, and everything after it depends on it. The message
+      # names the crate and the rite that brings it into the world.
       #
       # The User-Agent is required, not politeness. crates.io answers 403 to a
       # request without one, and `curl -f` reports that the same way it reports
@@ -355,14 +383,41 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           version=$(packaging/version.sh)
-          probe="https://crates.io/api/v1/crates/sdrtop/$version"
-          if curl -fsS -A "sdrtop-release-workflow ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
-               "$probe" >/dev/null; then
-            echo "sdrtop $version is already on crates.io; nothing to do"
+          agent="sdrtop-release-workflow ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)"
+          # What crates.io answers for a path: 200 there, 404 not, anything
+          # else a reason to stop rather than guess.
+          answer() {
+            curl -sS -o /dev/null -w '%{http_code}' -A "$agent" "https://crates.io/api/v1/crates/$1"
+          }
+          crates=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[].name')
+          echo "the workspace publishes: $(echo $crates)"
+          exclude=""
+          unborn=""
+          for crate in $crates; do
+            case $(answer "$crate/$version") in
+              200) echo "$crate $version is already on crates.io"
+                   exclude="$exclude --exclude $crate"; continue ;;
+              404) ;;
+              *) echo "::error::crates.io did not say whether $crate $version is there"; exit 1 ;;
+            esac
+            case $(answer "$crate") in
+              200) ;;
+              404) unborn="$unborn $crate" ;;
+              *) echo "::error::crates.io did not say whether $crate exists"; exit 1 ;;
+            esac
+          done
+          if [ -n "$unborn" ]; then
+            echo "::error::never published:$unborn. The first version of a crate goes up by hand (RELEASING.md, the Rite of the First Offering); then rerun this job."
+            exit 1
+          fi
+          if [ "$(echo $exclude | wc -w)" -eq "$(( $(echo $crates | wc -w) * 2 ))" ]; then
+            echo "every crate of $version is on crates.io; nothing to do"
             exit 0
           fi
-          # Verify the packaged source builds before publishing an immutable version
-          cargo publish --locked
+          # Verifies each packaged source builds before publishing an
+          # immutable version of it.
+          # shellcheck disable=SC2086 # deliberate: $exclude is an argument list
+          cargo publish --workspace --locked $exclude
 
   release:
     needs: [collect, publish]

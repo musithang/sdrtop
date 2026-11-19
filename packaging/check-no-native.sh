@@ -23,17 +23,16 @@ fi
 
 cargo build --locked
 cargo test --locked
-bin="${CARGO_TARGET_DIR:-target}/debug/sdrtop"
-needed=$(readelf -d "$bin")
-if printf '%s\n' "$needed" | grep -Eq 'NEEDED.*lib(hackrf|rtlsdr|airspy|airspyhf|sdrplay_api)'; then
-    die "The binary requires a native SDR library"
-fi
+for program in sdrtop monasd; do
+    needed=$(readelf -d "${CARGO_TARGET_DIR:-target}/debug/$program")
+    if printf '%s\n' "$needed" | grep -Eq 'NEEDED.*lib(hackrf|rtlsdr|airspy|airspyhf|sdrplay_api)'; then
+        die "$program requires a native SDR library"
+    fi
+done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 # The CLI reads HOME/.config. Cargo and rustup must use the original HOME
 export HOME="$work"
-"$bin" --help >/dev/null
-"$bin" --version
 
 expect_failure() {
     if "$bin" "$@" >"$work/output" 2>&1; then
@@ -50,35 +49,45 @@ expect_text() {
     }
 }
 
-# These package and version assertions keep installation advice actionable
-expect_failure --device hackrf
-expect_text "libhackrf backend unavailable"
-expect_text "2023.01.1"
-expect_text "libhackrf0"
-expect_failure --device rtlsdr
-expect_text "librtlsdr backend unavailable"
-expect_text "librtlsdr0"
-expect_text "librtlsdr2"
-expect_failure --device airspy
-expect_text "libairspy backend unavailable"
-expect_text "libairspy0"
-expect_failure --device airspyhf
-expect_text "libairspyhf backend unavailable"
-expect_text "libairspyhf1"
-expect_failure --device sdrplay
-expect_text "libsdrplay_api backend unavailable"
-expect_text "https://www.sdrplay.com/api/"
-expect_failure
-expect_text "No device found"
-expect_text "libhackrf backend unavailable"
-expect_text "librtlsdr backend unavailable"
-expect_text "libairspy backend unavailable"
-expect_text "libairspyhf backend unavailable"
-for backend in tinysa soapy; do
-    expect_failure --device "$backend"
-    expect_text "No device found"
-    if grep -Eq 'libhackrf|librtlsdr|libairspy' "$work/output"; then
-        die "Irrelevant native diagnostic for $backend"
-    fi
+# Both programs: each starts, and each says what is missing the same way. The
+# package and version assertions keep installation advice actionable.
+for program in sdrtop monasd; do
+    bin="${CARGO_TARGET_DIR:-target}/debug/$program"
+    case "$program" in
+        sdrtop) none="No device found" ;;
+        monasd) none="no radio found" ;;
+    esac
+    "$bin" --help >/dev/null
+    "$bin" --version
+    expect_failure --device hackrf
+    expect_text "libhackrf backend unavailable"
+    expect_text "2023.01.1"
+    expect_text "libhackrf0"
+    expect_failure --device rtlsdr
+    expect_text "librtlsdr backend unavailable"
+    expect_text "librtlsdr0"
+    expect_text "librtlsdr2"
+    expect_failure --device airspy
+    expect_text "libairspy backend unavailable"
+    expect_text "libairspy0"
+    expect_failure --device airspyhf
+    expect_text "libairspyhf backend unavailable"
+    expect_text "libairspyhf1"
+    expect_failure --device sdrplay
+    expect_text "libsdrplay_api backend unavailable"
+    expect_text "https://www.sdrplay.com/api/"
+    expect_failure
+    expect_text "$none"
+    expect_text "libhackrf backend unavailable"
+    expect_text "librtlsdr backend unavailable"
+    expect_text "libairspy backend unavailable"
+    expect_text "libairspyhf backend unavailable"
+    for backend in tinysa soapy; do
+        expect_failure --device "$backend"
+        expect_text "$none"
+        if grep -Eq 'libhackrf|librtlsdr|libairspy' "$work/output"; then
+            die "Irrelevant native diagnostic for $backend"
+        fi
+    done
 done
 printf '%s\n' "No-native-library startup checks passed"

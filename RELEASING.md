@@ -58,6 +58,13 @@ button. There is no undo. There is no kindly maintainer at the other end of a
 ticket who will make an exception, because there is no exception to make. The
 number is spent. It is gone. It is on the internet with your name on it.
 
+And there are three of them now: `monas`, the engine; `sdrtop`, the terminal;
+`monasd`, the engine with no screen. One version number, three crates, three
+spent numbers every time. Once the Rite of the First Offering below has been
+performed, each is set to **Trusted Publishing only** on crates.io, so the only
+hand that can publish one is the workflow's, and a token that leaks out of
+somebody's shell history publishes nothing at all.
+
 The publishing step is automated, and it runs **before** anything appears on
 GitHub. Every single check capable of saving you therefore happens earlier than
 it does. This is not an accident of ordering. This is the whole architecture,
@@ -120,10 +127,20 @@ still on.
 ## II. Speak the new number 🔢
 
 ```sh
-# edit Cargo.toml: version = "X.Y.Z"
+# edit the root Cargo.toml, both places, in one pass:
+#   [workspace.package]       version = "X.Y.Z"
+#   [workspace.dependencies]  every "=OLD" pin becomes "=X.Y.Z"
 cargo check --offline          # updates Cargo.lock to match
 packaging/version.sh           # must print X.Y.Z, and nothing else
 ```
+
+The root `Cargo.toml` is the only file a bump touches: every crate inherits its
+version from `[workspace.package]`, and every crate names the others through an
+exact `=X.Y.Z` pin, because a `monas` of one version works with an `sdrtop` of
+the same version and no other. Forget a pin and cargo refuses to resolve before
+you have finished typing; loosen one by accident (`"X.Y.Z"` without the `=`)
+and `the_internal_pins_are_the_workspace_version` fails in CI, on the bump
+commit, a long way before any tag.
 
 `Cargo.lock` is not decorative. CI runs `--locked` in every job, and a lockfile
 still whispering the previous version fails the build in a way that looks
@@ -139,8 +156,8 @@ profoundly mysterious for about ten minutes and then extremely stupid forever.
 ## III. Await the omens 🔮
 
 Push to `main` (**not the tag**, we are nowhere near ready for the tag) and let
-CI speak: formatting, clippy, the test suite, `cargo package`, the 1.88 MSRV
-check, shellcheck.
+CI speak: formatting, clippy, the test suite, `cargo package` of every crate in
+the workspace, the 1.88 MSRV check, shellcheck.
 
 Green means green. "Mostly green" is not a colour. It is a mood, and it is
 lying to you.
@@ -165,6 +182,18 @@ markers from memory.
 Press `Space`. Tune to something you *know* is transmitting. Look at the presets
 you touched.
 
+Then the same radio again, with no screen at all:
+
+```sh
+./target/release/monasd --config /tmp/sdrtop-release-check.toml
+curl -s http://127.0.0.1:7373/v1/health      # in another terminal
+```
+
+`Ctrl-C` stops it and saves the radio's blocks into that same throwaway config,
+which is the other reason for `--config`. A server that answers on a laptop with
+the radio plugged in has passed its rehearsal. A server that answers with no
+radio plugged in has passed a different, sadder test.
+
 Every other step in this document is a computer inspecting a computer. This one
 is a human being, looking at a screen, deciding whether the thing is any good.
 It is the only step that cannot be faked and the only one that has ever caught
@@ -173,7 +202,7 @@ anything interesting.
 ## V. THE SUMMONING 🏷️
 
 ```sh
-git add Cargo.toml Cargo.lock CHANGELOG.md
+git add Cargo.toml Cargo.lock CHANGELOG.md   # the root Cargo.toml; the crates' own never change
 git commit -m "chore(release): X.Y.Z"
 git tag -a vX.Y.Z -m "sdrtop X.Y.Z"
 git push origin main --follow-tags
@@ -191,10 +220,10 @@ permanent while you watch a progress spinner.
 
 | Job | Deed | Reversible |
 |---|---|---|
-| `build` | Linux tarball in the Debian 12 container, tag matched against `Cargo.toml`, changelog section confirmed to exist, glibc floor asserted, exact shared-library set asserted | yes |
+| `build` | Linux tarball (both programs, both man pages) in the Debian 12 container, tag matched against `Cargo.toml`, changelog section confirmed to exist, glibc floor asserted, exact shared-library set asserted | yes |
 | `build-macos` | macOS tarballs on an Apple Silicon and an Intel runner: architecture, system-only links, minimum macOS and ad-hoc signature asserted, then installed offline from the unpacked tarball and run | yes |
 | `collect` | all three tarballs counted, `SHA256SUMS` written, provenance attestation signed | yes |
-| `publish` | `cargo publish` to crates.io via Trusted Publishing | **no. never. under no circumstances whatsoever** |
+| `publish` | every crate to crates.io via Trusted Publishing, the engine first and the programs after it, each one asked about first and skipped if it is already there | **no. never. under no circumstances whatsoever** |
 | `release` | drafts the GitHub release with your changelog as its body | yes |
 
 The irreversible act sits in the **middle**: guarded by everything `build`,
@@ -215,6 +244,10 @@ gh release download vX.Y.Z --dir /tmp/rel
 cd /tmp/rel && tar -xzf sdrtop-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz
 sh sdrtop-X.Y.Z-x86_64-unknown-linux-gnu/install.sh --prefix ~/.cache/rel-test
 ```
+
+That installs `sdrtop` **and** `monasd`, with a man page each. Check both
+answered `--version` at the end of its output; a release whose second program
+quietly failed to install is a release with one program in it.
 
 That was the offline path. Now the other two, which need the crates.io version
 to be live, and by this point it is *aggressively* live:
@@ -259,10 +292,54 @@ will otherwise find in eleven minutes.
 
 ```sh
 cargo install sdrtop --locked --force
+cargo install monasd --locked --force
 sdrtop --version        # X.Y.Z and a commit hash. Both. Look at them.
+monasd --version        # the same X.Y.Z. If not, one of them is lying.
 ```
 
 Go outside. You have earned weather. 🎉
+
+---
+
+# 🍼 THE RITE OF THE FIRST OFFERING
+
+*Performed once in the life of each crate, and never again. Most releases skip
+this page. The first release that carries a crate crates.io has never seen does
+not, and the machines will tell you so by stopping.*
+
+crates.io will let a crate trust this workflow only once the crate **exists**.
+A crate that does not exist yet cannot be configured, so the workflow's token is
+refused for it, and its first version has to go up the old way: by your hand,
+with a token of your own, once. The `publish` job knows this. It asks crates.io
+about every crate before publishing any, and when one has never been seen, it
+publishes nothing, names it, and points here.
+
+1. **Make a token** on crates.io, scoped to `publish-new` and nothing else, with
+   an expiry measured in hours.
+
+2. **Offer the new crates, the engine first:**
+
+   ```sh
+   cargo publish -p monas --locked     # every program depends on it
+   cargo publish -p monasd --locked    # and then any program that is new
+   ```
+
+   Not `sdrtop`, which already exists and already trusts the workflow. It goes
+   up with the rerun in step 5, the way it always has.
+
+3. **Teach each new crate whom to trust.** On crates.io, each crate's
+   Settings, Trusted Publishing: repository `musithang/sdrtop`, workflow
+   `release.yaml` (**with an `a`**), Environment left empty. Exactly as
+   `sdrtop`'s is, or the Cryptic One below will have its evening.
+
+4. **Close the door behind you.** Switch each crate, `sdrtop` included, to
+   **Trusted Publishing only**, and revoke the token. Now nothing but the
+   workflow can ever publish them again, which is the First Law with the safety
+   catch on.
+
+5. **Rerun the `publish` job** from the Actions page. It finds the new crates
+   already there at this version, skips them, publishes whatever is left, and
+   the `release` job drafts the page as usual.
 
 ---
 
@@ -310,10 +387,32 @@ Re-run the job from the Actions page. It is idempotent, and it flatly refuses to
 overwrite the assets of an already-published release, a refusal written by
 somebody who had thought about it for an uncomfortably long time.
 
+## 🟠 The Half-Fed One: `publish` stopped halfway
+
+`monas` went up, then something broke before the programs did. Do not panic,
+do not bump, and above all do not try to publish the missing ones by hand with
+a fresh token "just this once", because Trusted Publishing only will refuse you
+and it will be right.
+
+Rerun the `publish` job. It asks crates.io about each crate before it does
+anything, leaves out the ones already there, and publishes the rest in order.
+What went up stays up; what did not, goes up now. Nobody needs to know it took
+two tries.
+
+## ⚫ The Unborn One: `publish` stops and names a crate that was never published
+
+Nothing has been published. The job checked every crate first, found one that
+crates.io has never heard of, and stopped before spending a single number,
+because a crate that does not exist cannot trust the workflow yet.
+
+This is not a failure. It is the Rite of the First Offering, knocking. Perform
+it, then rerun.
+
 ## 🟣 The Cryptic One: the token exchange failed in `publish`
 
 Trusted Publishing on crates.io names this repository **and the workflow
-filename**. Rename `release.yaml`, or add an `environment:` key to the `publish`
+filename**, separately for each crate, so a new crate configured from memory is
+a new chance to get it wrong. Rename `release.yaml`, or add an `environment:` key to the `publish`
 job, and the whole thing breaks until you edit the crates.io side to match.
 
 It is `release.yaml`. **With an `a`.** Every example on the internet says
@@ -336,7 +435,7 @@ HackRF requires libhackrf 2023.01.1+ with all required symbols.
 The release container builds without native SDR libraries or development headers.
 The release workflow requires exactly `libc.so.6`, `libgcc_s.so.1` and
 `libm.so.6` in `DT_NEEDED`. It explicitly rejects libhackrf and librtlsdr links.
-`cargo publish` retains its verification build without installing SDR libraries.
+`cargo publish` retains its verification build, for every crate, without installing SDR libraries.
 
 `install.sh` installs native runtimes for current releases only with `--hackrf` or `--rtlsdr`.
 `--soapy` selects SoapySDR and its driver modules. `--deps-only` installs only
@@ -387,17 +486,22 @@ But if you insist:
 cargo install cargo-release
 ```
 
-and add to `Cargo.toml`:
+and add to the root `Cargo.toml`:
 
 ```toml
-[package.metadata.release]
+[workspace.metadata.release]
+shared-version = true
 tag-name = "v{{version}}"
 pre-release-replacements = [
   { file = "CHANGELOG.md", search = "## \\[Unreleased\\]", replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}" },
 ]
 ```
 
-Steps II and V then collapse into `cargo release X.Y.Z --execute`.
+Steps II and V then collapse into `cargo release X.Y.Z --execute`, provided the
+version of cargo-release you installed also rewrites the exact pins in
+`[workspace.dependencies]`. Read its diff before believing it. The pins test
+will catch it if it does not, but the pins test catching it means the tag is
+already in your hand.
 
 Steps I, IV, VII and VIII still demand a human with functioning eyes and an
 actual radio on the desk.

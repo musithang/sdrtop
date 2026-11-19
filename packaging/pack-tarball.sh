@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-# Stage a built binary with the man page and the docs, check it, and pack it
-# into a deterministic tarball in target/dist.
+# Stage the two built binaries, sdrtop and monasd, with their man pages and the
+# docs, check them, and pack them into a deterministic tarball in target/dist.
 #
-#   packaging/pack-tarball.sh NAME BINARY
+#   packaging/pack-tarball.sh NAME SDRTOP_BINARY MONASD_BINARY
 #
-# build-tarball.sh calls this once the binary is built: inside the Debian
+# build-tarball.sh calls this once the binaries are built: inside the Debian
 # container for Linux, on the runner itself for macOS. One copy of what goes
 # into a release and how it is packed, so the two systems' tarballs cannot
 # drift apart.
@@ -17,12 +17,13 @@
 # names it where it is not `tar` (macOS ships bsdtar, Homebrew's is `gtar`).
 set -eu
 
-[ $# -eq 2 ] || {
-    echo "usage: pack-tarball.sh NAME BINARY" >&2
+[ $# -eq 3 ] || {
+    echo "usage: pack-tarball.sh NAME SDRTOP_BINARY MONASD_BINARY" >&2
     exit 2
 }
 NAME=$1
-BINARY=$2
+SDRTOP_BINARY=$2
+MONASD_BINARY=$3
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TAR=${TAR:-tar}
 : "${VERSION:?VERSION must be set}"
@@ -37,31 +38,34 @@ TAR=${TAR:-tar}
 
 OUT=$REPO/target/tarball/$NAME
 rm -rf "$OUT"; mkdir -p "$OUT"
-cp "$BINARY" "$OUT/"
+cp "$SDRTOP_BINARY" "$OUT/sdrtop"
+cp "$MONASD_BINARY" "$OUT/monasd"
 
-# Reading the binary's headers proves what it asks of a machine; this proves
-# it runs. Tested here, in the staging directory, so the file that gets
-# exercised is the exact one that goes into the archive rather than the one it
-# was copied from.
-reported=$("$OUT/sdrtop" --version)
-echo "$reported"
-"$OUT/sdrtop" --help >/dev/null
-
-# And it has to be *this* version. Nothing else in the pipeline compares the
+# Reading a binary's headers proves what it asks of a machine; this proves it
+# runs. Tested here, in the staging directory, so the file that gets exercised
+# is the exact one that goes into the archive rather than the one it was
+# copied from.
+#
+# And it has to be *this* version. Nothing else in the pipeline compares a
 # binary against the name on the archive, so a stale target directory could
 # ship an older build under the current version and no check would notice.
 # release.yaml separately asserts the tag against Cargo.toml, and $VERSION
 # came from version.sh reading that same file, so the two together chain the
-# tag all the way to the binary.
-case "$reported" in
-    "sdrtop $VERSION" | "sdrtop $VERSION "*) ;;
-    *)
-        echo "the binary reports \"$reported\", not sdrtop $VERSION" >&2
-        exit 1
-        ;;
-esac
+# tag all the way to each binary.
+for program in sdrtop monasd; do
+    reported=$("$OUT/$program" --version)
+    echo "$reported"
+    "$OUT/$program" --help >/dev/null
+    case "$reported" in
+        "$program $VERSION" | "$program $VERSION "*) ;;
+        *)
+            echo "$program reports \"$reported\", not $program $VERSION" >&2
+            exit 1
+            ;;
+    esac
+done
 cp "$REPO/README.md" "$REPO/LICENSE" "$OUT/"
-cp "$REPO/target/man/sdrtop.1" "$OUT/"
+cp "$REPO/target/man/sdrtop.1" "$REPO/target/man/monasd.1" "$OUT/"
 # install.sh travels with the tarball as well as being the one-liner on the
 # release page, so an unpacked tarball can install itself offline.
 cp "$REPO/packaging/install.sh" "$OUT/"

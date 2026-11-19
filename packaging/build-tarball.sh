@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-# Build the release tarball: the binary, the man page and the docs.
+# Build the release tarball: both binaries (sdrtop and monasd), their man pages
+# and the docs.
 #
 #   packaging/build-tarball.sh
 #
@@ -54,16 +55,17 @@ if [ "$(uname -s)" = Darwin ]; then
     CARGO_TARGET_DIR="$REPO/target/release-$TRIPLE" SDRTOP_COMMIT="$COMMIT" \
         cargo build --release --locked --target "$TRIPLE" \
         --manifest-path "$REPO/Cargo.toml"
-    BIN="$REPO/target/release-$TRIPLE/$TRIPLE/release/sdrtop"
-    # Signed ad hoc, on both architectures. Apple Silicon runs nothing without
+    BIN="$REPO/target/release-$TRIPLE/$TRIPLE/release"
+    # Signed ad hoc, on both architectures, both binaries. Apple Silicon runs nothing without
     # a signature and its linker adds one, but the Intel linker does not, and
     # one rule for both is easier to check than two. An ad-hoc signature is a
     # hash of the file with no certificate and no timestamp, so it costs no
     # reproducibility; it is not a developer signature, and says nothing about
     # who built the file. The attestation on the release says that.
-    codesign --sign - --force "$BIN"
+    codesign --sign - --force "$BIN/sdrtop"
+    codesign --sign - --force "$BIN/monasd"
     export VERSION SOURCE_DATE_EPOCH
-    exec sh "$REPO/packaging/pack-tarball.sh" "$NAME" "$BIN"
+    exec sh "$REPO/packaging/pack-tarball.sh" "$NAME" "$BIN/sdrtop" "$BIN/monasd"
 fi
 
 # Podman first, then docker. This used to live in a _container.sh that two build
@@ -121,5 +123,6 @@ exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     cargo build --release --target x86_64-unknown-linux-gnu
     # Tested at the supported glibc floor, without native SDR libraries.
     sh packaging/pack-tarball.sh "$NAME" \
-        target/container/x86_64-unknown-linux-gnu/release/sdrtop
+        target/container/x86_64-unknown-linux-gnu/release/sdrtop \
+        target/container/x86_64-unknown-linux-gnu/release/monasd
 '
