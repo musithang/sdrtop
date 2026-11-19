@@ -5,7 +5,7 @@
 //! fields the panel shows (PI, PTY, programme service name, RadioText).
 //!
 //! The DSP that recovers the bitstream from the 57 kHz subcarrier lives in
-//! [`super::rds_demod`]; everything here operates on a stream of already-recovered
+//! [`demod`]; everything here operates on a stream of already-recovered
 //! bits, which makes the whole protocol testable without a radio or a waveform.
 //!
 //! Structure of the data, briefly, because the constants below only make sense
@@ -15,6 +15,13 @@
 //! the blocks self-locating: a receiver that computes the syndrome of a candidate
 //! 26-bit window and gets one of the five offset words back has found a block
 //! boundary and knows which position it is looking at.
+
+// The documentation is its developers', so a public item's comment may
+// point at the private one that explains it. rustdoc still resolves every
+// such link, and a broken one fails the doc build as it always did.
+#![allow(rustdoc::private_intra_doc_links)]
+
+pub mod demod;
 
 /// Generator polynomial x¹⁰+x⁸+x⁷+x⁵+x⁴+x³+1, with the x¹⁰ term included.
 const POLY: u32 = 0x5B9;

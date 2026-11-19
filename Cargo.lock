@@ -1033,6 +1033,7 @@ dependencies = [
  "libc",
  "libloading",
  "monas-dsp",
+ "monas-rds",
  "num-complex",
  "rustfft",
  "serde",
@@ -1048,6 +1049,14 @@ version = "0.7.4"
 dependencies = [
  "num-complex",
  "rustfft",
+]
+
+[[package]]
+name = "monas-rds"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
 ]
 
 [[package]]

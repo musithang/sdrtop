@@ -3,7 +3,7 @@
 
 //! RDS - the signal layer: recovering the bitstream from the 57 kHz subcarrier
 //! in the demodulated MPX baseband. The protocol that consumes those bits lives
-//! in [`super::rds`].
+//! in [the crate root](crate).
 //!
 //! The chain, and why each stage is shaped the way it is:
 //!
@@ -25,7 +25,7 @@
 
 use num_complex::Complex;
 
-use super::rds::RdsDecoder;
+use crate::RdsDecoder;
 
 /// RDS subcarrier: exactly three times the stereo pilot.
 pub const SUBCARRIER_HZ: f64 = 57_000.0;
@@ -127,7 +127,7 @@ impl RdsDemod {
             freq: 2.0 * std::f64::consts::PI * PILOT_HZ / rate,
             kp: 2.0 * 0.707 * wn,
             ki: wn * wn,
-            lp: super::dsp::fir::design_lowpass(LP_TAPS, cutoff),
+            lp: monas_dsp::fir::design_lowpass(LP_TAPS, cutoff),
             hist: vec![Complex { re: 0.0, im: 0.0 }; LP_TAPS],
             hist_pos: 0,
             dec_d,
@@ -280,8 +280,8 @@ fn biphase(buf: &[f32], off: f64, sps: f64) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::rds::{encode_block, BlockOffset, RdsDecoder, BLOCK_BITS};
     use super::*;
+    use crate::{encode_block, BlockOffset, RdsDecoder, BLOCK_BITS};
     use std::f64::consts::TAU;
 
     /// Build an MPX waveform carrying a pilot and an RDS bitstream, the way a

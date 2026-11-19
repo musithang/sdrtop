@@ -20,6 +20,7 @@ testing = ["monas-dsp/testing"]
 
 [dependencies]
 monas-dsp.workspace = true
+monas-rds.workspace = true
 libc.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
