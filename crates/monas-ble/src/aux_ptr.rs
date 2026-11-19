@@ -136,8 +136,8 @@ pub fn keeps(p: &Promise, heard_phy: Phy, heard: &ExtHeader) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::coded::Coding;
-    use crate::signal::ble::ext::{parse, ExtHeader};
+    use crate::coded::Coding;
+    use crate::ext::{parse, ExtHeader};
 
     fn header(aux: Option<(u8, u32, bool, u8)>) -> ExtHeader {
         // AuxPtr from (channel, offset in 30 us units, CA, PHY bits).
@@ -221,7 +221,7 @@ mod tests {
         let same = header(None);
         assert!(keeps(&p, coded, &same));
         let mut other_adi = same.clone();
-        other_adi.adi = Some(crate::signal::ble::ext::Adi { did: 0x124, sid: 3 });
+        other_adi.adi = Some(crate::ext::Adi { did: 0x124, sid: 3 });
         assert!(!keeps(&p, coded, &other_adi));
         assert!(
             !keeps(&p, Phy::OneM, &same),

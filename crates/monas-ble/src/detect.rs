@@ -23,7 +23,7 @@ use num_complex::Complex;
 use super::gfsk;
 use super::Phy;
 #[cfg(test)]
-use crate::signal::dsp::correlate::MatchedFilter;
+use monas_dsp::correlate::MatchedFilter;
 
 /// The fixed access address every advertising channel PDU begins with.
 ///
@@ -172,7 +172,7 @@ impl Detector {
     }
 
     /// How many samples the reference is - `REFERENCE_SYMBOLS * sps` - which
-    /// is the figure [`crate::signal::dsp::correlate::threshold_for_false_alarm`]
+    /// is the figure [`monas_dsp::correlate::threshold_for_false_alarm`]
     /// needs to turn a stated false-alarm rate into a threshold for this
     /// detector specifically.
     ///
@@ -199,8 +199,8 @@ impl Detector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::correlate::threshold_for_false_alarm;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use monas_dsp::correlate::threshold_for_false_alarm;
+    use monas_dsp::testkit::{at_snr, Rng};
 
     /// The worked example the source citation names: `0x8E89BED6` is sent as
     /// the octets D6, BE, 89, 8E, each octet least-significant-bit-first.

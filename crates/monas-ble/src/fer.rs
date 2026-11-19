@@ -28,7 +28,7 @@
 //! 1)`, which stays positive at both ends where the textbook `sqrt(p(1 -
 //! p) / n)` collapses to a certainty the data does not have.
 
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 /// Bins, each [`BIN_DB`] wide from [`LOW_DB`]: 0 to 40 dB in 2 dB steps.
 /// A packet below the first edge counts in the first bin and one above the

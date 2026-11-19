@@ -24,7 +24,7 @@
 //! counts; this module does not tell it from the payload, because nothing
 //! in the header says whether a link is encrypted.
 
-use crate::signal::dsp::code::crc::crc24;
+use monas_dsp::code::crc::crc24;
 
 /// One data channel PDU, as sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,7 +98,7 @@ pub fn decode(bits: &[bool], crc_init: u32) -> Option<DataPdu> {
 /// A data channel PDU's bits, CRC'd under `crc_init` and whitened for
 /// `channel` as a transmitter sends them: for this module's tests and the
 /// receiver's.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn encode(pdu: &DataPdu, crc_init: u32, channel: u8) -> Vec<bool> {
     let byte0 = pdu.llid & 0b11
         | (pdu.nesn as u8) << 2
@@ -114,14 +114,14 @@ pub fn encode(pdu: &DataPdu, crc_init: u32, channel: u8) -> Vec<bool> {
         .iter()
         .flat_map(|&b| (0..8).map(move |i| b >> i & 1 != 0))
         .collect();
-    crate::signal::dsp::code::lfsr::whiten(&mut bits, channel);
+    monas_dsp::code::lfsr::whiten(&mut bits, channel);
     bits
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::code::lfsr::whiten;
+    use monas_dsp::code::lfsr::whiten;
 
     fn pdu(llid: u8, flags: (bool, bool, bool), payload: &[u8]) -> DataPdu {
         DataPdu {

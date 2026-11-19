@@ -23,12 +23,12 @@
 //! own tests assert: 40 channels, 2 MHz apart, covering exactly 2402 to
 //! 2480 MHz with no gap and no overlap. That agreement is why this table is a
 //! constant rather than a `None`-shaped placeholder like
-//! [`crate::signal::reference::Standard::tolerance_ppm`] - but the primary
+//! the engine's per-standard tolerance table, which says none - but the primary
 //! source is still owed a real read before anything downstream (whitening,
 //! CRC, hop timing) trusts a channel *index*, not just its frequency.
 
 /// The 2.4 GHz ISM band, as BLE actually uses it: 2402 to 2480 MHz, the span
-/// the 40 channels below cover exactly. Not [`crate::signal::net::band::LOW_HZ`]
+/// the 40 channels below cover exactly. Not the NET band's `LOW_HZ`
 /// and `HIGH_HZ`, which are the wider Wi-Fi framing of the same physical band;
 /// BLE's own channel plan does not reach either edge of that wider range.
 ///

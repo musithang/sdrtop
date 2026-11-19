@@ -24,7 +24,7 @@
 //! **Key material is named, never printed**: LL_ENC_REQ's and LL_ENC_RSP's
 //! random number, diversifiers and initialisation vectors.
 
-use crate::signal::errors::error_name;
+use monas_dsp::errors::error_name;
 
 /// Table 2.20, with each PDU's CtrData length in octets from its figure.
 pub const OPCODES: &[(u8, &str, usize)] = &[

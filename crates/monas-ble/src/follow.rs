@@ -35,7 +35,7 @@ use super::data::DataPdu;
 use super::llcp;
 use super::receive::DataTiming;
 use super::Phy;
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 /// The accuracy this radio's own sample clock is assumed to keep, in ppm,
 /// for the listening window only: an assumption, neither measured nor read
@@ -729,9 +729,9 @@ fn phy_of(bits: u8) -> Option<Phy> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::connect::{ConnectIndData, Csa1, Csa2};
-    use crate::signal::ble::data::DataPdu;
-    use crate::signal::ble::receive::DataTiming;
+    use crate::connect::{ConnectIndData, Csa1, Csa2};
+    use crate::data::DataPdu;
+    use crate::receive::DataTiming;
 
     fn params(interval: u16, win_offset: u16, win_size: u8) -> ConnectIndData {
         ConnectIndData {

@@ -13,6 +13,11 @@
 //! stage, but [`detect`] needs it to build the reference it correlates
 //! against, since the advertising access address is known in advance.
 
+// The documentation is its developers', so a public item's comment may
+// point at the private one that explains it. rustdoc still resolves every
+// such link, and a broken one fails the doc build as it always did.
+#![allow(rustdoc::private_intra_doc_links)]
+
 pub mod ad;
 pub mod address;
 pub mod aux_ptr;

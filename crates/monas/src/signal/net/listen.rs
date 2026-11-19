@@ -160,7 +160,7 @@ impl Listener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::receive::tests::{data_pdu, synthetic_data_burst};
+    use crate::signal::ble::receive::testing::{data_pdu, synthetic_data_burst};
     use crate::signal::ble::receive::Link;
     use crate::signal::ble::Phy;
     use crate::signal::net::measure::Recent;

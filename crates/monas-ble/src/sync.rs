@@ -16,8 +16,8 @@
 //! search-once-and-hold method fits, so that is what this module uses.
 
 #[cfg(test)]
-use crate::signal::dsp::timing::find_phase;
-use crate::signal::dsp::timing::interpolate;
+use monas_dsp::timing::find_phase;
+use monas_dsp::timing::interpolate;
 
 /// How many candidate phases [`slice`] tries per symbol period. 16 puts the
 /// worst-case phase error at 1/32 of a symbol - a sixteenth either side of
@@ -50,8 +50,8 @@ pub fn slice(
 /// A shift by whole symbols moves where slicing starts, not where inside
 /// each symbol it samples, so one search serves every candidate start a
 /// whole number of symbols apart.
-pub fn growing(sps: f64) -> crate::signal::dsp::timing::PhaseSearch {
-    crate::signal::dsp::timing::PhaseSearch::new(sps, PHASE_RESOLUTION)
+pub fn growing(sps: f64) -> monas_dsp::timing::PhaseSearch {
+    monas_dsp::timing::PhaseSearch::new(sps, PHASE_RESOLUTION)
 }
 
 /// Recover one bit per symbol from a discriminator's instantaneous-frequency
@@ -91,10 +91,10 @@ pub fn slice_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::detect::Le1mParams;
-    use crate::signal::ble::gfsk::modulate;
-    use crate::signal::dsp::discriminate::discriminate;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use crate::detect::Le1mParams;
+    use crate::gfsk::modulate;
+    use monas_dsp::discriminate::discriminate;
+    use monas_dsp::testkit::{at_snr, Rng};
 
     /// The ideal noncoherent binary orthogonal FSK bit error rate.
     ///

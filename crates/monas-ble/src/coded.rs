@@ -29,8 +29,8 @@
 //! `transmit` builds a packet from the Core's text, so the readers are
 //! held to the specification rather than to themselves.
 
-use crate::signal::dsp::code::conv::{correlation, hamming, Code};
-use crate::signal::dsp::code::lfsr::whiten;
+use monas_dsp::code::conv::{correlation, hamming, Code};
+use monas_dsp::code::lfsr::whiten;
 
 /// The 8-symbol unit the Coded PHY's own preamble repeats ten times -
 /// section 2.2.1's own exact words: "10 repetitions of the symbol pattern
@@ -432,7 +432,7 @@ pub fn symbols_of(access_address: u32, coding: Coding, air: &[bool]) -> Vec<bool
 /// A whole packet's symbols, built from the Core's text alone and never from
 /// the readers above: [`symbols_of`] on the PDU, its CRC and the whitening as
 /// `pdu::encode` builds them for the uncoded PHYs (3.1.1, 3.2).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn transmit(
     access_address: u32,
     coding: Coding,
@@ -450,7 +450,7 @@ pub fn transmit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     /// Section 2.2.1's own exact preamble pattern and length, checked
     /// directly rather than trusted from the constant's own name.
@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn the_sync_symbols_are_the_preamble_then_the_coded_address() {
-        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let aa = crate::detect::ADVERTISING_ACCESS_ADDRESS;
         let s = sync_symbols(aa);
         assert_eq!(s.len(), 336);
         assert_eq!(&s[..80], &preamble_bits()[..]);
@@ -597,7 +597,7 @@ mod tests {
     /// access address, the scheme, the PDU, a passing CRC, nothing repaired.
     #[test]
     fn a_coded_packet_reads_back_through_the_chain() {
-        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let aa = crate::detect::ADVERTISING_ACCESS_ADDRESS;
         for coding in [Coding::S8, Coding::S2] {
             let payload = [0x05, 0x18, 0x23, 0x31, 0x09, 0x64, 0x40, 0x00];
             let sym = transmit(aa, coding, 38, 0x07, &payload);
@@ -614,12 +614,9 @@ mod tests {
             );
             let b2 = &body[BLOCK1_SYMBOLS..];
             let header = peek_header(&soft(b2), coding, 38).unwrap();
-            assert_eq!(
-                crate::signal::ble::pdu::length(&header),
-                Some(payload.len() as u8)
-            );
+            assert_eq!(crate::pdu::length(&header), Some(payload.len() as u8));
             let (bits, repairs) = read_block2(&soft(b2), coding, 38).unwrap();
-            let p = crate::signal::ble::pdu::decode(&bits).unwrap();
+            let p = crate::pdu::decode(&bits).unwrap();
             assert!(p.crc_ok, "{coding:?}");
             assert_eq!(p.payload, payload);
             assert_eq!(repairs, 0);
@@ -630,14 +627,14 @@ mod tests {
     /// past it alone.
     #[test]
     fn the_header_is_read_before_the_packet_ends() {
-        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let aa = crate::detect::ADVERTISING_ACCESS_ADDRESS;
         for coding in [Coding::S8, Coding::S2] {
             let payload = [0x42; 30];
             let sym = transmit(aa, coding, 39, 0x07, &payload);
             let b2 = &sym[PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS..];
             let enough = (16 + HEADER_LOOKAHEAD_BITS) * 2 * coding.symbols_per_bit() / 2;
             let header = peek_header(&soft(&b2[..enough]), coding, 39).unwrap();
-            assert_eq!(crate::signal::ble::pdu::length(&header), Some(30));
+            assert_eq!(crate::pdu::length(&header), Some(30));
             assert_eq!(peek_header(&soft(&b2[..enough - 1]), coding, 39), None);
         }
     }
@@ -645,7 +642,7 @@ mod tests {
     /// Three symbols of block 1 flipped: still read, and counted.
     #[test]
     fn block_one_repairs_what_it_fixes() {
-        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let aa = crate::detect::ADVERTISING_ACCESS_ADDRESS;
         let sym = transmit(aa, Coding::S8, 37, 0x07, &[0x01, 0x00]);
         let mut b1 = soft(&sym[PREAMBLE_SYMBOLS..PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS]);
         for i in [5, 101, 230] {
@@ -662,13 +659,13 @@ mod tests {
     /// symbol is a flipped coded bit, which the convolutional code repairs.
     #[test]
     fn block_two_repairs_at_s2_too() {
-        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let aa = crate::detect::ADVERTISING_ACCESS_ADDRESS;
         let payload = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
         let sym = transmit(aa, Coding::S2, 37, 0x07, &payload);
         let mut b2 = soft(&sym[PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS..]);
         b2[40] = -b2[40];
         let (bits, repairs) = read_block2(&b2, Coding::S2, 37).unwrap();
-        let p = crate::signal::ble::pdu::decode(&bits).unwrap();
+        let p = crate::pdu::decode(&bits).unwrap();
         assert!(p.crc_ok);
         assert_eq!(repairs, 1);
     }

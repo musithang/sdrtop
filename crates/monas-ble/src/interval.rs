@@ -42,7 +42,7 @@
 //! the device's interval in our seconds; that is a real reading of it, and
 //! the grid comparison below allows for it rather than correcting it.
 
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 /// The advInterval's step, and its legacy range, in seconds.
 pub const INTERVAL_STEP_S: f64 = 0.625e-3;
@@ -210,7 +210,7 @@ pub fn estimate(pairs: &[u64], rate_hz: f64) -> Result<Estimate, Refusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::testkit::Rng;
+    use monas_dsp::testkit::Rng;
 
     const RATE: f64 = 8e6;
 

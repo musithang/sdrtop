@@ -38,7 +38,7 @@ impl Receiver {
     /// their errors cancel along the line), and one point per symbol
     /// overstated it by two thirds. `the_offset_s_uncertainty_matches_its_
     /// scatter` holds the stated figure to the measured one.
-    pub(super) fn sync_offset(&self) -> Option<crate::signal::dsp::uncertainty::Uncertain> {
+    pub(super) fn sync_offset(&self) -> Option<monas_dsp::uncertainty::Uncertain> {
         let n = self.reference.len();
         if self.sync_window.len() != n || n < 2 * WORKING_SPS {
             return None;
@@ -85,7 +85,7 @@ impl Receiver {
             .collect();
         let residual_var = residual.iter().map(|r| r * r).sum::<f64>() / (n_pts - 2.0).max(1.0);
         if residual_var <= 0.0 {
-            return Some(crate::signal::dsp::uncertainty::Uncertain::exact(
+            return Some(monas_dsp::uncertainty::Uncertain::exact(
                 slope * working_rate_hz(self.phy) / std::f64::consts::TAU,
             ));
         }
@@ -114,7 +114,7 @@ impl Receiver {
         let per_sample = (12.0 * residual_var / (n_eff * (n_eff * n_eff - 1.0))).sqrt() / spacing;
         let rate = working_rate_hz(self.phy);
         let to_hz = rate / std::f64::consts::TAU;
-        Some(crate::signal::dsp::uncertainty::Uncertain::from_sigma(
+        Some(monas_dsp::uncertainty::Uncertain::from_sigma(
             slope * to_hz,
             per_sample * to_hz,
         ))
@@ -212,18 +212,16 @@ impl Receiver {
         // centre, `k + 0.5`, is where the slicer sampled it.
         let at = |x: f64| fine.at(skip as f64 + phase + (x - 0.5) * sps + 0.5);
         // Every bit read once, for the modulation and the carrier both.
-        let readings = crate::signal::dsp::deviation::BitReadings::read(packet.air.len(), at);
-        packet.modulation =
-            crate::signal::dsp::deviation::suite_readings_from(&packet.air, &readings).and_then(
-                |(settled, alternating)| {
-                    crate::signal::ble::measure::modulation_from(&settled, &alternating, self.phy)
-                },
-            );
+        let readings = monas_dsp::deviation::BitReadings::read(packet.air.len(), at);
+        packet.modulation = monas_dsp::deviation::suite_readings_from(&packet.air, &readings)
+            .and_then(|(settled, alternating)| {
+                crate::measure::modulation_from(&settled, &alternating, self.phy)
+            });
         // The preamble is not in the capture: the first block stands for f0.
-        let carrier = crate::signal::dsp::carrier::by_bit_from(&packet.air, &readings);
+        let carrier = monas_dsp::carrier::by_bit_from(&packet.air, &readings);
         let crc_start = packet.air.len().saturating_sub(pdu::CRC_BITS);
-        let blocks = crate::signal::dsp::carrier::ten_bit_blocks(&carrier, 1, crc_start);
-        packet.drift = crate::signal::ble::measure::drift_from(None, &blocks, self.phy);
+        let blocks = monas_dsp::carrier::ten_bit_blocks(&carrier, 1, crc_start);
+        packet.drift = crate::measure::drift_from(None, &blocks, self.phy);
         packet
     }
 }

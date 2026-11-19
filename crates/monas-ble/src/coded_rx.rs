@@ -21,10 +21,10 @@ use super::coded::{self, Coding};
 use super::detect::ADVERTISING_ACCESS_ADDRESS;
 use super::pdu::{self, Packet};
 use super::receive::Funnel;
-use crate::signal::dsp::correlate::ShapeMatcher;
-use crate::signal::dsp::discriminate::instantaneous_freq_hz;
-use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
-use crate::signal::dsp::nco::Nco;
+use monas_dsp::correlate::ShapeMatcher;
+use monas_dsp::discriminate::instantaneous_freq_hz;
+use monas_dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
+use monas_dsp::nco::Nco;
 
 /// The rate the chain decimates to: four samples a symbol, as LE 1M's.
 pub const WORKING_RATE_HZ: f64 = 4e6;
@@ -608,7 +608,7 @@ impl CodedReceiver {
                         // The PDU and CRC as sent, whitened again: what the
                         // measurement path rebuilds the packet's symbols from.
                         let mut air = bits.clone();
-                        crate::signal::dsp::code::lfsr::whiten(&mut air, self.channel);
+                        monas_dsp::code::lfsr::whiten(&mut air, self.channel);
                         pdu::decode(&bits).map(|mut p| {
                             p.air = air;
                             (p, more)
@@ -803,9 +803,9 @@ mod tests {
         assert!(front_end(20e6, FILTER).is_ok());
     }
 
-    use crate::signal::ble::coded::{self, Coding};
-    use crate::signal::ble::{channel, detect, gfsk, pdu};
-    use crate::signal::dsp::testkit::Rng;
+    use crate::coded::{self, Coding};
+    use crate::{channel, detect, gfsk, pdu};
+    use monas_dsp::testkit::Rng;
 
     const AA: u32 = detect::ADVERTISING_ACCESS_ADDRESS;
     /// An ADV_EXT_IND as LE Coded sends one: ext header length 6, AdvMode 0,
@@ -943,7 +943,7 @@ mod tests {
     #[test]
     fn an_le_1m_packet_is_not_a_coded_one() {
         let mut rng = Rng::new(4);
-        let mut le1m = detect::preamble_bits(AA, crate::signal::ble::Phy::OneM);
+        let mut le1m = detect::preamble_bits(AA, crate::Phy::OneM);
         le1m.extend(detect::access_address_bits(AA));
         le1m.extend(pdu::encode(12, 0x00, &[1, 2, 3, 4, 5, 6, 2, 1, 6]));
         let (iq, _) = on_air(&le1m, 20e6, 12, 2_426e6, 0.0, 64, &mut rng);

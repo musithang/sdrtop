@@ -39,7 +39,7 @@
 //! out to be the wrong input for it.
 
 use super::Phy;
-use crate::signal::dsp::uncertainty::Uncertain;
+use monas_dsp::uncertainty::Uncertain;
 
 // The symbol rate both measurements scale by is the PHY's own
 // (`Phy::symbol_rate_hz`: 1 Mb/s on LE 1M, 2 Mb/s on LE 2M), a specification
@@ -131,8 +131,8 @@ pub fn modulation_from(
         return None;
     }
 
-    let delta_f1_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(settled);
-    let delta_f2_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(alternating);
+    let delta_f1_avg_hz = monas_dsp::uncertainty::mean_with_uncertainty(settled);
+    let delta_f2_avg_hz = monas_dsp::uncertainty::mean_with_uncertainty(alternating);
     let modulation_index = delta_f1_avg_hz.scale(2.0 / phy.symbol_rate_hz());
     let ratio = delta_f2_avg_hz.ratio(&delta_f1_avg_hz);
 
@@ -146,26 +146,26 @@ pub fn modulation_from(
 
 /// The carrier figures, which are GFSK's and so `dsp::carrier`'s: classic
 /// Bluetooth reads them too.
-pub use crate::signal::dsp::carrier::Drift;
+pub use monas_dsp::carrier::Drift;
 
-/// [`crate::signal::dsp::carrier::drift_from`] on `phy`'s clock.
+/// [`monas_dsp::carrier::drift_from`] on `phy`'s clock.
 pub fn drift_from(initial: Option<(f64, usize)>, blocks: &[f64], phy: Phy) -> Option<Drift> {
-    crate::signal::dsp::carrier::drift_from(initial, blocks, phy.symbol_rate_hz())
+    monas_dsp::carrier::drift_from(initial, blocks, phy.symbol_rate_hz())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::detect::Le1mParams;
-    use crate::signal::ble::gfsk::modulate;
-    use crate::signal::dsp::discriminate::discriminate;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use crate::detect::Le1mParams;
+    use crate::gfsk::modulate;
+    use monas_dsp::discriminate::discriminate;
+    use monas_dsp::testkit::{at_snr, Rng};
 
     /// The suites' readings of per-symbol `samples`, each held across its
     /// bit, aggregated: what the receivers do with a rebuilt waveform, on
     /// the one reading a bit these tests build.
     fn modulation_quality(bits: &[bool], samples: &[f32], phy: Phy) -> Option<ModulationQuality> {
-        let (settled, alternating) = crate::signal::dsp::deviation::suite_readings(bits, |x| {
+        let (settled, alternating) = monas_dsp::deviation::suite_readings(bits, |x| {
             samples[(x as usize).min(samples.len() - 1)]
         })?;
         modulation_from(&settled, &alternating, phy)
@@ -204,7 +204,7 @@ mod tests {
         };
         let mut inst = Vec::new();
         discriminate(&iq, params.sample_rate, &mut inst);
-        let (_, samples) = crate::signal::ble::sync::slice(&inst, params.sps as f64, n_bits, 0.0);
+        let (_, samples) = crate::sync::slice(&inst, params.sps as f64, n_bits, 0.0);
         (bits, samples)
     }
 
@@ -218,7 +218,7 @@ mod tests {
     /// tight tolerance, and that is a finding of its own kind.** A first
     /// version of this test did exactly that, at three deviations, and
     /// failed at 200 kHz while passing at 250 kHz - not because the
-    /// measurement is wrong, but because [`find_phase`](crate::signal::dsp::timing::find_phase)'s
+    /// measurement is wrong, but because [`find_phase`](monas_dsp::timing::find_phase)'s
     /// amplitude-based search has a broad, nearly flat maximum over a
     /// settled plateau, so two *independent* simulated captures at
     /// different deviations can legitimately settle on phases a fraction of
@@ -366,7 +366,7 @@ mod tests {
     /// with no preamble held: what the receivers do with a rebuilt
     /// waveform, on the one reading a bit these tests build.
     fn drift(bits: &[bool], samples: &[f32], phy: Phy) -> Option<Drift> {
-        use crate::signal::dsp::carrier::{by_bit, ten_bit_blocks};
+        use monas_dsp::carrier::{by_bit, ten_bit_blocks};
         let carrier = by_bit(bits, |x| samples[(x as usize).min(samples.len() - 1)]);
         drift_from(None, &ten_bit_blocks(&carrier, 1, bits.len() - 1), phy)
     }
@@ -417,8 +417,7 @@ mod tests {
         let drifted = with_drift(&clean, params.sample_rate, drift_rate_hz_per_us * 1e6);
         let mut inst = Vec::new();
         discriminate(&drifted, params.sample_rate, &mut inst);
-        let (_, samples) =
-            crate::signal::ble::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
+        let (_, samples) = crate::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
 
         let d = drift(&bits, &samples, Phy::OneM).expect("plenty of samples at 3000 bits");
         assert!(
@@ -457,8 +456,7 @@ mod tests {
         );
         let mut inst = Vec::new();
         discriminate(&clean, params.sample_rate, &mut inst);
-        let (_, samples) =
-            crate::signal::ble::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
+        let (_, samples) = crate::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
 
         let d = drift(&bits, &samples, Phy::OneM).unwrap();
         assert!(
@@ -489,7 +487,7 @@ mod tests {
         let iq = at_snr(&clean, 30.0, &mut Rng::new(seed + 1));
         let mut inst = Vec::new();
         discriminate(&iq, rate, &mut inst);
-        let (_, samples) = crate::signal::ble::sync::slice(&inst, sps as f64, n_bits, 0.0);
+        let (_, samples) = crate::sync::slice(&inst, sps as f64, n_bits, 0.0);
         (bits, samples)
     }
 
@@ -529,7 +527,7 @@ mod tests {
         let drifted = with_drift(&clean, rate, injected * 1e6);
         let mut inst = Vec::new();
         discriminate(&drifted, rate, &mut inst);
-        let (_, samples) = crate::signal::ble::sync::slice(&inst, sps as f64, bits.len(), 0.0);
+        let (_, samples) = crate::sync::slice(&inst, sps as f64, bits.len(), 0.0);
         let d = drift(&bits, &samples, Phy::TwoM).unwrap();
         assert!(
             (d.drift_rate_hz_per_us.value() - injected).abs()

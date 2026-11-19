@@ -392,7 +392,7 @@ impl Advertised {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::pdu::PduType;
+    use crate::pdu::PduType;
 
     /// **A device's account, across the packets it splits it between**: the
     /// advertising names a company and a short name, the scan response the

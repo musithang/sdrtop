@@ -28,8 +28,8 @@ use num_complex::Complex;
 
 use super::coded::{self, Coding, Decisions};
 use super::{coded_rx, detect, gfsk, pdu, receive, Phy};
-use crate::signal::dsp::discriminate::discriminate;
-use crate::signal::dsp::testkit::Rng;
+use monas_dsp::discriminate::discriminate;
+use monas_dsp::testkit::Rng;
 
 const RAW_RATE: f64 = 20e6;
 const RAW_SPS: usize = 20;
@@ -385,7 +385,7 @@ fn coded_filter_bench() {
     let block: Vec<Complex<f32>> = Rng::new(1).noise(4_000_000, 1.0);
     println!("\nfilter     taps   ms per 1 ms of 20 Msps signal");
     for f in coded_rx::CANDIDATES {
-        let taps = crate::signal::dsp::fir::design_lowpass_to_spec(
+        let taps = monas_dsp::fir::design_lowpass_to_spec(
             f.cutoff_hz / RAW_RATE,
             f.transition_hz / RAW_RATE,
             40.0,

@@ -121,7 +121,7 @@ pub fn front_end(raw_rate: f64, phy: Phy) -> Result<StreamingDecimator, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::Phy;
+    use crate::Phy;
 
     /// A sample rate below the working rate is refused, not silently
     /// mis-scaled.

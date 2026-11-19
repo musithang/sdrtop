@@ -2,7 +2,6 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 pub mod assigned;
-pub mod ble;
 pub mod bt;
 pub mod demod;
 pub mod fft;
@@ -18,6 +17,8 @@ pub mod reference;
 pub mod retune;
 pub mod rf_calc;
 
+/// The Bluetooth LE receivers and measurements, under their old name.
+pub use monas_ble as ble;
 /// The building blocks, under the names the engine has always used for them.
 pub use monas_dsp as dsp;
 pub use monas_dsp::{ballistics, errors, iq, stats, stream};

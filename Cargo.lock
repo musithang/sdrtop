@@ -1032,6 +1032,7 @@ dependencies = [
  "crossbeam-channel",
  "libc",
  "libloading",
+ "monas-ble",
  "monas-dsp",
  "monas-rds",
  "monas-wifi",
@@ -1042,6 +1043,14 @@ dependencies = [
  "serialport",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "monas-ble"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
 ]
 
 [[package]]

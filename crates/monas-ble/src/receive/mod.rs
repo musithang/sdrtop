@@ -33,16 +33,16 @@
 
 use num_complex::Complex;
 
+use monas_dsp::code::lfsr::whiten;
+use monas_dsp::correlate::ShapeMatcher;
+use monas_dsp::discriminate::{discriminate, instantaneous_freq_hz, Oversampled};
+use monas_dsp::estimate::snr_from_metric;
+use monas_dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
+use monas_dsp::nco::Nco;
 #[cfg(test)]
-use crate::hardware::SampleGeometry;
-#[cfg(test)]
-use crate::signal::demod::decode as decode_iq;
-use crate::signal::dsp::code::lfsr::whiten;
-use crate::signal::dsp::correlate::ShapeMatcher;
-use crate::signal::dsp::discriminate::{discriminate, instantaneous_freq_hz, Oversampled};
-use crate::signal::dsp::estimate::snr_from_metric;
-use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
-use crate::signal::dsp::nco::Nco;
+use monas_dsp::sample::decode as decode_iq;
+#[cfg(any(test, feature = "testing"))]
+use monas_dsp::sample::SampleGeometry;
 
 use super::data::{self, DataPdu};
 use super::detect::{access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS};
@@ -183,7 +183,7 @@ pub struct Receiver {
     inst_sums: Vec<f64>,
     /// The phase search over the capture so far (`sync::growing`), grown
     /// with it.
-    search: crate::signal::dsp::timing::PhaseSearch,
+    search: monas_dsp::timing::PhaseSearch,
     /// What happened to each trigger since the worker last asked
     /// ([`Self::take_funnel`]).
     funnel: Funnel,
@@ -519,14 +519,72 @@ impl Receiver {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+/// Link-layer packets as a radio would hear them, for the tests here and the
+/// engine's: one link's data channel burst, and the PDU it carries.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
     use super::*;
-    use crate::hardware::{SampleFormat, StreamBlock};
-    use crate::signal::ble::channel;
-    use crate::signal::ble::data::DataPdu;
-    use crate::signal::ble::gfsk::modulate;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
+    use crate::channel;
+    use crate::data::DataPdu;
+    use crate::gfsk::modulate;
+    use monas_dsp::testkit::{at_snr, Rng};
+
+    /// A data channel packet for one link, at the radio's own rate with its
+    /// channel at its offset from `tuned_hz`: sixteen random bits of lead-in
+    /// after `lead` pairs of silence, the preamble `aa` calls for, `aa`, the
+    /// PDU CRC'd under `crc_init` and whitened for `ch`, a short tail. Returns
+    /// the samples and where the preamble's first bit starts, in pairs.
+    pub fn synthetic_data_burst(
+        raw_rate: f64,
+        ch: u8,
+        tuned_hz: f64,
+        aa: u32,
+        crc_init: u32,
+        pdu: &DataPdu,
+        lead: usize,
+    ) -> (Vec<Complex<f32>>, f64) {
+        let sps = (raw_rate / 1e6).round() as usize;
+        let mut rng = Rng::new(4242);
+        let mut bits: Vec<bool> = (0..16).map(|_| rng.next_u64() & 1 == 1).collect();
+        bits.extend(crate::detect::preamble_bits(aa, Phy::OneM));
+        bits.extend_from_slice(&crate::detect::access_address_bits(aa));
+        bits.extend(crate::data::encode(pdu, crc_init, ch));
+        bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
+        let base = modulate(&bits, sps, Phy::OneM.deviation_hz(), raw_rate, 0.5);
+        let offset = channel::centre_hz(ch).unwrap() as f64 - tuned_hz;
+        let mut iq = vec![Complex::new(0.0f32, 0.0); lead];
+        iq.extend(base.iter().enumerate().map(|(n, s)| {
+            let ph = std::f64::consts::TAU * offset * (lead + n) as f64 / raw_rate;
+            s * Complex::new(ph.cos() as f32, ph.sin() as f32)
+        }));
+        let noisy = at_snr(&iq[lead..], 25.0, &mut Rng::new(99));
+        iq.truncate(lead);
+        iq.extend(noisy);
+        iq.extend(vec![Complex::new(0.0, 0.0); 2000]);
+        (iq, (lead + 16 * sps) as f64)
+    }
+
+    pub fn data_pdu(llid: u8, payload: &[u8]) -> DataPdu {
+        DataPdu {
+            llid,
+            nesn: false,
+            sn: true,
+            md: false,
+            cte_info: None,
+            payload: payload.to_vec(),
+            crc_ok: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{data_pdu, synthetic_data_burst};
+    use super::*;
+    use crate::channel;
+    use crate::gfsk::modulate;
+    use monas_dsp::sample::{SampleFormat, StreamBlock};
+    use monas_dsp::testkit::{at_snr, Rng};
 
     /// A receiver with the radio tuned exactly to the channel: what every test
     /// here means unless it says otherwise.
@@ -599,53 +657,6 @@ pub(crate) mod tests {
             bytes.push(im as u8);
         }
         bytes
-    }
-
-    /// A data channel packet for one link, at the radio's own rate with its
-    /// channel at its offset from `tuned_hz`: sixteen random bits of lead-in
-    /// after `lead` pairs of silence, the preamble `aa` calls for, `aa`, the
-    /// PDU CRC'd under `crc_init` and whitened for `ch`, a short tail. Returns
-    /// the samples and where the preamble's first bit starts, in pairs.
-    pub(crate) fn synthetic_data_burst(
-        raw_rate: f64,
-        ch: u8,
-        tuned_hz: f64,
-        aa: u32,
-        crc_init: u32,
-        pdu: &DataPdu,
-        lead: usize,
-    ) -> (Vec<Complex<f32>>, f64) {
-        let sps = (raw_rate / 1e6).round() as usize;
-        let mut rng = Rng::new(4242);
-        let mut bits: Vec<bool> = (0..16).map(|_| rng.next_u64() & 1 == 1).collect();
-        bits.extend(super::super::detect::preamble_bits(aa, Phy::OneM));
-        bits.extend_from_slice(&super::super::detect::access_address_bits(aa));
-        bits.extend(super::super::data::encode(pdu, crc_init, ch));
-        bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
-        let base = modulate(&bits, sps, Phy::OneM.deviation_hz(), raw_rate, 0.5);
-        let offset = channel::centre_hz(ch).unwrap() as f64 - tuned_hz;
-        let mut iq = vec![Complex::new(0.0f32, 0.0); lead];
-        iq.extend(base.iter().enumerate().map(|(n, s)| {
-            let ph = std::f64::consts::TAU * offset * (lead + n) as f64 / raw_rate;
-            s * Complex::new(ph.cos() as f32, ph.sin() as f32)
-        }));
-        let noisy = at_snr(&iq[lead..], 25.0, &mut Rng::new(99));
-        iq.truncate(lead);
-        iq.extend(noisy);
-        iq.extend(vec![Complex::new(0.0, 0.0); 2000]);
-        (iq, (lead + 16 * sps) as f64)
-    }
-
-    pub(crate) fn data_pdu(llid: u8, payload: &[u8]) -> DataPdu {
-        DataPdu {
-            llid,
-            nesn: false,
-            sn: true,
-            md: false,
-            cte_info: None,
-            payload: payload.to_vec(),
-            crc_ok: true,
-        }
     }
 
     const LINK_AA: u32 = 0x5065_4b6a;
@@ -738,7 +749,7 @@ pub(crate) mod tests {
     #[test]
     fn a_synthetic_adv_ind_is_received_whole() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 20.0);
         let geometry = eight_bit();
@@ -810,7 +821,7 @@ pub(crate) mod tests {
     #[test]
     fn packets_are_stamped_in_stream_pairs_across_a_gap() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let one = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 25.0);
         let geometry = eight_bit();
@@ -858,7 +869,7 @@ pub(crate) mod tests {
         let rate = working_rate_hz(Phy::OneM);
         let geometry = eight_bit();
         let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
 
         let iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 25.0);
@@ -945,7 +956,7 @@ pub(crate) mod tests {
                 seed.wrapping_mul(91),
                 0xaa ^ seed,
             ];
-            let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+            let mut payload = crate::pdu::air_octets(addr).to_vec();
             payload.extend_from_slice(&[0x02, 0x01, 0x06]);
             for cfo_hz in [-200_000.0, 200_000.0] {
                 let mut iq = synthetic_packet_iq(Phy::OneM, 37, 0x40, &payload, 20.0);
@@ -988,7 +999,7 @@ pub(crate) mod tests {
     #[test]
     fn a_packet_with_a_crystal_offset_is_still_heard() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let rate = working_rate_hz(Phy::OneM);
         let snr_at = |cfo_hz: f64| -> f64 {
@@ -1046,7 +1057,7 @@ pub(crate) mod tests {
     #[test]
     fn the_offset_s_uncertainty_matches_its_scatter() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let rate = working_rate_hz(Phy::OneM);
         let clean = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, f64::INFINITY);
@@ -1150,7 +1161,7 @@ pub(crate) mod tests {
     #[test]
     fn a_synthetic_adv_ind_is_received_whole_on_le_2m() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let iq = synthetic_packet_iq(Phy::TwoM, 37, 0x00, &payload, 20.0);
         let geometry = eight_bit();
@@ -1171,7 +1182,7 @@ pub(crate) mod tests {
     #[test]
     fn a_packet_split_across_many_small_blocks_still_arrives() {
         let addr = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
-        let payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let payload = crate::pdu::air_octets(addr).to_vec();
         let iq = synthetic_packet_iq(Phy::OneM, 37, 0x02, &payload, 20.0); // ADV_NONCONN_IND
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
@@ -1205,7 +1216,7 @@ pub(crate) mod tests {
     #[test]
     fn a_channel_off_the_tuned_centre_is_measured_from_its_own_centre() {
         let addr = [0x0A, 0x1B, 0x2C, 0x3D, 0x4E, 0x5F];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.push(0xFF);
         let raw_rate = 8_000_000.0;
         let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;
@@ -1259,7 +1270,7 @@ pub(crate) mod tests {
     #[test]
     fn a_packet_survives_decimation_from_a_wider_capture_rate() {
         let addr = [0x10, 0x20, 0x30, 0x40, 0x50, 0x60];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.push(0xFF);
         let raw_rate = 20_000_000.0;
         let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;
@@ -1297,7 +1308,7 @@ pub(crate) mod tests {
     #[test]
     fn a_strong_out_of_channel_interferer_no_longer_defeats_detection() {
         let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
-        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        let mut payload = crate::pdu::air_octets(addr).to_vec();
         payload.push(0x01);
         let raw_rate = 20_000_000.0;
         let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;

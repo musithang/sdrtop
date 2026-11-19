@@ -297,8 +297,7 @@ impl Receiver {
         // what a busy channel cost. The same bits either way - at a fixed
         // phase and threshold each symbol is sliced on its own - so this
         // only skips work whose answer was already `None`.
-        let (mut header, _) =
-            crate::signal::ble::sync::slice_at(inst, sps, pdu::HEADER_BITS, threshold, phase);
+        let (mut header, _) = crate::sync::slice_at(inst, sps, pdu::HEADER_BITS, threshold, phase);
         whiten(&mut header, self.channel);
         let wanted = match self.link {
             Link::Advertising | Link::Auxiliary => pdu::used_bits(pdu::length(&header)?),
@@ -311,7 +310,7 @@ impl Receiver {
         // header reads a short length would otherwise slice everything
         // captured so far on every try, which a busy channel paid for with
         // the square of the capture. `decode` reads no further than this.
-        let (mut bits, _) = crate::signal::ble::sync::slice_at(inst, sps, wanted, threshold, phase);
+        let (mut bits, _) = crate::sync::slice_at(inst, sps, wanted, threshold, phase);
         // The modulation-quality measurement needs the physically
         // transmitted (still-whitened) symbols - exactly what `bits` is
         // before the next line undoes whitening to recover the data

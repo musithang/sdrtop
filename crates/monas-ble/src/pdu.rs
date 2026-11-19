@@ -11,9 +11,9 @@
 //! advertising PDU types, cross-checked against public documentation of the
 //! same layout.
 
-use crate::signal::dsp::code::crc::crc24_ble;
-#[cfg(test)]
-use crate::signal::dsp::code::lfsr::whiten;
+use monas_dsp::code::crc::crc24_ble;
+#[cfg(any(test, feature = "testing"))]
+use monas_dsp::code::lfsr::whiten;
 
 /// The seven PDU types a legacy advertising channel packet can carry.
 /// `Other` is not a defect in this list - PDU types 7 and up are extended
@@ -126,7 +126,7 @@ pub struct Packet {
     pub payload: Vec<u8>,
     pub crc_ok: bool,
     pub snr_db: Option<f64>,
-    pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
+    pub freq_offset_hz: Option<monas_dsp::uncertainty::Uncertain>,
     pub drift: Option<super::measure::Drift>,
     pub modulation: Option<super::measure::ModulationQuality>,
     /// Where in the stream the packet's sync word triggered the receiver, in
@@ -319,7 +319,7 @@ pub fn air_octets(addr: [u8; 6]) -> [u8; 6] {
 /// `cfg(test)` rather than ``: unlike `gfsk::modulate`,
 /// which the receiver needs to build its reference, nothing on the receive
 /// side ever constructs a packet, only decodes one.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn encode(channel: u8, header_byte0: u8, payload: &[u8]) -> Vec<bool> {
     let mut pdu_bytes = vec![header_byte0, payload.len() as u8];
     pdu_bytes.extend_from_slice(payload);
