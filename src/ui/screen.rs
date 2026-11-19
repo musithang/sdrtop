@@ -517,6 +517,34 @@ impl Default for UiState {
 mod tests {
     use super::*;
 
+    /// **Monas can compute what every built-in layout shows.** Each layout,
+    /// in the section it declares, asks for what some named Monas mode asks
+    /// for too (same feeds, same NET view, same FT8 lab), so `monasd` can run
+    /// what any terminal view runs; and a layout that shares a name with a
+    /// Monas mode computes the same thing by it.
+    #[test]
+    fn every_built_in_layout_asks_for_a_mode_monas_knows() {
+        use crate::engine::mode::{Mode, MODES};
+        let computes = |m: &Mode| (m.feeds, m.net, m.ft8_lab);
+        let named: Vec<Mode> = MODES.iter().map(|(n, _)| Mode::named(n).unwrap()).collect();
+        let layouts = crate::config::LayoutConfig::default_config();
+        for (preset, cfg) in &layouts.presets {
+            let section = cfg.section.clone().unwrap_or_default();
+            let asked = Mode::for_view(&section, preset);
+            assert!(
+                named.iter().any(|m| computes(m) == computes(&asked)),
+                "{preset} in {section} asks for a mode Monas has no name for"
+            );
+            if let Some(m) = Mode::named(preset) {
+                assert_eq!(
+                    computes(&m),
+                    computes(&asked),
+                    "{preset}: one name, two modes"
+                );
+            }
+        }
+    }
+
     /// **The screen and the engine read one view the same way.** Every
     /// built-in layout, with the section it declares, asks the engine for
     /// exactly the feeds the screen's own description of that section says

@@ -1012,7 +1012,7 @@ impl SdrDevice for AirspyHfDevice {
         id == "dsp"
     }
 
-    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+    fn update_config(&self, config: &mut crate::config::EngineConfig) -> anyhow::Result<()> {
         config.airspyhf.dsp = self.tuning().dsp;
         Ok(())
     }
@@ -1317,7 +1317,7 @@ mod tests {
         device.set_option("dsp", "On").unwrap();
         assert_eq!(fixture.airspyhf_state(3), 1);
         assert_eq!(device.set_frequency(7_074_300).unwrap(), 7_074_300);
-        let mut config = crate::config::AppConfig::default();
+        let mut config = crate::config::EngineConfig::default();
         device.update_config(&mut config).unwrap();
         assert!(config.airspyhf.dsp);
         device.set_option("dsp", "Off").unwrap();

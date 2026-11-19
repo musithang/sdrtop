@@ -828,7 +828,7 @@ impl SdrDevice for AirspyDevice {
 
     /// Packing only: the bias tee starts off every session, whatever the last
     /// one ended with.
-    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+    fn update_config(&self, config: &mut crate::config::EngineConfig) -> anyhow::Result<()> {
         config.airspy.packing = self.stream().packing;
         Ok(())
     }
@@ -1550,7 +1550,7 @@ mod tests {
         let device = AirspyDevice::open_with_api(api, &listing(), &packed).unwrap();
         assert_eq!(fixture.airspy_state(12), 1);
         device.set_option("bias_tee", "On").unwrap();
-        let mut cfg = crate::config::AppConfig::default();
+        let mut cfg = crate::config::EngineConfig::default();
         device.update_config(&mut cfg).unwrap();
         assert_eq!(cfg.airspy, packed);
     }

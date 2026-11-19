@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::config::AppConfig;
+use crate::config::SdrtopConfig;
 use crate::event::EventStream;
 use crate::hardware;
 use crate::state::SdrMetrics;
@@ -36,20 +36,23 @@ impl App {
     /// another process to hold it: `DeviceKind::observer_profile`, asked by
     /// `App::new`, which has the listing.
     pub(super) fn new_normal(
-        cfg: AppConfig,
+        cfg: SdrtopConfig,
         config_path: Option<PathBuf>,
         device: Arc<dyn hardware::SdrDevice>,
         observable: bool,
     ) -> anyhow::Result<Self> {
         let geometry = device.capabilities().sample_geometry;
         let state = Arc::new(Mutex::new(crate::engine::start::open(
-            &cfg, &device, observable,
+            &cfg.engine,
+            cfg.tui.display.shown(),
+            &device,
+            observable,
         )?));
 
         // Read out before `cfg` is moved into `Self::assemble` below - a
         // plain `usize`, not worth threading the whole config through the
         // worker for.
-        let bt_channels = cfg.net.bt_channels;
+        let bt_channels = cfg.engine.net.bt_channels;
         let (rx_ctx, feeds) = crate::engine::start::feeds(&state, geometry);
 
         let app = Self::assemble(
@@ -67,14 +70,14 @@ impl App {
     }
 
     pub(super) fn new_observer(
-        cfg: AppConfig,
+        cfg: SdrtopConfig,
         config_path: Option<PathBuf>,
         sysinfo: hardware::usb::UsbDeviceInfo,
         profile: hardware::discovery::ObserverProfile,
     ) -> anyhow::Result<Self> {
         let state = Arc::new(Mutex::new(initial_metrics(
-            &cfg,
-            Boot::observer(&cfg, &sysinfo, profile),
+            &cfg.engine,
+            Boot::observer(&cfg.engine, &sysinfo, profile).showing(cfg.tui.display.shown()),
         )?));
 
         {
@@ -107,7 +110,7 @@ impl App {
     /// mode passes `Some("observer")` because its layout is the only one that
     /// says anything useful with no stream behind it.
     pub(super) fn assemble(
-        cfg: AppConfig,
+        cfg: SdrtopConfig,
         config_path: Option<PathBuf>,
         state: Arc<Mutex<SdrMetrics>>,
         device: Option<Arc<dyn hardware::SdrDevice>>,
@@ -116,11 +119,11 @@ impl App {
     ) -> anyhow::Result<Self> {
         let themes_dir = config_path
             .as_deref()
-            .and_then(crate::config::AppConfig::themes_dir);
+            .and_then(crate::config::TuiConfig::themes_dir);
         let presets_dir = config_path
             .as_deref()
             .and_then(crate::config::LayoutConfig::presets_dir);
-        let theme = cfg.build_theme(themes_dir.as_deref());
+        let theme = cfg.tui.build_theme(themes_dir.as_deref());
         // Whether a config was saved before this run: what makes a view
         // worth offering to resume. Read before anything writes one, which
         // only quitting does.
@@ -137,7 +140,7 @@ impl App {
             )
         };
 
-        let active = preset_override.unwrap_or(&cfg.display.active_preset);
+        let active = preset_override.unwrap_or(&cfg.tui.display.active_preset);
         let acquisition = state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -145,7 +148,7 @@ impl App {
             .acquisition;
         let (engine, focus_keys) = Self::build_ui_for(
             active,
-            &cfg.presets,
+            &cfg.tui.presets,
             presets_dir.as_deref(),
             registry::NetAdmitted {
                 band: net.clone(),
@@ -180,7 +183,7 @@ impl App {
 
             ui.menu = startup_menu(&engine, m.observer.active, saved);
             if !m.observer.active {
-                ui.recall = crate::ui::recall_from_hz(cfg.radio.recall_hz);
+                ui.recall = crate::ui::recall_from_hz(cfg.engine.radio.recall_hz);
             }
         }
 
@@ -201,18 +204,17 @@ impl App {
             engine,
             theme,
             focus_keys,
-            theme_config: cfg.theme.clone(),
-            tinysa_config: cfg.tinysa.clone(),
-            airspy_config: cfg.airspy.clone(),
-            airspyhf_config: cfg.airspyhf.clone(),
-            sdrplay_config: cfg.sdrplay.clone(),
-            plutosky_config: cfg.plutosky.clone(),
-            headless_config: cfg.headless.clone(),
-            boost_config: cfg.radio.boost.clone(),
-            net_config: cfg.net.clone(),
-            record_config: cfg.record.clone(),
+            theme_config: cfg.tui.theme.clone(),
+            tinysa_config: cfg.engine.tinysa.clone(),
+            airspy_config: cfg.engine.airspy.clone(),
+            airspyhf_config: cfg.engine.airspyhf.clone(),
+            sdrplay_config: cfg.engine.sdrplay.clone(),
+            plutosky_config: cfg.engine.plutosky.clone(),
+            boost_config: cfg.engine.radio.boost.clone(),
+            net_config: cfg.engine.net.clone(),
+            record_config: cfg.engine.record.clone(),
             recorder: None,
-            user_presets: cfg.presets,
+            user_presets: cfg.tui.presets,
         })
     }
 }
@@ -283,7 +285,7 @@ mod tests {
     /// cannot see the holder using.
     #[test]
     fn an_observed_radio_is_introduced_in_the_header_as_its_own_backend() {
-        let cfg = crate::config::AppConfig::default();
+        let cfg = crate::config::EngineConfig::default();
         let sysinfo = hardware::usb::UsbDeviceInfo {
             product: "RTL2838UHIDIR".into(),
             manufacturer: "Realtek".into(),

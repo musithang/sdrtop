@@ -22,7 +22,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::config::{AppConfig, RadioConfig};
+use crate::config::{EngineConfig, RadioConfig};
 use crate::hardware::{self, DeviceCapabilities, GainModel};
 use crate::state::{
     Accumulators, IqState, ObserverState, RadioState, SdrMetrics, SignalState, SpectrumMarker,
@@ -76,18 +76,39 @@ pub(crate) struct Boot {
     pub tuning: Tuning,
     pub identity: Identity,
     pub observer: ObserverState,
-    /// Saved spectrum markers, restored only when there is a spectrum to put
-    /// them on: observer mode spawns no FFT worker, so a marker there would
-    /// annotate an axis that never draws - and `save_config` is a no-op in
-    /// observer mode, so there is no path back for them either.
+    /// What the screen last showed; see [`Boot::showing`].
+    pub shown: Shown,
+}
+
+/// What a screen last showed, which the state starts from: how the spectrum
+/// is drawn, how much waterfall history is kept and in which palette, and the
+/// markers on the spectrum. A terminal keeps these in its own block of the
+/// config and hands them over at start; an instance with no screen starts
+/// from the defaults.
+#[derive(Clone, Debug)]
+pub struct Shown {
+    pub spectrum_style: crate::state::SpectrumStyle,
+    /// Raised to [`WATERFALL_MIN_ROWS`] when less.
+    pub waterfall_rows: usize,
+    pub waterfall_palette: crate::state::WaterfallPalette,
     pub markers: Vec<SpectrumMarker>,
+}
+
+impl Default for Shown {
+    fn default() -> Self {
+        Self {
+            spectrum_style: Default::default(),
+            waterfall_rows: WATERFALL_MIN_ROWS,
+            waterfall_palette: Default::default(),
+            markers: vec![],
+        }
+    }
 }
 
 impl Boot {
     /// A radio we opened: capabilities read from the device, config clamped into
     /// them, identity as the device reports it.
     pub(crate) fn normal(
-        cfg: &AppConfig,
         caps: Arc<DeviceCapabilities>,
         tuning: Tuning,
         info: &hardware::DeviceInfo,
@@ -109,7 +130,7 @@ impl Boot {
                 observable,
             },
             observer: ObserverState::default(),
-            markers: cfg.display.spectrum_markers.clone(),
+            shown: Shown::default(),
         }
     }
 
@@ -123,7 +144,7 @@ impl Boot {
     /// an empty gain table, so snapping against it would report every RTL gain as
     /// 0 dB. A config value the operator recognises beats a fabricated legal one.
     pub(crate) fn observer(
-        cfg: &AppConfig,
+        cfg: &EngineConfig,
         sysinfo: &hardware::usb::UsbDeviceInfo,
         profile: hardware::discovery::ObserverProfile,
     ) -> Self {
@@ -176,8 +197,23 @@ impl Boot {
                 connected: sysinfo.connected_secs.map(crate::tasks::fmt_duration),
                 ..Default::default()
             },
-            markers: vec![],
+            shown: Shown::default(),
         }
+    }
+
+    /// Start the state from what a screen last showed. Saved markers are
+    /// restored only when there is a spectrum to put them on: observer mode
+    /// spawns no FFT worker, so a marker there would annotate an axis that
+    /// never draws, and `save_config` is a no-op in observer mode, so there
+    /// is no path back for them either.
+    pub(crate) fn showing(mut self, shown: Shown) -> Self {
+        let markers = if self.observer.active {
+            vec![]
+        } else {
+            shown.markers
+        };
+        self.shown = Shown { markers, ..shown };
+        self
     }
 }
 
@@ -340,13 +376,13 @@ pub fn resolve_gains(
 /// Everything not reached through `boot` is the same on both startups by
 /// definition: history ring buffers sized but empty, every measurement at its
 /// no-measurement value.
-pub(crate) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<SdrMetrics> {
+pub(crate) fn initial_metrics(cfg: &EngineConfig, boot: Boot) -> anyhow::Result<SdrMetrics> {
     let Boot {
         caps,
         tuning,
         identity,
         observer,
-        markers,
+        shown,
     } = boot;
 
     caps.validate_display()?;
@@ -419,9 +455,9 @@ pub(crate) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             y_max: caps.level_max_db,
             hold: None,
             cursor_freq: None,
-            markers,
+            markers: shown.markers,
             pending_marker: None,
-            style: cfg.display.spectrum_style,
+            style: shown.spectrum_style,
             // Until the first frame is drawn and says otherwise: a spectrum
             // fed for nobody costs a core, one starved for a panel is wrong.
             wanted: true,
@@ -430,8 +466,8 @@ pub(crate) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         // so a config written before the floor existed carries a value too small
         // to fill a full-height waterfall. See [`WATERFALL_MIN_ROWS`].
         waterfall: WaterfallState::new(
-            cfg.display.waterfall_max_rows.max(WATERFALL_MIN_ROWS),
-            cfg.display.waterfall_palette,
+            shown.waterfall_rows.max(WATERFALL_MIN_ROWS),
+            shown.waterfall_palette,
             caps.level_min_db,
             caps.level_max_db,
         ),
@@ -525,8 +561,8 @@ mod tests {
     use super::*;
 
     /// A config written on a HackRF: 2.4 GHz, 10 Msps, LNA 24 / VGA 30.
-    fn hackrf_config() -> AppConfig {
-        let mut cfg = AppConfig::default();
+    fn hackrf_config() -> EngineConfig {
+        let mut cfg = EngineConfig::default();
         cfg.radio.frequency_hz = 2_400_000_000;
         cfg.radio.sample_rate = 10_000_000.0;
         cfg.radio.lna_gain = Some(24);
@@ -584,7 +620,7 @@ mod tests {
         // an 0..=40 dB, 8 dB-stepped attenuator. Displaying 49 there would be a
         // number the hardware can never be in.
         let caps = hardware::native::hackrf::caps();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.lna_gain = Some(49);
         cfg.radio.vga_gain = Some(99);
         let t = resolve_tuning(&cfg.radio, &caps);
@@ -602,7 +638,7 @@ mod tests {
         let mut caps = hardware::native::rtlsdr::observer_caps();
         caps.gain = crate::hardware::native::rtlsdr::gain_model(&steps);
         for asked in [0u32, 5, 12, 30, 100] {
-            let mut cfg = AppConfig::default();
+            let mut cfg = EngineConfig::default();
             cfg.radio.lna_gain = Some(asked);
             let t = resolve_tuning(&cfg.radio, &caps);
             let got = t.gains[0] as u32;
@@ -678,7 +714,7 @@ mod tests {
     /// disagree about - that is the whole point of the shared literal.
     #[test]
     fn both_startups_begin_with_no_measurements() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         for m in [
             initial_metrics(
                 &cfg,
@@ -687,7 +723,6 @@ mod tests {
             initial_metrics(
                 &cfg,
                 Boot::normal(
-                    &cfg,
                     Arc::new(hardware::native::hackrf::caps()),
                     resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps()),
                     &hardware::DeviceInfo::default(),
@@ -710,7 +745,7 @@ mod tests {
 
     #[test]
     fn iq_devices_keep_the_existing_startup_defaults() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         for caps in [
             hardware::native::hackrf::caps(),
             hardware::native::rtlsdr::observer_caps(),
@@ -719,7 +754,6 @@ mod tests {
             let metrics = initial_metrics(
                 &cfg,
                 Boot::normal(
-                    &cfg,
                     Arc::new(caps),
                     tuning,
                     &hardware::DeviceInfo::default(),
@@ -741,7 +775,7 @@ mod tests {
 
     #[test]
     fn startup_uses_the_device_level_axis() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         let mut caps = hardware::native::hackrf::caps();
         caps.level_min_db = -110.0;
         caps.level_max_db = -10.0;
@@ -749,7 +783,6 @@ mod tests {
         let metrics = initial_metrics(
             &cfg,
             Boot::normal(
-                &cfg,
                 Arc::new(caps),
                 tuning,
                 &hardware::DeviceInfo::default(),
@@ -769,7 +802,7 @@ mod tests {
     /// own line in `[radio.boost]`, and one with no line starts with it off.
     #[test]
     fn each_radio_starts_from_its_own_boost() {
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.boost.insert("HackRF One".into(), true);
         cfg.radio.boost.insert("Airspy HF+ Discovery".into(), false);
         let start = |board: &str| {
@@ -779,13 +812,10 @@ mod tests {
                 board_name: board.into(),
                 ..Default::default()
             };
-            initial_metrics(
-                &cfg,
-                Boot::normal(&cfg, Arc::new(caps), tuning, &info, true),
-            )
-            .unwrap()
-            .radio
-            .amp_enabled
+            initial_metrics(&cfg, Boot::normal(Arc::new(caps), tuning, &info, true))
+                .unwrap()
+                .radio
+                .amp_enabled
         };
         assert!(start("HackRF One"));
         assert!(!start("Airspy HF+ Discovery"));
@@ -794,7 +824,7 @@ mod tests {
 
     #[test]
     fn startup_rejects_invalid_display_capabilities() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         for (min, max, budget, error) in [
             (0.0, 0.0, 500, "Invalid display level bounds"),
             (0.0, -10.0, 500, "Invalid display level bounds"),
@@ -813,7 +843,6 @@ mod tests {
             let result = initial_metrics(
                 &cfg,
                 Boot::normal(
-                    &cfg,
                     Arc::new(caps),
                     tuning,
                     &hardware::DeviceInfo::default(),
@@ -830,7 +859,7 @@ mod tests {
 
     #[test]
     fn startup_accepts_valid_display_capabilities() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         for (min, max, budget) in [(-10.0, 0.0, 1), (-120.0, 20.0, 5_000)] {
             let mut caps = hardware::native::hackrf::caps();
             caps.level_min_db = min;
@@ -840,7 +869,6 @@ mod tests {
             let m = initial_metrics(
                 &cfg,
                 Boot::normal(
-                    &cfg,
                     Arc::new(caps),
                     tuning,
                     &hardware::DeviceInfo::default(),
@@ -856,7 +884,7 @@ mod tests {
 
     #[test]
     fn observer_startup_also_rejects_invalid_display_capabilities() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         let mut boot = Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf));
         Arc::make_mut(&mut boot.caps).trace_stale_ms = 0;
         assert!(initial_metrics(&cfg, boot)
@@ -874,11 +902,14 @@ mod tests {
     /// leaves a blank strip above the waterfall's bottom border that never fills.
     #[test]
     fn a_shallow_waterfall_buffer_is_raised_to_the_floor() {
-        let mut cfg = AppConfig::default();
-        cfg.display.waterfall_max_rows = 64;
+        let cfg = EngineConfig::default();
+        let shown = Shown {
+            waterfall_rows: 64,
+            ..Shown::default()
+        };
         let m = initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)).showing(shown),
         )
         .unwrap();
         assert_eq!(
@@ -890,11 +921,14 @@ mod tests {
     /// A deeper setting is the user's to make, and is left alone.
     #[test]
     fn a_deep_waterfall_buffer_is_left_alone() {
-        let mut cfg = AppConfig::default();
-        cfg.display.waterfall_max_rows = 4_096;
+        let cfg = EngineConfig::default();
+        let shown = Shown {
+            waterfall_rows: 4_096,
+            ..Shown::default()
+        };
         let m = initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)).showing(shown),
         )
         .unwrap();
         assert_eq!(m.waterfall.buffer.max_rows, 4_096);
@@ -902,7 +936,7 @@ mod tests {
 
     #[test]
     fn a_power_trace_backend_uses_its_level_axis_and_starts_paused() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         let mut caps = hardware::native::hackrf::caps();
         caps.acquisition = hardware::AcquisitionKind::PowerTrace;
         caps.level_unit = hardware::LevelUnit::Dbm;
@@ -912,7 +946,6 @@ mod tests {
         let metrics = initial_metrics(
             &cfg,
             Boot::normal(
-                &cfg,
                 Arc::new(caps),
                 tuning,
                 &hardware::DeviceInfo::default(),
@@ -930,29 +963,32 @@ mod tests {
 
     #[test]
     fn observer_mode_starts_without_markers() {
-        let mut cfg = AppConfig::default();
-        cfg.display.spectrum_markers = vec![SpectrumMarker {
-            freq_hz: 100_000_000,
-            label: "FM".into(),
-            channel_bw_hz: None,
-            measured_bw_hz: None,
-        }];
+        let cfg = EngineConfig::default();
+        let shown = Shown {
+            markers: vec![SpectrumMarker {
+                freq_hz: 100_000_000,
+                label: "FM".into(),
+                channel_bw_hz: None,
+                measured_bw_hz: None,
+            }],
+            ..Shown::default()
+        };
         let live = initial_metrics(
             &cfg,
             Boot::normal(
-                &cfg,
                 Arc::new(hardware::native::hackrf::caps()),
                 resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps()),
                 &hardware::DeviceInfo::default(),
                 true,
-            ),
+            )
+            .showing(shown.clone()),
         )
         .unwrap();
         assert_eq!(live.spectrum.markers.len(), 1);
 
         let obs = initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)).showing(shown),
         )
         .unwrap();
         assert!(obs.spectrum.markers.is_empty());
@@ -968,7 +1004,7 @@ mod tests {
     /// What the header draws from it is held by the app's own test.
     #[test]
     fn an_observed_radio_is_introduced_as_its_own_backend() {
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         let stack = initial_metrics(
             &cfg,
             Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::RtlSdr)),
@@ -1001,7 +1037,7 @@ mod tests {
     #[test]
     fn a_config_with_no_gain_at_all_uses_the_historical_defaults() {
         let caps = hardware::native::hackrf::caps();
-        let cfg = AppConfig::default();
+        let cfg = EngineConfig::default();
         let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains, vec![16.0, 20.0]);
     }
@@ -1013,7 +1049,7 @@ mod tests {
     #[test]
     fn an_unnamed_stage_starts_at_the_devices_start() {
         let gm = hardware::native::airspyhf::gain_model();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("LNA=28,VGA=12".into());
         let (gains, _) = resolve_gains(&cfg.radio, &gm, None);
         assert_eq!(gains, vec![0.0, 6.0]);
@@ -1024,7 +1060,7 @@ mod tests {
     #[test]
     fn the_named_form_places_each_stage() {
         let caps = hardware::native::hackrf::caps();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("VGA=41,LNA=27".into());
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(
@@ -1040,7 +1076,7 @@ mod tests {
     #[test]
     fn a_bare_number_is_a_whole_chain_total() {
         let caps = hardware::native::hackrf::caps();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("45".into());
         let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(
@@ -1055,7 +1091,7 @@ mod tests {
     #[test]
     fn the_positional_flags_override_one_stage_and_leave_the_rest() {
         let caps = hardware::native::hackrf::caps();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("LNA=8,VGA=40".into());
         cfg.radio.lna_gain = Some(32);
         let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
@@ -1068,7 +1104,7 @@ mod tests {
     #[test]
     fn a_string_naming_another_radios_stage_is_reported_not_fatal() {
         let caps = hardware::native::hackrf::caps();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("IFGR=20,LNA=16".into());
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains[0], 16.0);
@@ -1081,7 +1117,7 @@ mod tests {
     #[test]
     fn unreadable_text_leaves_the_defaults_and_says_so() {
         let caps = hardware::native::hackrf::caps();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("banana".into());
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains.len(), 2, "still one value per stage");
@@ -1092,7 +1128,7 @@ mod tests {
     /// passes through untouched. The placeholder profile would flatten it to 0.
     #[test]
     fn observer_reads_the_named_form_without_a_device() {
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.gain = Some("LNA=37,VGA=41".into());
         assert_eq!(observer_gains(&cfg.radio), vec![37.0, 41.0], "not snapped");
         cfg.radio.gain = Some("55".into());
@@ -1108,7 +1144,7 @@ mod tests {
     fn the_gain_mode_is_resolved_by_name() {
         let mut caps = (*crate::state::SdrMetrics::fixture().caps).clone();
         caps.gain = crate::hardware::native::airspy::gain_model();
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         let t = resolve_tuning(&cfg.radio, &caps);
         assert_eq!(
             (t.gain_curve, t.gains.clone()),

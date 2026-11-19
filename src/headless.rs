@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 
-use crate::config::{AppConfig, ENGINE_BLOCKS};
+use crate::config::EngineConfig;
 use crate::engine::command::{Command, Reply};
 use crate::engine::events::Event;
 use crate::engine::headless::HeadlessPlan;
@@ -24,7 +24,7 @@ use crate::server;
 /// The log goes to stderr, a line per line, where a terminal, a pipe or the
 /// journal takes it.
 pub async fn run(
-    mut cfg: AppConfig,
+    mut cfg: EngineConfig,
     config_path: Option<PathBuf>,
     found: &[hardware::DeviceListing],
     chosen: usize,
@@ -34,7 +34,14 @@ pub async fn run(
     let device = hardware::open_device(listing, &cfg)?;
     let observable = listing.kind.observer_profile().is_some();
     let geometry = device.capabilities().sample_geometry;
-    let state = Arc::new(Mutex::new(start::open(&cfg, &device, observable)?));
+    // No screen: the state starts from how a screen with nothing chosen
+    // would show it.
+    let state = Arc::new(Mutex::new(start::open(
+        &cfg,
+        engine::boot::Shown::default(),
+        &device,
+        observable,
+    )?));
     let engine = Engine::new(Arc::clone(&state), Arc::clone(&device));
 
     // What was said while the radio opened, then everything said after.
@@ -117,7 +124,7 @@ pub async fn run(
     }
     if let Some(path) = config_path {
         cfg.radio = engine::boot::radio_block(&engine.snapshot(), &cfg.radio);
-        cfg.save_blocks(&path, ENGINE_BLOCKS)?;
+        cfg.save(&path)?;
     }
     Ok(())
 }

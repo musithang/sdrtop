@@ -29,7 +29,7 @@ use anyhow::{Context, Result};
 use app::App;
 use clap::Parser;
 use cli::Cli;
-use config::AppConfig;
+use config::{MonasdConfig, SdrtopConfig};
 use ratatui::crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -127,13 +127,26 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config_path = cli.config.or_else(default_config_path);
-    let mut app_cfg = config_path
-        .as_deref()
-        .map(AppConfig::load_or_default)
-        .unwrap_or_default();
+    // One read of the file, as the front end that runs reads it: the
+    // terminal its blocks and the engine's, a headless run `[monasd]` and the
+    // engine's.
+    let (mut app_cfg, monasd) = match config_path.as_deref() {
+        Some(path) if cli.headless => {
+            let MonasdConfig { engine, monasd } = MonasdConfig::load_or_default(path);
+            (
+                SdrtopConfig {
+                    engine,
+                    ..SdrtopConfig::default()
+                },
+                monasd,
+            )
+        }
+        Some(path) => (SdrtopConfig::load_or_default(path), Default::default()),
+        None => Default::default(),
+    };
 
     if let Some(f) = cli.frequency {
-        app_cfg.radio.frequency_hz = f;
+        app_cfg.engine.radio.frequency_hz = f;
     }
     // `--lna` / `--vga` are **positional**: the first and second stage, whatever
     // the device calls them. That is what they already meant on the two native
@@ -141,33 +154,26 @@ async fn main() -> Result<()> {
     // named `IFGR` and `RFGR`. `resolve_gains` layers them over the config's own
     // gain, so one flag does not silently reset the other stages.
     if let Some(l) = cli.lna {
-        app_cfg.radio.lna_gain = Some(l);
+        app_cfg.engine.radio.lna_gain = Some(l);
     }
     if let Some(v) = cli.vga {
-        app_cfg.radio.vga_gain = Some(v);
+        app_cfg.engine.radio.vga_gain = Some(v);
     }
     // `--gain` takes either form the config file takes: a bare number, which is
     // the whole chain and gets distributed the way the knob distributes it, or
     // `NAME=value` pairs. One parser serves both, so the flag can never express
     // something the file cannot.
     if let Some(g) = cli.gain {
-        app_cfg.radio.gain = Some(g);
+        app_cfg.engine.radio.gain = Some(g);
     }
     if let Some(t) = cli.theme {
-        app_cfg.theme.base = t;
+        app_cfg.tui.theme.base = t;
     }
 
     // Decided before any radio is looked for: a headless run that could not
     // run as asked says so at once.
     let headless = if cli.headless {
-        let mut layouts = config::LayoutConfig::default_config();
-        layouts.presets.extend(app_cfg.presets.clone());
-        match engine::headless::plan(
-            cli.listen.as_deref(),
-            cli.mode.as_deref(),
-            &app_cfg.headless,
-            &layouts,
-        ) {
+        match engine::headless::plan(cli.listen.as_deref(), cli.mode.as_deref(), &monasd) {
             Ok(plan) => Some(plan),
             Err(why) => {
                 eprintln!("sdrtop: {why}");
@@ -180,8 +186,8 @@ async fn main() -> Result<()> {
 
     let themes_dir = config_path
         .as_deref()
-        .and_then(config::AppConfig::themes_dir);
-    let theme = app_cfg.build_theme(themes_dir.as_deref());
+        .and_then(config::TuiConfig::themes_dir);
+    let theme = app_cfg.tui.build_theme(themes_dir.as_deref());
 
     let (want, soapy_filter) = match cli.device.as_deref() {
         None => (None, None),
@@ -231,7 +237,7 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         };
-        return headless::run(app_cfg, config_path, &devices, chosen, plan)
+        return headless::run(app_cfg.engine, config_path, &devices, chosen, plan)
             .await
             .context("Headless error");
     }

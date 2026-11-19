@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::boot::{initial_metrics, resolve_tuning, Boot};
-use crate::config::AppConfig;
+use crate::config::EngineConfig;
 use crate::hardware::{self, SampleGeometry, SdrDevice};
 use crate::signal::{DemodWorker, FftWorker, NetWorker, PowerWorker};
 use crate::state::SdrMetrics;
@@ -22,10 +22,14 @@ use crate::tasks;
 /// the boost) and build the state a session starts from, with the log saying
 /// who the radio is and anything the config asked for and did not get.
 ///
-/// `observable` is whether observer mode could watch this radio were another
-/// process to hold it.
+/// `shown` is what a screen last showed, for the state to start from
+/// ([`Shown::default`] with no screen). `observable` is whether observer mode
+/// could watch this radio were another process to hold it.
+///
+/// [`Shown::default`]: super::boot::Shown
 pub fn open(
-    cfg: &AppConfig,
+    cfg: &EngineConfig,
+    shown: super::boot::Shown,
     device: &Arc<dyn SdrDevice>,
     observable: bool,
 ) -> anyhow::Result<SdrMetrics> {
@@ -87,7 +91,7 @@ pub fn open(
     hardware::debug_assert_device_options(&device_options);
     let mut initial = initial_metrics(
         cfg,
-        Boot::normal(cfg, Arc::clone(&caps), tuning, &info, observable),
+        Boot::normal(Arc::clone(&caps), tuning, &info, observable).showing(shown),
     )?;
     initial.device_options = Arc::new(device_options);
     {

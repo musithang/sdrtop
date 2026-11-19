@@ -110,6 +110,18 @@ pub struct DisplayConfig {
     pub spectrum_markers: Vec<SpectrumMarker>,
 }
 
+impl DisplayConfig {
+    /// What this block hands the engine to start its state from.
+    pub fn shown(&self) -> crate::engine::boot::Shown {
+        crate::engine::boot::Shown {
+            spectrum_style: self.spectrum_style,
+            waterfall_rows: self.waterfall_max_rows,
+            waterfall_palette: self.waterfall_palette,
+            markers: self.spectrum_markers.clone(),
+        }
+    }
+}
+
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
@@ -314,12 +326,10 @@ impl Ft8Settings {
     }
 }
 
-/// `[record]`: how long an IQ recording may run, whichever limit comes first.
-///
-/// `[headless]`: how sdrtop runs with no terminal. Every field optional; a
+/// `[monasd]`: how the engine runs with no terminal. Every field optional; a
 /// command-line flag wins over the file.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]
-pub struct HeadlessSettings {
+pub struct MonasdSettings {
     /// The address the API listens on, `host:port`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listen: Option<String>,
@@ -335,12 +345,14 @@ pub struct HeadlessSettings {
     pub recordings_dir: Option<PathBuf>,
 }
 
-impl HeadlessSettings {
+impl MonasdSettings {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
 }
 
+/// `[record]`: how long an IQ recording may run, whichever limit comes first.
+///
 /// No in-app control changes these, so `App` holds the loaded block and
 /// writes it back as it was, the way it holds `[net]`.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
@@ -549,14 +561,13 @@ impl SdrplaySettings {
     }
 }
 
+/// The blocks Monas owns: the radio and everything it measures with. The
+/// terminal and the headless server both run the engine, so both read these
+/// and both write them back, through [`EngineConfig::save`].
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
-pub struct AppConfig {
+pub struct EngineConfig {
     #[serde(default)]
     pub radio: RadioConfig,
-    #[serde(default)]
-    pub display: DisplayConfig,
-    #[serde(default)]
-    pub theme: ThemeConfig,
     #[serde(default)]
     pub sweep: SweepSettings,
     #[serde(default)]
@@ -587,9 +598,22 @@ pub struct AppConfig {
     /// Written only once it differs from the default, as `[airspyhf]` is.
     #[serde(default, skip_serializing_if = "PlutoSkySettings::is_default")]
     pub plutosky: PlutoSkySettings,
-    /// How `sdrtop --headless` runs. Written only once something is set.
-    #[serde(default, skip_serializing_if = "HeadlessSettings::is_default")]
-    pub headless: HeadlessSettings,
+}
+
+impl EngineConfig {
+    /// Write the engine's blocks into the file at `path`, and nothing else.
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        save_blocks(self, path, ENGINE_BLOCKS)
+    }
+}
+
+/// The blocks the terminal owns: how it shows what the engine measures.
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct TuiConfig {
+    #[serde(default)]
+    pub display: DisplayConfig,
+    #[serde(default)]
+    pub theme: ThemeConfig,
     /// User-defined layout presets, merged into the built-in set at startup.
     /// A preset here with the same name as a built-in overrides it. Preserved
     /// verbatim across save so hand-written presets survive a quit.
@@ -597,24 +621,7 @@ pub struct AppConfig {
     pub presets: HashMap<String, PresetConfig>,
 }
 
-impl AppConfig {
-    pub fn load_or_default(path: &Path) -> Self {
-        let content = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(_) => return Self::default(),
-        };
-        match toml::from_str(&content) {
-            Ok(cfg) => cfg,
-            Err(e) => {
-                eprintln!(
-                    "Warning: failed to parse {}: {e}. Using defaults.",
-                    path.display()
-                );
-                Self::default()
-            }
-        }
-    }
-
+impl TuiConfig {
     /// Where a user's own themes live, given the config file's location:
     /// `~/.config/sdrtop/themes/`. `None` when the config path has no parent,
     /// which means there is nowhere to look and only the built-ins exist.
@@ -679,57 +686,118 @@ impl AppConfig {
         apply!(map_home);
         t
     }
+}
 
-    /// Write the config to `path` through a temporary file beside it, so a
-    /// failed write never leaves half a file. A failure names the file it
-    /// could not create, write or replace: "Permission denied" alone sends
-    /// the reader looking in the wrong place.
-    /// Write the blocks named in `owned` into the file at `path`, and keep
-    /// every other block exactly as the file has it.
-    ///
-    /// **One file, two owners.** The engine owns the radio and what it
-    /// measures with; the terminal owns how it is shown. Each writes only
-    /// its own, so a headless instance's save cannot reset the layout and
-    /// the theme, and neither half can delete the other's by not carrying it
-    /// forward. A block of `owned` that serialises to nothing (back at its
-    /// default) is removed, as a whole-file save would leave it out. A file
-    /// that is not TOML has nothing to keep and is written fresh.
-    pub fn save_blocks(&self, path: &Path, owned: &[&str]) -> anyhow::Result<()> {
-        use anyhow::Context;
-        let mine: toml::Table = toml::Table::try_from(self)?;
-        let mut merged: toml::Table = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| text.parse().ok())
-            .unwrap_or_default();
-        for block in owned {
-            match mine.get(*block) {
-                Some(value) => {
-                    merged.insert((*block).to_string(), value.clone());
-                }
-                None => {
-                    merged.remove(*block);
-                }
-            }
-        }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("could not create {}", parent.display()))?;
-        }
-        let content = toml::to_string_pretty(&merged)?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, content)
-            .with_context(|| format!("could not write {}", tmp.display()))?;
-        std::fs::rename(&tmp, path)
-            .with_context(|| format!("could not replace {}", path.display()))?;
-        Ok(())
+/// The config as the terminal reads it: the engine's blocks and its own, from
+/// one file in one read, so a file that does not parse falls back to the
+/// defaults for both at once.
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct SdrtopConfig {
+    #[serde(flatten)]
+    pub engine: EngineConfig,
+    #[serde(flatten)]
+    pub tui: TuiConfig,
+}
+
+impl SdrtopConfig {
+    /// See [`load_or_default`].
+    pub fn load_or_default(path: &Path) -> Self {
+        load_or_default(path)
+    }
+
+    /// Write both halves' blocks into the file at `path`: this process runs
+    /// the engine and the screen. Anything else in the file (`[monasd]`, a
+    /// block a newer or older version wrote, a key added by hand) is left
+    /// where it is.
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        save_blocks(self, path, &[ENGINE_BLOCKS, TUI_BLOCKS].concat())
     }
 }
 
+/// The config as the headless server reads it: the engine's blocks and
+/// `[monasd]`. It writes back only the engine's ([`EngineConfig::save`]):
+/// `[monasd]` is the operator's, and no command changes it.
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct MonasdConfig {
+    #[serde(flatten)]
+    pub engine: EngineConfig,
+    #[serde(default, skip_serializing_if = "MonasdSettings::is_default")]
+    pub monasd: MonasdSettings,
+}
+
+impl MonasdConfig {
+    /// See [`load_or_default`].
+    pub fn load_or_default(path: &Path) -> Self {
+        load_or_default(path)
+    }
+}
+
+/// The config at `path`, or the defaults when there is none. A file that does
+/// not parse is said on stderr and read as the defaults rather than refusing
+/// to start.
+pub fn load_or_default<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
+    let content = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return T::default(),
+    };
+    match toml::from_str(&content) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!(
+                "Warning: failed to parse {}: {e}. Using defaults.",
+                path.display()
+            );
+            T::default()
+        }
+    }
+}
+
+/// Write the blocks named in `owned` from `value` into the file at `path`,
+/// and keep every other block exactly as the file has it.
+///
+/// **One file, three owners.** The engine owns the radio and what it
+/// measures with; the terminal owns how it is shown; `[monasd]` is the
+/// operator's. Each writes only its own, so a headless instance's save cannot
+/// reset the layout and the theme, and neither half can delete the other's by
+/// not carrying it forward. A block of `owned` that serialises to nothing
+/// (back at its default) is removed, as a whole-file save would leave it out.
+/// A file that is not TOML has nothing to keep and is written fresh. The
+/// write goes through a temporary file beside it, so a failed write never
+/// leaves half a file, and a failure names the file it could not create,
+/// write or replace.
+pub fn save_blocks<T: Serialize>(value: &T, path: &Path, owned: &[&str]) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let mine: toml::Table = toml::Table::try_from(value)?;
+    let mut merged: toml::Table = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or_default();
+    for block in owned {
+        match mine.get(*block) {
+            Some(value) => {
+                merged.insert((*block).to_string(), value.clone());
+            }
+            None => {
+                merged.remove(*block);
+            }
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("could not create {}", parent.display()))?;
+    }
+    let content = toml::to_string_pretty(&merged)?;
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, content).with_context(|| format!("could not write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("could not replace {}", path.display()))?;
+    Ok(())
+}
+
 /// The blocks of the config file the engine writes: the radio and
-/// everything it measures with. See [`AppConfig::save_blocks`].
+/// everything it measures with. See [`save_blocks`].
 pub const ENGINE_BLOCKS: &[&str] = &[
     "radio", "sweep", "net", "record", "pager", "station", "ft8", "tinysa", "airspy", "airspyhf",
-    "sdrplay", "plutosky", "headless",
+    "sdrplay", "plutosky",
 ];
 
 /// The blocks the terminal writes: how it shows what is measured.
@@ -1003,15 +1071,15 @@ mod tests {
     /// and read back as written; the corrections default to on.
     #[test]
     fn the_sdrplay_block_is_written_only_when_it_says_something() {
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         assert!(cfg.sdrplay.corrections);
         assert!(!toml::to_string(&cfg).unwrap().contains("[sdrplay]"));
         cfg.sdrplay.dab_notch = true;
         let text = toml::to_string(&cfg).unwrap();
         assert!(text.contains("[sdrplay]"), "{text}");
-        let back: AppConfig = toml::from_str(&text).unwrap();
+        let back: EngineConfig = toml::from_str(&text).unwrap();
         assert_eq!(back.sdrplay, cfg.sdrplay);
-        let partial: AppConfig = toml::from_str("[sdrplay]\nfm_notch = true\n").unwrap();
+        let partial: EngineConfig = toml::from_str("[sdrplay]\nfm_notch = true\n").unwrap();
         assert!(partial.sdrplay.corrections && partial.sdrplay.fm_notch);
     }
 
@@ -1260,8 +1328,8 @@ panels = [
         std::fs::write(&blocker, "").unwrap();
         let err = format!(
             "{:#}",
-            AppConfig::default()
-                .save_blocks(&blocker.join("config.toml"), ENGINE_BLOCKS)
+            EngineConfig::default()
+                .save(&blocker.join("config.toml"))
                 .unwrap_err()
         );
         assert!(err.contains(&blocker.display().to_string()), "{err}");
@@ -1271,8 +1339,8 @@ panels = [
         std::fs::create_dir_all(dir.join("config.tmp")).unwrap();
         let err = format!(
             "{:#}",
-            AppConfig::default()
-                .save_blocks(&dir.join("config.toml"), ENGINE_BLOCKS)
+            EngineConfig::default()
+                .save(&dir.join("config.toml"))
                 .unwrap_err()
         );
         assert!(err.contains("config.tmp"), "{err}");
@@ -1338,13 +1406,13 @@ panels = [
     /// no Airspy block, and packing set comes back as written.
     #[test]
     fn the_airspy_block_is_written_only_when_it_says_something() {
-        let plain = toml::to_string(&AppConfig::default()).unwrap();
+        let plain = toml::to_string(&EngineConfig::default()).unwrap();
         assert!(!plain.contains("[airspy]"), "{plain}");
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.airspy.packing = true;
         let text = toml::to_string(&cfg).unwrap();
         assert!(text.contains("[airspy]\npacking = true"), "{text}");
-        let back: AppConfig = toml::from_str(&text).unwrap();
+        let back: EngineConfig = toml::from_str(&text).unwrap();
         assert!(back.airspy.packing);
     }
 
@@ -1360,44 +1428,45 @@ panels = [
 
     #[test]
     fn load_or_default_missing_file_returns_default() {
-        let cfg = AppConfig::load_or_default(Path::new("/nonexistent/sdrtop/config.toml"));
+        let cfg = load_or_default::<EngineConfig>(Path::new("/nonexistent/sdrtop/config.toml"));
         assert_eq!(cfg.radio.frequency_hz, RadioConfig::default().frequency_hz);
     }
 
     #[test]
     fn deserialize_partial_toml_fills_missing_with_defaults() {
         let toml_str = "[radio]\nfrequency_hz = 433_000_000\n";
-        let cfg: AppConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(cfg.radio.frequency_hz, 433_000_000);
-        assert_eq!(cfg.display.active_preset, "command_rail");
+        let cfg: SdrtopConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.engine.radio.frequency_hz, 433_000_000);
+        assert_eq!(cfg.tui.display.active_preset, "command_rail");
     }
 
     #[test]
     fn serialize_deserialize_round_trip() {
-        let mut cfg = AppConfig::default();
-        cfg.radio.gain = Some("LNA=24,VGA=30".into());
-        cfg.display.active_preset = "spectrum".into();
+        let mut cfg = SdrtopConfig::default();
+        cfg.engine.radio.gain = Some("LNA=24,VGA=30".into());
+        cfg.tui.display.active_preset = "spectrum".into();
         let serialized = toml::to_string_pretty(&cfg).unwrap();
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
-        assert_eq!(restored.radio.gain.as_deref(), Some("LNA=24,VGA=30"));
-        assert_eq!(restored.display.active_preset, "spectrum");
+        let restored: SdrtopConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.engine.radio.gain.as_deref(), Some("LNA=24,VGA=30"));
+        assert_eq!(restored.tui.display.active_preset, "spectrum");
     }
 
     /// `[record]` defaults to 60 s or 4 GB, survives a save, and a value
     /// that cannot be a limit is replaced by its default and named.
     #[test]
     fn record_settings_default_round_trip_and_refuse_nonsense() {
-        let cfg: AppConfig = toml::from_str("").unwrap();
+        let cfg: EngineConfig = toml::from_str("").unwrap();
         let (limits, notes) = cfg.record.limits();
         assert_eq!((limits.max_secs, limits.max_bytes), (60.0, 4_000_000_000));
         assert!(notes.is_empty());
 
-        let cfg: AppConfig = toml::from_str("[record]\nmax_seconds = 5.5").unwrap();
-        let back: AppConfig = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        let cfg: EngineConfig = toml::from_str("[record]\nmax_seconds = 5.5").unwrap();
+        let back: EngineConfig = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(back.record.max_seconds, 5.5);
         assert_eq!(back.record.max_gb, 4.0);
 
-        let cfg: AppConfig = toml::from_str("[record]\nmax_seconds = -1.0\nmax_gb = 0.0").unwrap();
+        let cfg: EngineConfig =
+            toml::from_str("[record]\nmax_seconds = -1.0\nmax_gb = 0.0").unwrap();
         let (limits, notes) = cfg.record.limits();
         assert_eq!((limits.max_secs, limits.max_bytes), (60.0, 4_000_000_000));
         assert_eq!(notes.len(), 2, "{notes:?}");
@@ -1406,7 +1475,7 @@ panels = [
 
     #[test]
     fn tinysa_settings_default_and_round_trip() {
-        let defaults: AppConfig = toml::from_str("").unwrap();
+        let defaults: EngineConfig = toml::from_str("").unwrap();
         assert_eq!(defaults.tinysa, TinySaSettings::default());
 
         let source = r#"
@@ -1420,9 +1489,9 @@ panels = [
             spur = "off"
             ext_gain_db = -8
         "#;
-        let config: AppConfig = toml::from_str(source).unwrap();
+        let config: EngineConfig = toml::from_str(source).unwrap();
         let serialized = toml::to_string_pretty(&config).unwrap();
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: EngineConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(restored.tinysa, config.tinysa);
         assert!(serialized.contains("[tinysa]"));
         assert!(serialized.contains("basic_input = \"high\""));
@@ -1433,30 +1502,30 @@ panels = [
     /// off is written: a config that never met the radio carries no section.
     #[test]
     fn plutosky_settings_default_to_slow_attack_and_round_trip() {
-        let defaults = AppConfig::default();
+        let defaults = EngineConfig::default();
         assert_eq!(defaults.plutosky.agc, "slow_attack");
         assert!(!toml::to_string(&defaults).unwrap().contains("[plutosky]"));
-        let config: AppConfig = toml::from_str("[plutosky]\nagc = \"fast_attack\"\n").unwrap();
+        let config: EngineConfig = toml::from_str("[plutosky]\nagc = \"fast_attack\"\n").unwrap();
         let serialized = toml::to_string(&config).unwrap();
         assert!(serialized.contains("[plutosky]"), "{serialized}");
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: EngineConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(restored.plutosky.agc, "fast_attack");
     }
 
     #[test]
     fn airspyhf_settings_default_on_and_round_trip_off() {
-        let defaults: AppConfig = toml::from_str("").unwrap();
+        let defaults: EngineConfig = toml::from_str("").unwrap();
         assert!(defaults.airspyhf.dsp);
         assert!(!toml::to_string_pretty(&defaults)
             .unwrap()
             .contains("[airspyhf]"));
-        let empty: AppConfig = toml::from_str("[airspyhf]\n").unwrap();
+        let empty: EngineConfig = toml::from_str("[airspyhf]\n").unwrap();
         assert!(empty.airspyhf.dsp);
 
-        let config: AppConfig = toml::from_str("[airspyhf]\ndsp = false\n").unwrap();
+        let config: EngineConfig = toml::from_str("[airspyhf]\ndsp = false\n").unwrap();
         let serialized = toml::to_string_pretty(&config).unwrap();
         assert!(serialized.contains("[airspyhf]"), "{serialized}");
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: EngineConfig = toml::from_str(&serialized).unwrap();
         assert!(!restored.airspyhf.dsp);
     }
 
@@ -1464,7 +1533,7 @@ panels = [
     /// the single `amp_enabled` it replaced is read past and not written.
     #[test]
     fn the_boost_is_per_radio_and_the_old_flag_is_let_go() {
-        let defaults: AppConfig = toml::from_str("").unwrap();
+        let defaults: EngineConfig = toml::from_str("").unwrap();
         assert!(!toml::to_string_pretty(&defaults).unwrap().contains("boost"));
 
         let source = r#"
@@ -1475,7 +1544,7 @@ panels = [
             "HackRF One" = true
             "Airspy HF+ Discovery" = false
         "#;
-        let config: AppConfig = toml::from_str(source).unwrap();
+        let config: EngineConfig = toml::from_str(source).unwrap();
         assert!(config.radio.boost_for("HackRF One"));
         assert!(!config.radio.boost_for("Airspy HF+ Discovery"));
         assert!(
@@ -1485,13 +1554,13 @@ panels = [
         let serialized = toml::to_string_pretty(&config).unwrap();
         assert!(!serialized.contains("amp_enabled"), "{serialized}");
         assert!(serialized.contains("[radio.boost]"), "{serialized}");
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: EngineConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(restored.radio.boost, config.radio.boost);
     }
 
     #[test]
     fn partial_tinysa_settings_fill_field_defaults() {
-        let config: AppConfig = toml::from_str("[tinysa]\npoints = 64\n").unwrap();
+        let config: EngineConfig = toml::from_str("[tinysa]\npoints = 64\n").unwrap();
         assert_eq!(config.tinysa.points, 64);
         assert_eq!(
             config.tinysa.basic_input,
@@ -1507,33 +1576,33 @@ panels = [
 
     #[test]
     fn spectrum_style_round_trips_and_defaults_braille() {
-        let cfg: AppConfig = toml::from_str("[display]\nactive_preset = \"spectrum\"\n").unwrap();
+        let cfg: TuiConfig = toml::from_str("[display]\nactive_preset = \"spectrum\"\n").unwrap();
         assert_eq!(cfg.display.spectrum_style, SpectrumStyle::Braille);
-        let mut cfg = AppConfig::default();
+        let mut cfg = TuiConfig::default();
         cfg.display.spectrum_style = SpectrumStyle::Scatter;
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         assert!(
             serialized.contains("spectrum_style = \"scatter\""),
             "got:\n{serialized}"
         );
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: TuiConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(restored.display.spectrum_style, SpectrumStyle::Scatter);
     }
 
     #[test]
     fn waterfall_palette_round_trips_and_defaults_classic() {
         // Missing key → Classic (the existing look).
-        let cfg: AppConfig = toml::from_str("[display]\nactive_preset = \"spectrum\"\n").unwrap();
+        let cfg: TuiConfig = toml::from_str("[display]\nactive_preset = \"spectrum\"\n").unwrap();
         assert_eq!(cfg.display.waterfall_palette, WaterfallPalette::Classic);
         // Explicit choice survives a save/load round trip and serializes lowercase.
-        let mut cfg = AppConfig::default();
+        let mut cfg = TuiConfig::default();
         cfg.display.waterfall_palette = WaterfallPalette::Phosphor;
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         assert!(
             serialized.contains("waterfall_palette = \"phosphor\""),
             "got:\n{serialized}"
         );
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: TuiConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(
             restored.display.waterfall_palette,
             WaterfallPalette::Phosphor
@@ -1543,12 +1612,13 @@ panels = [
     #[test]
     fn radio_recall_round_trips_and_defaults_empty() {
         // Missing key → all-empty slots.
-        let cfg: AppConfig = toml::from_str("[radio]\nfrequency_hz = 100_000_000\n").unwrap();
+        let cfg: EngineConfig = toml::from_str("[radio]\nfrequency_hz = 100_000_000\n").unwrap();
         assert_eq!(cfg.radio.recall_hz, [0, 0, 0]);
         // Explicit slots survive a save/load round trip.
-        let mut cfg = AppConfig::default();
+        let mut cfg = EngineConfig::default();
         cfg.radio.recall_hz = [92_800_000, 0, 446_006_000];
-        let restored: AppConfig = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+        let restored: EngineConfig =
+            toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
         assert_eq!(restored.radio.recall_hz, [92_800_000, 0, 446_006_000]);
     }
 
@@ -1695,7 +1765,7 @@ panels = [
               { name = "spectrum", position = "body" },
             ]
         "#;
-        let app: AppConfig = toml::from_str(raw).unwrap();
+        let app: TuiConfig = toml::from_str(raw).unwrap();
         let cfg = LayoutConfig::with_user_presets(&app.presets, None);
         // New preset joined the set.
         assert!(cfg.presets.contains_key("custom"));
@@ -1716,9 +1786,9 @@ panels = [
               { name = "footer", position = "bottom" },
             ]
         "#;
-        let app: AppConfig = toml::from_str(raw).unwrap();
+        let app: TuiConfig = toml::from_str(raw).unwrap();
         let serialized = toml::to_string_pretty(&app).unwrap();
-        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        let restored: TuiConfig = toml::from_str(&serialized).unwrap();
         let custom = restored
             .presets
             .get("custom")
@@ -1730,7 +1800,7 @@ panels = [
 
     #[test]
     fn app_config_without_presets_omits_section() {
-        let app = AppConfig::default();
+        let app = TuiConfig::default();
         let serialized = toml::to_string_pretty(&app).unwrap();
         assert!(
             !serialized.contains("[presets"),
@@ -1740,32 +1810,30 @@ panels = [
 
     #[test]
     fn the_station_survives_a_save_and_an_empty_one_is_not_written() {
-        let written = AppConfig {
+        let written = EngineConfig {
             station: StationSettings {
                 latitude: Some(47.497),
                 longitude: Some(19.04),
                 callsign: Some("HA5ZZT".into()),
             },
-            ..AppConfig::default()
+            ..EngineConfig::default()
         };
         let path =
             std::env::temp_dir().join(format!("sdrtop-station-save-{}.toml", std::process::id()));
-        written
-            .save_blocks(&path, &[ENGINE_BLOCKS, TUI_BLOCKS].concat())
-            .unwrap();
-        let back = AppConfig::load_or_default(&path);
+        written.save(&path).unwrap();
+        let back = load_or_default::<EngineConfig>(&path);
         let text = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_file(&path);
         assert_eq!(back.station, written.station);
         assert!(text.contains("[station]"), "{text}");
 
-        let none = toml::to_string(&AppConfig::default()).unwrap();
+        let none = toml::to_string(&EngineConfig::default()).unwrap();
         assert!(!none.contains("[station]"), "{none}");
     }
 
     #[test]
     fn a_hand_written_station_reads_as_written() {
-        let cfg: AppConfig = toml::from_str(
+        let cfg: EngineConfig = toml::from_str(
             "[station]\nlatitude = -33.87\nlongitude = 151.21\ncallsign = \"vk2abc\"\n",
         )
         .unwrap();
@@ -1789,19 +1857,17 @@ panels = [
         loaded.stale = Some("#101010".into());
 
         // Exactly what `save_config` writes now: the loaded block, `base` refreshed.
-        let written = AppConfig {
+        let written = TuiConfig {
             theme: ThemeConfig {
                 base: "nord".into(),
                 ..loaded.clone()
             },
-            ..AppConfig::default()
+            ..TuiConfig::default()
         };
         let path =
             std::env::temp_dir().join(format!("sdrtop-theme-save-{}.toml", std::process::id()));
-        written
-            .save_blocks(&path, &[ENGINE_BLOCKS, TUI_BLOCKS].concat())
-            .unwrap();
-        let back = AppConfig::load_or_default(&path);
+        save_blocks(&written, &path, TUI_BLOCKS).unwrap();
+        let back = load_or_default::<TuiConfig>(&path);
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(back.theme.base, "nord");
@@ -1853,7 +1919,7 @@ panels = [
         );
         std::fs::write(dir.join("gruvbox.toml"), text).unwrap();
 
-        let mut cfg = AppConfig::default();
+        let mut cfg = TuiConfig::default();
         cfg.theme.base = "gruvbox".into();
         cfg.theme.value_hi = Some("#abcdef".into());
         let t = cfg.build_theme(Some(&dir));
@@ -1872,7 +1938,7 @@ panels = [
 
     #[test]
     fn build_theme_default_is_sdr() {
-        let cfg = AppConfig::load_or_default(Path::new("/nonexistent/sdrtop/config.toml"));
+        let cfg = SdrtopConfig::load_or_default(Path::new("/nonexistent/sdrtop/config.toml")).tui;
         let t = cfg.build_theme(None);
         assert_eq!(t.name, "sdr");
     }
@@ -1880,14 +1946,14 @@ panels = [
     #[test]
     fn build_theme_unknown_base_falls_back_to_sdr() {
         let toml = "[theme]\nbase = \"nonexistent\"\n";
-        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let cfg: TuiConfig = toml::from_str(toml).unwrap();
         assert_eq!(cfg.build_theme(None).name, "sdr");
     }
 
     #[test]
     fn build_theme_override_applies_hex_color() {
         let toml = "[theme]\nbase = \"nord\"\nborder_accent = \"#ff0000\"\n";
-        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let cfg: TuiConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.border_accent, ratatui::style::Color::Rgb(255, 0, 0));
     }
@@ -1896,7 +1962,7 @@ panels = [
     #[test]
     fn build_theme_override_applies_to_the_pager_display() {
         let toml = "[theme]\nbase = \"sdr\"\nlcd_night_ink = \"#123456\"\n";
-        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let cfg: TuiConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(
             t.lcd(true).ink,
@@ -1908,7 +1974,7 @@ panels = [
     #[test]
     fn build_theme_override_applies_to_net_wifi() {
         let toml = "[theme]\nbase = \"sdr\"\nnet_wifi = \"#123456\"\n";
-        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let cfg: TuiConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.net_wifi, ratatui::style::Color::Rgb(0x12, 0x34, 0x56));
     }
@@ -1918,7 +1984,7 @@ panels = [
     fn build_theme_override_applies_to_the_wifi_formats() {
         let toml =
             "[theme]\nbase = \"nord\"\nwifi_dsss = \"#010203\"\nwifi_other_channel = \"#040506\"\n";
-        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let cfg: TuiConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.wifi_dsss, ratatui::style::Color::Rgb(1, 2, 3));
         assert_eq!(t.wifi_other_channel, ratatui::style::Color::Rgb(4, 5, 6));
@@ -1928,7 +1994,7 @@ panels = [
     #[test]
     fn build_theme_invalid_hex_override_ignored() {
         let toml = "[theme]\nbase = \"nord\"\nborder_accent = \"notahex\"\n";
-        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let cfg: TuiConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.name, "nord");
     }
@@ -2064,10 +2130,10 @@ panels = [{ name = "spectrum", position = "body" }]
     #[test]
     fn the_engine_save_keeps_the_tui_blocks() {
         let file = Scratch::new("engine", ON_DISK);
-        let mut cfg = AppConfig::default();
-        cfg.radio.frequency_hz = 433_920_000;
-        cfg.display.active_preset = "spectrum".into();
-        cfg.save_blocks(&file.0, ENGINE_BLOCKS).unwrap();
+        let mut cfg = SdrtopConfig::default();
+        cfg.engine.radio.frequency_hz = 433_920_000;
+        cfg.tui.display.active_preset = "spectrum".into();
+        cfg.engine.save(&file.0).unwrap();
 
         let on_disk = file.read();
         assert_eq!(
@@ -2087,9 +2153,7 @@ panels = [{ name = "spectrum", position = "body" }]
     #[test]
     fn a_hand_edited_preset_survives_an_engine_save() {
         let file = Scratch::new("preset", ON_DISK);
-        AppConfig::default()
-            .save_blocks(&file.0, ENGINE_BLOCKS)
-            .unwrap();
+        EngineConfig::default().save(&file.0).unwrap();
         assert!(file.read()["presets"].get("mine").is_some());
     }
 
@@ -2097,10 +2161,10 @@ panels = [{ name = "spectrum", position = "body" }]
     #[test]
     fn the_tui_save_keeps_the_engine_blocks() {
         let file = Scratch::new("tui", ON_DISK);
-        let mut cfg = AppConfig::default();
-        cfg.display.active_preset = "spectrum".into();
-        cfg.radio.frequency_hz = 1;
-        cfg.save_blocks(&file.0, TUI_BLOCKS).unwrap();
+        let mut cfg = SdrtopConfig::default();
+        cfg.tui.display.active_preset = "spectrum".into();
+        cfg.engine.radio.frequency_hz = 1;
+        save_blocks(&cfg, &file.0, TUI_BLOCKS).unwrap();
 
         let on_disk = file.read();
         assert_eq!(
@@ -2118,9 +2182,7 @@ panels = [{ name = "spectrum", position = "body" }]
     #[test]
     fn a_block_back_at_its_default_leaves_the_file() {
         let file = Scratch::new("default", "[pager]\nnight = true\n");
-        AppConfig::default()
-            .save_blocks(&file.0, ENGINE_BLOCKS)
-            .unwrap();
+        EngineConfig::default().save(&file.0).unwrap();
         assert!(file.read().get("pager").is_none());
     }
 
@@ -2129,36 +2191,148 @@ panels = [{ name = "spectrum", position = "body" }]
     #[test]
     fn a_broken_file_is_written_fresh() {
         let file = Scratch::new("broken", "this is [not toml");
-        AppConfig::default()
-            .save_blocks(&file.0, ENGINE_BLOCKS)
-            .unwrap();
+        EngineConfig::default().save(&file.0).unwrap();
         assert!(file.read().get("radio").is_some());
     }
 
-    /// **Every block has exactly one owner.** A block in neither list would
-    /// be written by nobody and lost from the running app's point of view; a
-    /// block in both would have two writers again. Read off the struct's
-    /// source, so a block added there and to neither list fails here.
-    #[test]
-    fn every_block_has_one_owner() {
+    /// The blocks `struct name` holds of its own, read off this file's source.
+    fn blocks_of(name: &str) -> Vec<&'static str> {
         let src = include_str!("config.rs");
         let body = src
-            .split_once("pub struct AppConfig {")
+            .split_once(&format!("pub struct {name} {{"))
             .unwrap()
             .1
             .split_once("\n}")
             .unwrap()
             .0;
-        let blocks: Vec<&str> = body
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("pub "))
-            .filter_map(|l| l.split_once(':').map(|(name, _)| name))
-            .collect();
-        assert!(blocks.len() > 10, "{blocks:?}");
-        for block in &blocks {
-            let owners = ENGINE_BLOCKS.contains(block) as u8 + TUI_BLOCKS.contains(block) as u8;
+        // A flattened field is a half, not a block of the file.
+        let mut flattened = false;
+        let mut blocks = vec![];
+        for line in body.lines().map(str::trim) {
+            if line == "#[serde(flatten)]" {
+                flattened = true;
+            } else if let Some((name, _)) =
+                line.strip_prefix("pub ").and_then(|l| l.split_once(':'))
+            {
+                if !std::mem::take(&mut flattened) {
+                    blocks.push(name);
+                }
+            }
+        }
+        blocks
+    }
+
+    /// **Every block of the file has exactly one owner**, and each half
+    /// holds exactly the blocks it owns: a block in two lists would have two
+    /// writers again, and one in a struct but in no list would never be
+    /// saved. Read off the structs' source, so a block added to a struct and
+    /// not to its list fails here.
+    #[test]
+    fn every_block_has_one_owner() {
+        let mut engine = blocks_of("EngineConfig");
+        let mut tui = blocks_of("TuiConfig");
+        let mut monasd = blocks_of("MonasdConfig");
+        assert!(engine.len() > 10, "{engine:?}");
+        for (struct_blocks, list) in [
+            (&mut engine, ENGINE_BLOCKS),
+            (&mut tui, TUI_BLOCKS),
+            (&mut monasd, &["monasd"]),
+        ] {
+            let mut list = list.to_vec();
+            struct_blocks.sort_unstable();
+            list.sort_unstable();
+            assert_eq!(*struct_blocks, list);
+        }
+        let all = [ENGINE_BLOCKS, TUI_BLOCKS, &["monasd"]].concat();
+        for block in &all {
+            let owners = all.iter().filter(|b| *b == block).count();
             assert_eq!(owners, 1, "{block} has {owners} owners");
         }
-        assert_eq!(blocks.len(), ENGINE_BLOCKS.len() + TUI_BLOCKS.len());
+        assert_eq!(blocks_of("SdrtopConfig"), Vec::<&str>::new());
+    }
+
+    /// A config with every block set, as today's sdrtop writes it: what
+    /// either front end reads must come back out byte for byte.
+    const FULL: &str = include_str!("config/full.toml");
+
+    fn full_copy(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sdrtop-full-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, FULL).unwrap();
+        path
+    }
+
+    /// **The terminal reads and writes the whole file unchanged** through
+    /// the two halves: every block it owns comes back as it was, and
+    /// `[monasd]` and a block nobody knows are left where they were.
+    #[test]
+    fn the_terminal_writes_back_the_full_config_unchanged() {
+        let path = full_copy("sdrtop");
+        let cfg = SdrtopConfig::load_or_default(&path);
+        assert_eq!(cfg.tui.display.active_preset, "net_survey");
+        assert_eq!(cfg.engine.radio.frequency_hz, 92_800_000);
+        cfg.save(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), FULL);
+
+        // And it writes both halves, not only keeps them.
+        let mut cfg = cfg;
+        cfg.engine.net.bt_channels = 3;
+        cfg.tui.display.active_preset = "lab_iq".into();
+        cfg.save(&path).unwrap();
+        let back = SdrtopConfig::load_or_default(&path);
+        assert_eq!(back.engine.net.bt_channels, 3);
+        assert_eq!(back.tui.display.active_preset, "lab_iq");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// **The headless server reads its block and the engine's, and writes
+    /// back only the engine's**: the display, the theme and the layouts it
+    /// never read are not reset by its save.
+    #[test]
+    fn the_server_writes_back_the_full_config_unchanged() {
+        let path = full_copy("monasd");
+        let cfg = MonasdConfig::load_or_default(&path);
+        assert_eq!(
+            cfg.monasd,
+            MonasdSettings {
+                listen: Some("0.0.0.0:7373".into()),
+                token: Some("s3cret".into()),
+                mode: Some("net_survey".into()),
+                recordings_dir: Some(PathBuf::from("/srv/rec")),
+            }
+        );
+        assert_eq!(cfg.engine.tinysa.points, 900);
+        cfg.engine.save(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), FULL);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// A save at the defaults removes its own blocks and only those.
+    #[test]
+    fn an_engine_at_its_defaults_removes_only_its_own_blocks() {
+        let path = full_copy("defaults");
+        EngineConfig::default().save(&path).unwrap();
+        let left: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        let mut keys: Vec<&str> = left.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        // `[radio]`, `[sweep]`, `[net]`, `[record]` and `[tinysa]` are
+        // written at their defaults too; the rest leave no block.
+        assert_eq!(
+            keys,
+            [
+                "display",
+                "monasd",
+                "net",
+                "presets",
+                "radio",
+                "record",
+                "somebody_else",
+                "sweep",
+                "theme",
+                "tinysa"
+            ]
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

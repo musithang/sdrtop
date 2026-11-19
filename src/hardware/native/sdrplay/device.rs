@@ -817,7 +817,7 @@ impl SdrDevice for SdrplayDevice {
     }
 
     /// The kept switches as they stand; the bias tee is never kept.
-    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+    fn update_config(&self, config: &mut crate::config::EngineConfig) -> anyhow::Result<()> {
         let [corrections, fm_notch, dab_notch, _] = self.switches();
         config.sdrplay = crate::config::SdrplaySettings {
             corrections,
@@ -1290,7 +1290,7 @@ mod tests {
         assert!(device.set_option("lo_mode", "On").is_err());
         device.stop_rx().unwrap();
 
-        let mut config = crate::config::AppConfig::default();
+        let mut config = crate::config::EngineConfig::default();
         device.update_config(&mut config).unwrap();
         assert_eq!(
             config.sdrplay,

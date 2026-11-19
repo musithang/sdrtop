@@ -26,7 +26,7 @@ use axum::{Json, Router};
 
 use serde::Serialize;
 
-use crate::config::{AppConfig, ENGINE_BLOCKS};
+use crate::config::EngineConfig;
 use crate::engine::command::{Command, Reply};
 use crate::engine::events::Waited;
 use crate::engine::testimony::Staleness;
@@ -43,7 +43,7 @@ pub struct Access {
     /// one streams: some libraries open every radio to describe it.
     radios: Arc<Vec<Radio>>,
     /// The config as loaded, for the blocks the state does not hold.
-    config: Arc<AppConfig>,
+    config: Arc<EngineConfig>,
 }
 
 /// One radio found, as the API lists it.
@@ -100,7 +100,7 @@ impl Access {
     }
 
     /// The config as loaded.
-    pub fn with_config(self, config: AppConfig) -> Self {
+    pub fn with_config(self, config: EngineConfig) -> Self {
         Self {
             config: Arc::new(config),
             ..self
@@ -185,25 +185,22 @@ async fn radios(State(access): State<Access>) -> Json<Vec<Radio>> {
     Json(access.radios.as_ref().clone())
 }
 
-/// The engine's blocks of the config as they would be saved now. The token
-/// is never sent back, to anyone: only whether one is set.
+/// The engine's blocks of the config as they would be saved now. Only the
+/// engine's: the server's own block, with its token, is not among them, so
+/// there is nothing to withhold.
 async fn config(State(access): State<Access>) -> Response {
     let mut cfg = access.config.as_ref().clone();
     cfg.radio = access
         .engine
         .with_state(|m| crate::engine::boot::radio_block(m, &cfg.radio));
-    if cfg.headless.token.is_some() {
-        cfg.headless.token = Some("(set)".to_string());
-    }
     let Ok(all) = toml::Table::try_from(&cfg) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let engine_blocks: serde_json::Map<String, serde_json::Value> = all
+    let blocks: serde_json::Map<String, serde_json::Value> = all
         .into_iter()
-        .filter(|(block, _)| ENGINE_BLOCKS.contains(&block.as_str()))
         .filter_map(|(block, value)| Some((block, serde_json::to_value(value).ok()?)))
         .collect();
-    Json(engine_blocks).into_response()
+    Json(blocks).into_response()
 }
 
 /// One command, answered: 200 when applied, 422 with the reason when not.
@@ -422,24 +419,25 @@ mod tests {
         assert!(json["process"]["rss_mb"].is_number());
     }
 
-    /// The engine's blocks, as they would be saved now; the token is never
-    /// sent back, to anyone.
+    /// The engine's blocks, as they would be saved now, and no other.
     #[tokio::test]
-    async fn config_is_the_engines_blocks_with_the_token_withheld() {
+    async fn config_is_the_engines_blocks() {
         let (engine, _) = engine_on(Bench::new());
         engine.with_state(|m| m.radio.frequency = 433_920_000);
-        let mut cfg = crate::config::AppConfig::default();
-        cfg.headless.token = Some("s3cret".into());
-        cfg.display.active_preset = "net_survey".into();
+        let mut cfg = crate::config::EngineConfig::default();
+        cfg.net.bt_channels = 5;
         let app = router(Access::loopback(engine).with_config(cfg));
         let (status, json) = ask(app, get("/v1/config")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["radio"]["frequency_hz"], 433_920_000);
-        assert!(
-            json.get("display").is_none(),
-            "the screen's block is not the engine's"
-        );
-        assert_eq!(json["headless"]["token"], "(set)");
-        assert!(!json.to_string().contains("s3cret"));
+        assert_eq!(json["net"]["bt_channels"], 5);
+        let mut blocks: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        blocks.retain(|b| !crate::config::ENGINE_BLOCKS.contains(b));
+        assert!(blocks.is_empty(), "not the engine's: {blocks:?}");
     }
 }

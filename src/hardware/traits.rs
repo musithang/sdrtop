@@ -2037,7 +2037,7 @@ pub trait SdrDevice: Send + Sync {
     }
 
     /// Update backend-owned settings before the app saves its config snapshot.
-    fn update_config(&self, _config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+    fn update_config(&self, _config: &mut crate::config::EngineConfig) -> anyhow::Result<()> {
         Ok(())
     }
 

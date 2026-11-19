@@ -78,12 +78,13 @@ pub struct Cli {
     pub headless: bool,
 
     /// With --headless: the address to serve on, host:port (default
-    /// 127.0.0.1:7373; anywhere else needs the config's headless token)
+    /// 127.0.0.1:7373; anywhere else needs the token in the config's monasd block)
     #[arg(long, value_name = "ADDR", requires = "headless")]
     pub listen: Option<String>,
 
-    /// With --headless: the view to compute for, by its layout name, e.g.
-    /// net_survey (default spectrum)
-    #[arg(long, value_name = "VIEW", requires = "headless")]
+    /// With --headless: what to compute, by the name of the view that shows
+    /// it, e.g. net_survey (default spectrum; a name it does not know is
+    /// refused with the list)
+    #[arg(long, value_name = "MODE", requires = "headless")]
     pub mode: Option<String>,
 }

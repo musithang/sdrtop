@@ -300,7 +300,7 @@ impl SdrDevice for TinySaDevice {
         })
     }
 
-    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+    fn update_config(&self, config: &mut crate::config::EngineConfig) -> anyhow::Result<()> {
         config.tinysa = persisted_settings(
             &config.tinysa,
             &self.options(),
@@ -2458,9 +2458,9 @@ mod tests {
             command_tx,
             worker: Mutex::new(None),
         };
-        let mut config = crate::config::AppConfig {
+        let mut config = crate::config::EngineConfig {
             tinysa: loaded,
-            ..crate::config::AppConfig::default()
+            ..crate::config::EngineConfig::default()
         };
 
         device.update_config(&mut config).unwrap();

@@ -571,7 +571,7 @@ impl SdrDevice for PlutoDevice {
         Ok(())
     }
 
-    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+    fn update_config(&self, config: &mut crate::config::EngineConfig) -> anyhow::Result<()> {
         config.plutosky.agc = self
             .agc
             .lock()
@@ -1037,7 +1037,7 @@ mod tests {
             ]
         );
         assert_eq!(dev.auto_stage_db(0), None, "not under the AGC");
-        let mut cfg = crate::config::AppConfig::default();
+        let mut cfg = crate::config::EngineConfig::default();
         dev.update_config(&mut cfg).unwrap();
         assert_eq!(cfg.plutosky.agc, "fast_attack");
         assert!(dev.set_option("agc", "Hybrid").is_err(), "not offered");

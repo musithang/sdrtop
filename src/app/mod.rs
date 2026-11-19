@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::Backend, Terminal};
 
-use crate::config::{AppConfig, DisplayConfig, RadioConfig};
+use crate::config::{DisplayConfig, EngineConfig, RadioConfig, SdrtopConfig, TuiConfig};
 use crate::event::{AppEvent, DeviceOptionCompletion, DeviceOptionRequest, EventStream};
 use crate::hardware::{self, RxContext, SdrDevice};
 use crate::state::SdrMetrics;
@@ -73,8 +73,6 @@ pub struct App {
     /// The `[sdrplay]` block, likewise.
     pub(super) sdrplay_config: crate::config::SdrplaySettings,
     pub(super) plutosky_config: crate::config::PlutoSkySettings,
-    /// The `[headless]` block as loaded: the terminal never changes it.
-    pub(super) headless_config: crate::config::HeadlessSettings,
     /// `[radio.boost]` as loaded: every other radio's entry is carried
     /// forward, and the open radio's is written from the live state.
     pub(super) boost_config: std::collections::BTreeMap<String, bool>,
@@ -96,11 +94,11 @@ pub struct App {
 
 impl App {
     pub fn new(
-        cfg: AppConfig,
+        cfg: SdrtopConfig,
         config_path: Option<PathBuf>,
         listing: &hardware::DeviceListing,
     ) -> anyhow::Result<Self> {
-        match hardware::open_device(listing, &cfg) {
+        match hardware::open_device(listing, &cfg.engine) {
             Ok(device) => {
                 let observable = listing.kind.observer_profile().is_some();
                 Self::new_normal(cfg, config_path, device, observable)
@@ -635,8 +633,25 @@ impl App {
                 m.ft8.view.settings(),
             )
         };
-        let cfg = AppConfig {
+        let engine = EngineConfig {
             radio,
+            sweep: crate::config::SweepSettings {
+                start_hz: sweep_cfg.start_hz,
+                stop_hz: sweep_cfg.stop_hz,
+                dwell_ms: sweep_cfg.dwell_ms,
+            },
+            tinysa: self.tinysa_config.clone(),
+            airspy: self.airspy_config.clone(),
+            airspyhf: self.airspyhf_config.clone(),
+            sdrplay: self.sdrplay_config.clone(),
+            plutosky: self.plutosky_config.clone(),
+            net: self.net_config.clone(),
+            record: self.record_config.clone(),
+            pager: crate::config::PagerSettings { night, display },
+            station,
+            ft8,
+        };
+        let tui = TuiConfig {
             display: DisplayConfig {
                 active_preset: self.engine.saved_active_preset().to_string(),
                 waterfall_max_rows: wf_rows,
@@ -651,34 +666,15 @@ impl App {
                 base: self.theme.name.clone(),
                 ..self.theme_config.clone()
             },
-            sweep: crate::config::SweepSettings {
-                start_hz: sweep_cfg.start_hz,
-                stop_hz: sweep_cfg.stop_hz,
-                dwell_ms: sweep_cfg.dwell_ms,
-            },
-            tinysa: self.tinysa_config.clone(),
-            airspy: self.airspy_config.clone(),
-            airspyhf: self.airspyhf_config.clone(),
-            sdrplay: self.sdrplay_config.clone(),
-            plutosky: self.plutosky_config.clone(),
-            headless: self.headless_config.clone(),
-            net: self.net_config.clone(),
-            record: self.record_config.clone(),
-            pager: crate::config::PagerSettings { night, display },
-            station,
-            ft8,
             presets: self.user_presets.clone(),
         };
+        let cfg = SdrtopConfig { engine, tui };
         let mut candidate = cfg.clone();
-        let hook_error = device.update_config(&mut candidate).err();
-        // Both halves' blocks: this process runs the engine and the screen.
-        // Anything else in the file (a block a newer or older sdrtop wrote, a
-        // key added by hand) is left where it is.
-        let owned = [crate::config::ENGINE_BLOCKS, crate::config::TUI_BLOCKS].concat();
+        let hook_error = device.update_config(&mut candidate.engine).err();
         let save_result = if hook_error.is_some() {
-            cfg.save_blocks(path, &owned)
+            cfg.save(path)
         } else {
-            candidate.save_blocks(path, &owned)
+            candidate.save(path)
         };
         match (hook_error, save_result) {
             (None, result) => result,
@@ -827,7 +823,7 @@ mod tests {
             Ok(())
         }
 
-        fn update_config(&self, config: &mut AppConfig) -> anyhow::Result<()> {
+        fn update_config(&self, config: &mut EngineConfig) -> anyhow::Result<()> {
             match self.config_hook {
                 ConfigHook::Preserve => Ok(()),
                 ConfigHook::Apply => {
@@ -870,8 +866,8 @@ mod tests {
             NEXT_PATH.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = std::fs::remove_file(&path);
-        let mut config = AppConfig::default();
-        config.tinysa.lna = true;
+        let mut config = SdrtopConfig::default();
+        config.engine.tinysa.lna = true;
         let mut app = App::assemble(
             config,
             Some(path.clone()),
@@ -913,10 +909,16 @@ mod tests {
         assert_eq!(device.tune_calls.load(Ordering::Relaxed), 1);
         assert_eq!(device.tuned_hz.load(Ordering::Relaxed), 100_000_000);
         assert_eq!(
-            AppConfig::load_or_default(&path).radio.frequency_hz,
+            crate::config::load_or_default::<EngineConfig>(&path)
+                .radio
+                .frequency_hz,
             100_000_000
         );
-        assert!(AppConfig::load_or_default(&path).tinysa.lna);
+        assert!(
+            crate::config::load_or_default::<EngineConfig>(&path)
+                .tinysa
+                .lna
+        );
         let m = app.state.lock().unwrap();
         assert_eq!(m.device_options[0].selected_choice, "Wide");
         assert!(matches!(
@@ -945,7 +947,7 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         let app = App::assemble(
-            AppConfig::default(),
+            SdrtopConfig::default(),
             Some(path.clone()),
             state,
             Some(device),
@@ -956,7 +958,7 @@ mod tests {
 
         app.save_config().unwrap();
 
-        let saved = AppConfig::load_or_default(&path);
+        let saved = crate::config::load_or_default::<EngineConfig>(&path);
         assert_eq!(saved.radio.frequency_hz, 144_390_000);
         assert_eq!(saved.tinysa.points, 900);
         std::fs::remove_file(path).unwrap();
@@ -987,12 +989,12 @@ mod tests {
                 board.len()
             ));
             let _ = std::fs::remove_file(&path);
-            let mut config = AppConfig::default();
-            config.radio.boost.insert("Airspy R2".into(), false);
+            let mut config = SdrtopConfig::default();
+            config.engine.radio.boost.insert("Airspy R2".into(), false);
             let app =
                 App::assemble(config, Some(path.clone()), state, Some(device), None, None).unwrap();
             app.save_config().unwrap();
-            let saved = AppConfig::load_or_default(&path);
+            let saved = crate::config::load_or_default::<EngineConfig>(&path);
             std::fs::remove_file(path).unwrap();
             saved.radio.boost
         };
@@ -1026,9 +1028,9 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
-        let mut config = AppConfig::default();
-        config.tinysa.points = 450;
-        config.tinysa.lna = true;
+        let mut config = SdrtopConfig::default();
+        config.engine.tinysa.points = 450;
+        config.engine.tinysa.lna = true;
         let app =
             App::assemble(config, Some(path.clone()), state, Some(device), None, None).unwrap();
 
@@ -1037,12 +1039,12 @@ mod tests {
         assert!(error.contains("device settings could not be updated"));
         assert!(error.contains("previous device settings and other settings were saved"));
         assert!(error.contains("injected backend config failure"));
-        let saved = AppConfig::load_or_default(&path);
-        assert_eq!(saved.radio.frequency_hz, 433_920_000);
-        assert_eq!(saved.tinysa.points, 450);
-        assert!(saved.tinysa.lna);
-        assert_eq!(saved.display.spectrum_markers.len(), 1);
-        assert_eq!(saved.display.spectrum_markers[0].freq_hz, 434_500_000);
+        let saved = SdrtopConfig::load_or_default(&path);
+        assert_eq!(saved.engine.radio.frequency_hz, 433_920_000);
+        assert_eq!(saved.engine.tinysa.points, 450);
+        assert!(saved.engine.tinysa.lna);
+        assert_eq!(saved.tui.display.spectrum_markers.len(), 1);
+        assert_eq!(saved.tui.display.spectrum_markers[0].freq_hz, 434_500_000);
         std::fs::remove_file(path).unwrap();
     }
 
@@ -1058,7 +1060,7 @@ mod tests {
         std::fs::write(&blocker, "").unwrap();
         let path = blocker.join("config.toml");
         let mut app = App::assemble(
-            AppConfig::default(),
+            SdrtopConfig::default(),
             Some(path),
             state,
             Some(device),
@@ -1092,7 +1094,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(&blocker, b"block config parent").unwrap();
         let app = App::assemble(
-            AppConfig::default(),
+            SdrtopConfig::default(),
             Some(blocker.join("config.toml")),
             state,
             Some(device),
@@ -1127,7 +1129,7 @@ mod tests {
         let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
         let device = Arc::new(QuitDevice::new(state.lock().unwrap().caps.as_ref().clone()));
         let mut app = App::assemble(
-            AppConfig::default(),
+            SdrtopConfig::default(),
             Some(path.clone()),
             state,
             Some(device),
@@ -1554,8 +1556,8 @@ mod tests {
     /// which observer mode cannot do.
     #[test]
     fn recall_slots_come_from_the_config_and_stay_empty_in_observer_mode() {
-        let mut config = AppConfig::default();
-        config.radio.recall_hz = [100_000_000, 0, 0];
+        let mut config = SdrtopConfig::default();
+        config.engine.radio.recall_hz = [100_000_000, 0, 0];
         let open = App::assemble(
             config.clone(),
             None,

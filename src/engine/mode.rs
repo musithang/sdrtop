@@ -95,11 +95,71 @@ impl Mode {
     pub fn idle() -> Mode {
         Mode::for_view("", "")
     }
+    /// The mode called `name` in [`MODES`], or `None` for a name Monas does
+    /// not know.
+    pub fn named(name: &str) -> Option<Mode> {
+        MODES
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(n, section)| Mode::for_view(section, n))
+    }
 }
+
+/// What Monas can compute, by the name a client asks for it with, and the
+/// section that name belongs to: the plain spectrum, and every view that asks
+/// for a feed of its own. Named as the terminal's views are, so a script and
+/// the person at the terminal mean the same thing by `net_survey`. A view
+/// that asks for nothing beyond the spectrum (the Lab benches, the micro
+/// views) needs no name of its own here: `spectrum` computes what it shows.
+pub const MODES: &[(&str, &str)] = &[
+    ("spectrum", ""),
+    ("net", crate::signal::net::SECTION),
+    ("net_survey", crate::signal::net::SECTION),
+    ("net_ble", "le"),
+    ("net_census", "le"),
+    ("net_connection", "le"),
+    ("net_coded", "coded"),
+    ("net_bt", "classic"),
+    ("net_piconet", "classic"),
+    ("net_bench", "classic"),
+    ("wifi_survey", "wifi_channel"),
+    ("wifi_frames", "wifi_channel"),
+    ("wifi_airtime", "wifi_channel"),
+    ("radio_pocsag", crate::signal::pocsag::SECTION),
+    ("radio_ft8", crate::signal::ft8::SECTION),
+    ("lab_ft8_signal", crate::signal::ft8::LAB_SECTION),
+    ("lab_ft8_band", crate::signal::ft8::LAB_SECTION),
+    ("lab_ft8_receiver", crate::signal::ft8::LAB_SECTION),
+];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every named mode is the mode its view asks for in its own section.
+    #[test]
+    fn a_named_mode_is_its_view_in_its_section() {
+        for (name, section) in MODES {
+            assert_eq!(
+                Mode::named(name),
+                Some(Mode::for_view(section, name)),
+                "{name}"
+            );
+        }
+        assert_eq!(Mode::named("not_a_view"), None);
+    }
+
+    /// The plain spectrum asks for no feed of its own; every other named
+    /// mode asks for something, or it would not need a name.
+    #[test]
+    fn only_the_spectrum_is_named_without_a_feed() {
+        for (name, _) in MODES {
+            let mode = Mode::named(name).unwrap();
+            let idle =
+                mode.feeds == Feeds::default() && mode.net == NetView::default() && !mode.ft8_lab;
+            assert_eq!(idle, *name == "spectrum", "{name}");
+        }
+    }
 
     /// Nothing asked for, nothing fed.
     #[test]

@@ -476,7 +476,7 @@ fn offer_soapy(
 /// Opens the device a listing points at, as a trait object.
 pub fn open_device(
     listing: &DeviceListing,
-    cfg: &crate::config::AppConfig,
+    cfg: &crate::config::EngineConfig,
 ) -> anyhow::Result<Arc<dyn SdrDevice>> {
     let tinysa_settings = &cfg.tinysa;
     match listing.kind {

@@ -9,8 +9,8 @@
 
 use std::net::SocketAddr;
 
-use super::mode::Mode;
-use crate::config::{HeadlessSettings, LayoutConfig};
+use super::mode::{Mode, MODES};
+use crate::config::MonasdSettings;
 
 /// The port the API listens on when none is named.
 pub const DEFAULT_PORT: u16 = 7373;
@@ -26,14 +26,13 @@ pub struct HeadlessPlan {
     pub spectrum: bool,
 }
 
-/// Decide a headless run from the flags (`listen`, `view`), which win, and
-/// the `[headless]` block. Refused, with the reason, when it could not run as
-/// asked.
+/// Decide a headless run from the flags (`listen`, `mode`), which win, and
+/// the `[monasd]` block. The mode is one of [`MODES`], by name. Refused, with
+/// the reason, when it could not run as asked.
 pub fn plan(
     listen: Option<&str>,
-    view: Option<&str>,
-    settings: &HeadlessSettings,
-    layouts: &LayoutConfig,
+    mode: Option<&str>,
+    settings: &MonasdSettings,
 ) -> Result<HeadlessPlan, String> {
     let listen_text = listen
         .map(str::to_string)
@@ -46,24 +45,22 @@ pub fn plan(
     if !listen.ip().is_loopback() && token.is_none() {
         return Err(format!(
             "listening on {listen} lets anyone who reaches it retune the radio; \
-             put a token in the config's [headless] block (token = \"some long random string\"), \
+             put a token in the config's [monasd] block (token = \"some long random string\"), \
              or listen on 127.0.0.1"
         ));
     }
 
-    let view = view
+    let name = mode
         .map(str::to_string)
         .or_else(|| settings.mode.clone())
         .unwrap_or_else(|| "spectrum".to_string());
-    let Some(preset) = layouts.presets.get(&view) else {
-        let mut views: Vec<&str> = layouts.presets.keys().map(String::as_str).collect();
-        views.sort_unstable();
+    let Some(mode) = Mode::named(&name) else {
+        let names: Vec<&str> = MODES.iter().map(|(n, _)| *n).collect();
         return Err(format!(
-            "there is no view called {view}; the views are {}",
-            views.join(", ")
+            "there is no mode called {name}; the modes are {}",
+            names.join(", ")
         ));
     };
-    let mode = Mode::for_view(preset.section.as_deref().unwrap_or_default(), &view);
     Ok(HeadlessPlan {
         listen,
         token,
@@ -88,15 +85,11 @@ pub fn pick(labels: &[String]) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{HeadlessSettings, LayoutConfig};
-
-    fn layouts() -> LayoutConfig {
-        LayoutConfig::default_config()
-    }
+    use crate::config::MonasdSettings;
 
     #[test]
     fn listen_defaults_to_loopback() {
-        let plan = plan(None, None, &HeadlessSettings::default(), &layouts()).unwrap();
+        let plan = plan(None, None, &MonasdSettings::default()).unwrap();
         assert!(plan.listen.ip().is_loopback(), "{}", plan.listen);
         assert_eq!(plan.listen.port(), DEFAULT_PORT);
         assert_eq!(plan.token, None);
@@ -106,40 +99,28 @@ mod tests {
     /// so a token is required, and the refusal says how to give one.
     #[test]
     fn a_non_loopback_address_without_a_token_is_refused_with_how_to_make_one() {
-        let why = plan(
-            Some("0.0.0.0:7373"),
-            None,
-            &HeadlessSettings::default(),
-            &layouts(),
-        )
-        .unwrap_err();
-        assert!(why.contains("[headless]") && why.contains("token"), "{why}");
+        let why = plan(Some("0.0.0.0:7373"), None, &MonasdSettings::default()).unwrap_err();
+        assert!(why.contains("[monasd]") && why.contains("token"), "{why}");
 
-        let with_token = HeadlessSettings {
+        let with_token = MonasdSettings {
             token: Some("a-long-random-string".into()),
-            ..HeadlessSettings::default()
+            ..MonasdSettings::default()
         };
-        let plan = plan(Some("0.0.0.0:7373"), None, &with_token, &layouts()).unwrap();
+        let plan = plan(Some("0.0.0.0:7373"), None, &with_token).unwrap();
         assert!(!plan.listen.ip().is_loopback());
     }
 
     #[test]
     fn an_address_that_is_not_one_is_refused() {
-        let why = plan(Some("here"), None, &HeadlessSettings::default(), &layouts()).unwrap_err();
+        let why = plan(Some("here"), None, &MonasdSettings::default()).unwrap_err();
         assert!(why.contains("here"), "{why}");
     }
 
-    /// A view nobody knows computes nothing, so it is refused, with the ones
+    /// A mode nobody knows computes nothing, so it is refused, with the ones
     /// that exist.
     #[test]
-    fn an_unknown_mode_is_refused_with_the_list_of_views() {
-        let why = plan(
-            None,
-            Some("net_surveyy"),
-            &HeadlessSettings::default(),
-            &layouts(),
-        )
-        .unwrap_err();
+    fn an_unknown_mode_is_refused_with_the_list_of_modes() {
+        let why = plan(None, Some("net_surveyy"), &MonasdSettings::default()).unwrap_err();
         assert!(why.contains("net_surveyy"), "{why}");
         assert!(
             why.contains("net_survey,") || why.contains("net_survey "),
@@ -147,25 +128,25 @@ mod tests {
         );
     }
 
-    /// A known view gets the mode the terminal would ask for showing it; the
-    /// flag wins over the file.
+    /// A known mode is the one the terminal asks for showing the view of
+    /// that name; the flag wins over the file.
     #[test]
-    fn a_view_asks_for_the_mode_the_terminal_would() {
-        let file = HeadlessSettings {
+    fn a_mode_is_what_the_terminal_asks_for_by_that_name() {
+        let file = MonasdSettings {
             mode: Some("radio_pocsag".into()),
-            ..HeadlessSettings::default()
+            ..MonasdSettings::default()
         };
-        let plan = plan(None, Some("net_survey"), &file, &layouts()).unwrap();
+        let plan = plan(None, Some("net_survey"), &file).unwrap();
         assert_eq!(
             plan.mode,
             crate::engine::mode::Mode::for_view(crate::signal::net::SECTION, "net_survey")
         );
     }
 
-    /// No view named: the plain spectrum, the one thing every radio does.
+    /// No mode named: the plain spectrum, the one thing every radio does.
     #[test]
-    fn no_view_named_is_the_spectrum() {
-        let plan = plan(None, None, &HeadlessSettings::default(), &layouts()).unwrap();
+    fn no_mode_named_is_the_spectrum() {
+        let plan = plan(None, None, &MonasdSettings::default()).unwrap();
         assert_eq!(plan.mode.view, "spectrum");
         assert!(plan.spectrum);
     }
