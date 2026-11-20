@@ -14,11 +14,11 @@
 //! (`dsp::testkit::at_snr`), 38.4 kHz, not per bit and not in the signal's
 //! own bandwidth.
 
-use super::demod::tests::{air_bits, alpha, fsk, Air};
+use super::demod::testing::{air_bits, alpha, fsk, Air};
 use super::demod::{Decoder, Received, RATES};
-use super::page::tests::transmit;
+use super::page::testing::transmit;
 use super::page::Function;
-use crate::signal::dsp::testkit::{at_snr, Rng};
+use monas_dsp::testkit::{at_snr, Rng};
 
 const RATE: f64 = 38_400.0;
 

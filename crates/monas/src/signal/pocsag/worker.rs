@@ -176,8 +176,8 @@ impl Session {
 mod tests {
     use super::*;
     use crate::hardware::SampleFormat;
-    use crate::signal::pocsag::demod::tests::{air_bits, alpha, fsk, Air};
-    use crate::signal::pocsag::page::tests::transmit;
+    use crate::signal::pocsag::demod::testing::{air_bits, alpha, fsk, Air};
+    use crate::signal::pocsag::page::testing::transmit;
     use crate::signal::pocsag::page::{End, Function};
 
     const RATE: f64 = 2.4e6;

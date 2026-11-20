@@ -424,10 +424,12 @@ fn reads_as_digits(symbols: &[Option<Numeric>]) -> bool {
     symbols.iter().flatten().all(|s| *s != Numeric::Spare)
 }
 
-#[cfg(test)]
-pub(super) mod tests {
+/// Pages as a pager transmitter sends them, for the tests here and the
+/// engine's.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
     use super::*;
-    use crate::signal::pocsag::bch::encode;
+    use crate::bch::encode;
 
     /// A message's bits, least significant first per character.
     pub fn bits_of(codes: &[u8], width: usize) -> Vec<bool> {
@@ -470,6 +472,13 @@ pub(super) mod tests {
         }
         words.chunks(16).map(|c| c.try_into().unwrap()).collect()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{bits_of, transmit};
+    use super::*;
+    use crate::bch::encode;
 
     fn receive(batches: &[[u32; 16]]) -> Vec<Page> {
         let mut a = Assembler::default();

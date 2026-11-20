@@ -41,7 +41,7 @@ use num_complex::Complex;
 use super::bch::SYNC;
 use super::clock::BitClock;
 use super::page::{Assembler, Page};
-use crate::signal::dsp::discriminate::instantaneous_freq_hz;
+use monas_dsp::discriminate::instantaneous_freq_hz;
 
 /// The three rates POCSAG runs at.
 pub const RATES: [u32; 3] = [512, 1200, 2400];
@@ -528,13 +528,13 @@ fn spread((sum, sq, n): (f64, f64, u64)) -> Option<f64> {
     })
 }
 
-#[cfg(test)]
-pub(super) mod tests {
+/// Pages on the air, as samples a radio would hear, for the tests here and
+/// the engine's.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
     use super::*;
-    use crate::signal::dsp::testkit::{at_snr, Rng};
-    use crate::signal::pocsag::bch::SYNC;
-    use crate::signal::pocsag::page::tests::{bits_of, transmit};
-    use crate::signal::pocsag::page::Function;
+    use crate::bch::SYNC;
+    use crate::page::testing::bits_of;
     use std::f64::consts::TAU;
 
     /// How a test transmitter sends.
@@ -606,6 +606,16 @@ pub(super) mod tests {
         bits.extend(bits_of(&[0x04], 7));
         bits
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{air_bits, alpha, fsk, Air};
+    use super::*;
+    use crate::bch::SYNC;
+    use crate::page::testing::transmit;
+    use crate::page::Function;
+    use monas_dsp::testkit::{at_snr, Rng};
 
     fn decode(iq: &[Complex<f32>], rate: f64) -> Vec<Received> {
         let mut d = Decoder::new(rate);
@@ -813,7 +823,7 @@ pub(super) mod tests {
         let mut got: Vec<Received> = iq[..upto].chunks(4_096).flat_map(|b| d.push(b)).collect();
         got.extend(d.reset());
         assert_eq!(got.len(), 1, "{got:#?}");
-        assert_eq!(got[0].page.end, crate::signal::pocsag::page::End::Cut);
+        assert_eq!(got[0].page.end, crate::page::End::Cut);
         assert!(
             got[0].page.text().starts_with("A MESS"),
             "{}",
@@ -834,14 +844,14 @@ pub(super) mod tests {
         let mut got: Vec<Received> = iq[..half].chunks(4_096).flat_map(|b| d.push(b)).collect();
         got.extend(d.reset());
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].page.end, crate::signal::pocsag::page::End::Cut);
+        assert_eq!(got[0].page.end, crate::page::End::Cut);
     }
 
     /// Through the whole chain from a radio's stream: 2.4 Msps, the channel
     /// 250 kHz off the tuned centre, read in uneven blocks.
     #[test]
     fn from_the_radios_stream() {
-        use crate::signal::pocsag::channel::Channel;
+        use crate::channel::Channel;
         let input = 2.4e6;
         let air = Air {
             offset_hz: 250e3,

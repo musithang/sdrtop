@@ -1036,6 +1036,7 @@ dependencies = [
  "monas-bt",
  "monas-dsp",
  "monas-ft8",
+ "monas-pocsag",
  "monas-rds",
  "monas-wifi",
  "num-complex",
@@ -1079,6 +1080,14 @@ dependencies = [
  "num-complex",
  "rustfft",
  "serde_json",
+]
+
+[[package]]
+name = "monas-pocsag"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
 ]
 
 [[package]]

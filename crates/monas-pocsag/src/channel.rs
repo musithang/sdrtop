@@ -8,7 +8,7 @@
 //! its mixer every block, because a deviation statistic does not care. A
 //! POCSAG page does: its codewords run across blocks, and a phase step at a
 //! block boundary is a frequency spike the discriminator reads as a bit. So
-//! the oscillator is [`crate::signal::dsp::nco::Nco`], whose phase carries,
+//! the oscillator is [`monas_dsp::nco::Nco`], whose phase carries,
 //! and both filters are `StreamingDecimator`s, whose history carries;
 //! [`Channel::reset`] is for a real break in the stream.
 //!
@@ -30,9 +30,9 @@
 
 use num_complex::Complex;
 
-use crate::signal::demod::tap_count;
-use crate::signal::dsp::fir::{design_lowpass, StreamingDecimator};
-use crate::signal::dsp::nco::Nco;
+use monas_dsp::filter::tap_count;
+use monas_dsp::fir::{design_lowpass, StreamingDecimator};
+use monas_dsp::nco::Nco;
 
 /// The channel rate aimed at: 32 samples a bit at 1200 baud, 16 at 2400 and
 /// 75 at 512, so the slowest and fastest rates both have room.
@@ -150,7 +150,7 @@ impl Channel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::dsp::nco::Nco;
+    use monas_dsp::nco::Nco;
 
     fn tone(hz: f64, rate: f64, n: usize) -> Vec<Complex<f32>> {
         let mut nco = Nco::new(hz, rate);
@@ -259,7 +259,7 @@ mod tests {
         let worst = all[settled..]
             .windows(2)
             .map(|w| {
-                let f = crate::signal::dsp::discriminate::instantaneous_freq_hz(w[0], w[1], rate);
+                let f = monas_dsp::discriminate::instantaneous_freq_hz(w[0], w[1], rate);
                 (f - 1_200.0).abs()
             })
             .fold(0.0f32, f32::max);

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+[package]
+name = "monas-pocsag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "sdrtop's POCSAG pager decoder. Internal; no stability promise."
+readme = "README.md"
+
+[features]
+# The encoders other crates' tests build their pages with. Switched on only
+# from `[dev-dependencies]`, so no release build carries them.
+testing = ["monas-dsp/testing"]
+
+[dependencies]
+monas-dsp.workspace = true
+num-complex.workspace = true
+
+[dev-dependencies]
+monas-dsp = { workspace = true, features = ["testing"] }
