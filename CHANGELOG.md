@@ -14,61 +14,39 @@ field falls back to a default rather than refusing to start.
 
 ## [0.8.0] - 2026-11-20
 
-**The PlutoSky R2 opens natively, and sdrtop's engine runs without a screen.**
+**The PlutoSky R2 opens natively, and sdrtop's engine gets an identity of its own.**
 
-The PlutoSky R2 from OpenSourceSDRLab now opens through sdrtop's own client
-for the radio's server: nothing to install, its gain in measured decibels, its
-transmitter kept silent. And the engine underneath sdrtop has a name, Monas,
-and a second program built on it, **monasd**: the same radio and receivers,
-with an HTTP API and a WebSocket instead of a screen. monasd is early. It
-drives the radio and reports how it is doing, but does not yet serve the
-measurements themselves. Your config file carries over unchanged.
+The PlutoSky R2 from OpenSourceSDRLab now opens through sdrtop's own client for the radio's server: nothing to install, its gain in measured decibels, its transmitter kept silent. Your config file carries over unchanged.
+
+### Meet Monas
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/d0336f3b-b0a2-47ce-9197-85ce082bcb49" alt="Monas" width="320">
+</p>
+
+Monas is the engine sdrtop has always run on: the part that talks to the radio, runs the receivers and measures what they hear, with every number carrying where it came from, when it was taken, and what was lost while it was measured. Until now it lived inside the terminal. From this release it stands on its own, under its own name, and two programs are built on it: **sdrtop**, the terminal you know, and **monasd**, the same engine with no screen, driven over an HTTP API and a WebSocket. Nothing changes for you at the terminal; what changed is underneath, and it is what lets a radio run on a box with no screen at all.
+
+monasd is early. It drives the radio and reports how it is doing, but does not yet serve the measurements themselves; that is the next piece of work.
 
 ### Added
 
-- **PlutoSky R2, native.** Found on its USB network or over Ethernet, and
-  opened with its transmitter silenced and read back, unless another program
-  is using it. The gain is one control shown in measured dB (1,860 settings
-  measured at 25 frequencies), the AD9361's AGC is on `A` in slow or fast
-  attack, and 2.083, 3 and 4 Msps run over USB without losing a sample. The
-  radio can be shared: another program's retune, rate, gain or transmission
-  is read back every second and taken as the truth. It has its own page and a
-  measured page with the bench's charts.
-- **monasd**, the engine with no screen. `monasd --mode net_survey` computes
-  what that view computes; five routes under `/v1` (health, radios, config,
-  command, and an events WebSocket); loopback by default, a token required
-  anywhere else, set in the config's new `[monasd]` block. The installer puts
-  it beside sdrtop, every tarball carries it with its own man page, and
-  `cargo install monasd --locked` builds it. See `user_docs/monasd.md`.
-- **Measured pages** for the Airspy R2, the Airspy HF+ Discovery and the
-  SDRplay RSP1B, beside the PlutoSky's.
-- **From the antenna to the screen**, a page on how a sample travels through
-  sdrtop, with a section for nerds.
+- **PlutoSky R2, native.** Found on its USB network or over Ethernet, and opened with its transmitter silenced and read back, unless another program is using it. The gain is one control shown in measured dB (1,860 settings measured at 25 frequencies), the AD9361's AGC is on `A` in slow or fast attack, and 2.083, 3 and 4 Msps run over USB without losing a sample. The radio can be shared: another program's retune, rate, gain or transmission is read back every second and taken as the truth. It has its own page and a measured page with the bench's charts.
+- **monasd**, the engine with no screen. `monasd --mode net_survey` computes what that view computes; five routes under `/v1` (health, radios, config, command, and an events WebSocket); loopback by default, a token required anywhere else, set in the config's new `[monasd]` block. The installer puts it beside sdrtop, every tarball carries it with its own man page, and `cargo install monasd --locked` builds it. See `user_docs/monasd.md`.
+- **Measured pages** for the Airspy R2, the Airspy HF+ Discovery and the SDRplay RSP1B, beside the PlutoSky's.
+- **From the antenna to the screen**, a page on how a sample travels through sdrtop, with a section for nerds.
 
 ### Changed
 
-- **The source is a Cargo workspace.** The engine is published as `monas` and
-  the `monas-*` crates, which are on crates.io only so that `cargo install
-  sdrtop` and `cargo install monasd` can build; on their own they promise
-  nothing. `cargo install sdrtop --locked` works as before, though a plain
-  `cargo install` now builds with Cargo's own release settings: just as fast,
-  but unstripped. The installer and the tarballs give the stripped binary.
-- SoapyPlutoSDR's listings of a PlutoSky R2 are hidden, since it opens
-  natively.
+- **The source is a Cargo workspace.** The engine is published as `monas` and the `monas-*` crates, which are on crates.io only so that `cargo install sdrtop` and `cargo install monasd` can build; on their own they promise nothing. `cargo install sdrtop --locked` works as before, though a plain `cargo install` now builds with Cargo's own release settings: just as fast, but unstripped. The installer and the tarballs give the stripped binary.
+- SoapyPlutoSDR's listings of a PlutoSky R2 are hidden, since it opens natively.
 
 ### Fixed
 
-- Picking a PlutoSDR from SoapySDR's list opens the radio that line names.
-  SoapyPlutoSDR lists one radio once over USB and once over the network, with
-  no serial, and only the address tells the two apart.
-- A SoapySDR gain control that keeps whole decibels is no longer taken for an
-  on/off switch. The AD9361 behind SoapyPlutoSDR was.
-- A gain below 0 dB reads as itself on the header and the micro view, not as
-  0.
-- On a radio sdrtop reads from (SoapySDR, the PlutoSky R2), one late reply no
-  longer shows on the timing bench as a sample clock hundreds of ppm off.
-- The startup log names the setting the radio refused: a refused amplifier
-  was logged as "VGA gain", a refused tuner AGC as "amp".
+- Picking a PlutoSDR from SoapySDR's list opens the radio that line names. SoapyPlutoSDR lists one radio once over USB and once over the network, with no serial, and only the address tells the two apart.
+- A SoapySDR gain control that keeps whole decibels is no longer taken for an on/off switch. The AD9361 behind SoapyPlutoSDR was.
+- A gain below 0 dB reads as itself on the header and the micro view, not as 0.
+- On a radio sdrtop reads from (SoapySDR, the PlutoSky R2), one late reply no longer shows on the timing bench as a sample clock hundreds of ppm off.
+- The startup log names the setting the radio refused: a refused amplifier was logged as "VGA gain", a refused tuner AGC as "amp".
 
 ## [0.7.4] - 2026-11-14
 
