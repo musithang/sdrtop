@@ -76,16 +76,19 @@ pub fn open(
     let freq_result = device.set_frequency(tuning.frequency_hz).map(|tuned| {
         tuning.frequency_hz = tuned;
     });
-    let mut startup_results = vec![freq_result, sr_result];
+    // Each setting beside the name the log gives it, so the two cannot be
+    // counted apart: a separate list of names once called a failed amplifier
+    // "VGA gain".
+    let mut startup_results = vec![("frequency", freq_result), ("sample rate", sr_result)];
     let gains: Vec<f64> = stages
         .iter()
         .enumerate()
         .map(|(index, spec)| tuning.gains.get(index).copied().unwrap_or(spec.min_db))
         .collect();
-    startup_results.push(device.set_stage_gains(&gains));
+    startup_results.push(("gains", device.set_stage_gains(&gains)));
     let boost = cfg.radio.boost_for(&info.board_name);
-    startup_results.push(device.set_amp_enable(boost));
-    startup_results.push(device.set_tuner_agc(boost));
+    startup_results.push(("amplifier", device.set_amp_enable(boost)));
+    startup_results.push(("tuner AGC", device.set_tuner_agc(boost)));
 
     let device_options = device.options();
     hardware::debug_assert_device_options(&device_options);
@@ -133,17 +136,9 @@ pub fn open(
         for note in &boot_notes {
             m.push_log(note.clone());
         }
-        let names = [
-            "frequency",
-            "sample rate",
-            "LNA gain",
-            "VGA gain",
-            "amp",
-            "tuner AGC",
-        ];
-        for (result, name) in startup_results.iter().zip(names.iter()) {
+        for (name, result) in &startup_results {
             if let Err(e) = result {
-                m.push_log(format!("Startup: failed to set {}: {}", name, e));
+                m.push_log(format!("Startup: failed to set {name}: {e}"));
             }
         }
     }
@@ -303,4 +298,37 @@ fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) {
         .name(name.to_string())
         .spawn(run)
         .unwrap_or_else(|e| panic!("cannot start the {name} thread: {e}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::testing::Bench;
+
+    /// **A setting the radio refused is named as itself** in the log, once:
+    /// a refused gain says "gains", and no other setting is blamed for it.
+    #[test]
+    fn a_refused_setting_is_logged_under_its_own_name() {
+        let device: Arc<dyn SdrDevice> = Arc::new(Bench {
+            refuse_gain: true,
+            ..Bench::new()
+        });
+        let m = open(
+            &EngineConfig::default(),
+            super::super::boot::Shown::default(),
+            &device,
+            true,
+        )
+        .unwrap();
+        let failed: Vec<&str> = m
+            .log
+            .iter()
+            .map(|e| e.text.as_ref())
+            .filter(|t| t.starts_with("Startup: failed to set"))
+            .collect();
+        assert_eq!(
+            failed,
+            ["Startup: failed to set gains: LNA: the radio said no"]
+        );
+    }
 }

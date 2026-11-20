@@ -330,6 +330,11 @@ pub struct UiState {
     /// that take over what it showed decide alike. Zero, unknown, reads as
     /// wide.
     pub screen_cols: u16,
+    /// When this frame is drawn, in milliseconds since the Unix epoch: the
+    /// clock the header's RX lamp breathes by. Set by the app before every
+    /// frame, the one place the wall clock reaches the panels; a test that
+    /// leaves it at zero draws the same lamp whenever it runs.
+    pub drawn_at_ms: u128,
 }
 
 /// The menu's tiles, in the order they stand on screen.
@@ -492,6 +497,7 @@ impl Default for UiState {
     fn default() -> Self {
         Self {
             screen_cols: 0,
+            drawn_at_ms: 0,
             input_mode: InputMode::Normal,
             input_buf: String::new(),
             focused_panel: None,

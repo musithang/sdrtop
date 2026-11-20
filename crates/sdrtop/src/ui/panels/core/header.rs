@@ -22,15 +22,13 @@ pub struct HeaderPanel;
 /// Pure glyph animation - the badge colours never change. All four glyphs are a
 /// single terminal column, so the badge width (and the header gap math) is fixed.
 /// Only animates while frames are flowing (RX), which is exactly when the UI
-/// is already redrawing, so it costs no extra wakeups.
-fn rx_pulse_glyph() -> &'static str {
-    use std::time::{SystemTime, UNIX_EPOCH};
+/// is already redrawing, so it costs no extra wakeups. `drawn_at_ms` is when
+/// the frame is drawn (`UiState::drawn_at_ms`): the lamp reads the clock the
+/// app gave the frame, never the wall clock itself, so the same state draws
+/// the same header.
+fn rx_pulse_glyph(drawn_at_ms: u128) -> &'static str {
     const FRAMES: [&str; 4] = ["\u{2219}", "\u{2022}", "\u{25CF}", "\u{2022}"]; // ∙ • ● •
-    let ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    FRAMES[((ms / 220) % FRAMES.len() as u128) as usize]
+    FRAMES[((drawn_at_ms / 220) % FRAMES.len() as u128) as usize]
 }
 
 /// A dot-leader span that fills `gap` columns: ` ······ ` (one space at each
@@ -208,7 +206,12 @@ fn record_chips(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Span<'static>> 
     spans
 }
 
-fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> Line<'static> {
+fn top_band_line(
+    state: &SdrMetrics,
+    drawn_at_ms: u128,
+    theme: &crate::Theme,
+    inner_width: u16,
+) -> Line<'static> {
     use ratatui::style::Color;
 
     // --- Status badge ---
@@ -222,7 +225,7 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
         )
     } else if state.radio.hw_streaming {
         (
-            format!(" {} RX ", rx_pulse_glyph()),
+            format!(" {} RX ", rx_pulse_glyph(drawn_at_ms)),
             theme.status_ok,
             Color::Rgb(3, 15, 6),
         )
@@ -1350,7 +1353,12 @@ impl Panel for HeaderPanel {
         };
 
         f.render_widget(
-            Paragraph::new(top_band_line(state, theme, inner.width)),
+            Paragraph::new(top_band_line(
+                state,
+                state.ui.drawn_at_ms,
+                theme,
+                inner.width,
+            )),
             top_area,
         );
         f.render_widget(
@@ -1427,7 +1435,12 @@ impl Panel for SlimHeaderPanel {
         };
 
         f.render_widget(
-            Paragraph::new(top_band_line(state, theme, inner.width)),
+            Paragraph::new(top_band_line(
+                state,
+                state.ui.drawn_at_ms,
+                theme,
+                inner.width,
+            )),
             top_area,
         );
         f.render_widget(
@@ -1440,6 +1453,27 @@ impl Panel for SlimHeaderPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The RX lamp breathes by the frame's clock, never the wall clock**:
+    /// the same state at the same clock draws the same header however long
+    /// apart the two draws are, and a frame one phase (220 ms) later draws the
+    /// lamp's next glyph. A test that drew the header twice once failed when
+    /// the wall clock crossed a phase between its two draws.
+    #[test]
+    fn the_rx_lamp_breathes_by_the_frames_clock() {
+        let m = SdrMetrics::fixture().streaming();
+        let at = |ms: u128| {
+            let ui = crate::ui::UiState {
+                drawn_at_ms: ms,
+                ..crate::ui::UiState::default()
+            };
+            crate::ui::fixture::draw_view(HeaderPanel, 120, 8, &crate::ui::View::new(&m, &ui))
+                .join("\n")
+        };
+        assert_eq!(at(0), at(0));
+        assert_eq!(at(0), at(219));
+        assert_ne!(at(0), at(220));
+    }
     use crate::theme::Theme;
 
     #[test]

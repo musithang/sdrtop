@@ -718,6 +718,13 @@ if [ -z "$BINARY" ]; then
     # One target directory for every crate this installs: sdrtop and monasd
     # are built on the same engine, and compiling it twice on a Raspberry Pi
     # is a quarter of an hour nobody asked for.
+    #
+    # The release profile lives in the repository's root Cargo.toml, which a
+    # published crate does not carry, so `cargo install` would build with
+    # Cargo's own settings: as fast, but unstripped and twice the size. The
+    # two that cost no build time are asked for here, as the tarball has them;
+    # the link-time optimisation is left out, because on a Raspberry Pi it
+    # costs more memory and time than the megabytes it saves.
     run_cargo_install() {
         crate=${1:-$CRATE}
         (
@@ -725,6 +732,7 @@ if [ -z "$BINARY" ]; then
             # shellcheck disable=SC2086 # deliberate: $src_args is an argument list
             if PATH="$WORK/cargo/bin:$PATH" CARGO_TERM_COLOR=never \
                 CARGO_TARGET_DIR="$WORK/target" \
+                CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_PANIC=abort \
                 cargo install "$crate" --locked --root "$WORK/cargo" $src_args; then
                 echo 0 > "$WORK/cargo.status"
             else

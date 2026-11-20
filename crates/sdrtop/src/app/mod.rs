@@ -447,6 +447,12 @@ impl App {
         let size = terminal.size().unwrap_or_default();
         let size = ratatui::layout::Rect::new(0, 0, size.width, size.height);
         ui.screen_cols = size.width;
+        // The one place the wall clock reaches the panels: the header's RX
+        // lamp breathes by it.
+        ui.drawn_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
         let ui = ui;
         // The Frames capture is as long as the river's lanes on this screen,
         // and the NET worker takes it: written on the shared side, and only

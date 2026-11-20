@@ -169,7 +169,8 @@ pub fn magnitude_to_color_themed(
 /// `Classic` defers to the theme gradient (identical to the themed version), the
 /// others use their fixed stops on TrueColor. On 256/16-colour terminals every
 /// palette falls back to the shared hardcoded ramp (the curve stays sharp, only
-/// the colour-AA is lost - DSN-2026-04 §05).
+/// the colour-AA is lost: a 256-colour terminal has no in-between shades to
+/// blend toward).
 pub fn magnitude_to_color_palette(
     db: f32,
     db_min: f32,

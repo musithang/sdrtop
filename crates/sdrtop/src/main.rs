@@ -464,6 +464,13 @@ mod source_tests {
         if lower.contains("design section") {
             return Some("a design section");
         }
+        // A design note by its number: the three letters, a dash, a year.
+        if text
+            .match_indices("DSN-")
+            .any(|(at, _)| text[at + 4..].starts_with(|c: char| c.is_ascii_digit()))
+        {
+            return Some("a design note's number");
+        }
         if lower.contains("case study")
             || lower.contains("case-study")
             || lower.contains("case studies")
@@ -485,6 +492,33 @@ mod source_tests {
                     && word.matches('-').count() >= 2
             });
         named.then_some("a plan's name")
+    }
+
+    /// **The installer's source build is the release profile, less the
+    /// link-time optimisation.** A published crate carries no profile, so
+    /// packaging/install.sh asks `cargo install` for the release profile's
+    /// `strip` and `panic` itself; this holds the two to the root manifest,
+    /// so a change to the profile cannot leave the installer building a
+    /// different binary from the tarball's without a word.
+    #[test]
+    fn the_installer_builds_with_the_release_profiles_strip_and_panic() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+        let manifest: toml::Table = std::fs::read_to_string(format!("{root}/Cargo.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        let release = &manifest["profile"]["release"];
+        let installer = std::fs::read_to_string(format!("{root}/packaging/install.sh")).unwrap();
+        let strip = release["strip"].as_bool().unwrap();
+        let panic = release["panic"].as_str().unwrap();
+        assert!(
+            installer.contains(&format!("CARGO_PROFILE_RELEASE_STRIP={strip}")),
+            "install.sh does not ask for strip = {strip}"
+        );
+        assert!(
+            installer.contains(&format!("CARGO_PROFILE_RELEASE_PANIC={panic}")),
+            "install.sh does not ask for panic = {panic}"
+        );
     }
 
     /// **Every internal crate is pinned exactly at the workspace's version.**
@@ -564,6 +598,7 @@ mod source_tests {
             " (case study)",
             " Stop 11 found this",
             " per net-ux-polish-plan",
+            " redesign (DSN-2026-07)",
         ] {
             assert!(plan_reference(cited).is_some(), "missed: {cited}");
         }
@@ -572,6 +607,7 @@ mod source_tests {
             " the sweep stops at the edge",
             " Stop the stream before retuning",
             " code table G0 and Eb/N0",
+            " the DSN-like spelling of a word",
         ] {
             assert_eq!(plan_reference(ordinary), None, "flagged: {ordinary}");
         }

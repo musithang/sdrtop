@@ -18,6 +18,13 @@ is built on beside it (the `monas` crates, published only so that this line can
 work). Building needs Rust 1.88+ and a C compiler/linker. Native SDR libraries
 are optional at runtime. What [monasd](monasd.md) is for has a page of its own.
 
+One quirk, so it doesn't surprise you: a plain `cargo install` builds with
+Cargo's own release settings, because the project's live in the repository
+and don't travel with the crate. The binary comes out just as fast, but
+unstripped and about twice the size of the one in the release tarball. The
+installer below asks for the stripped kind; by hand, the same is
+`CARGO_PROFILE_RELEASE_STRIP=true cargo install sdrtop --locked`.
+
 ## The shorter way, if you don't want to think about it
 
 ```sh

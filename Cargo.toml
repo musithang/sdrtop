@@ -106,8 +106,18 @@ opt-level = 3
 [profile.dev.package.monas-pocsag]
 opt-level = 3
 
+# Fat LTO since the engine became crates: thin LTO internalises less across
+# crate boundaries, and the release sdrtop grew from 11.2 to 13.5 MB with the
+# split. Measured on one machine, one day: fat brings it to 10.7 MB, the hot
+# path and the NET receive chain run at the same rate, and a release build
+# from nothing takes 248 s instead of 232.
+#
+# A profile here does not travel with a published crate: `cargo install`
+# builds with Cargo's own release settings (as fast, measured, but unstripped
+# and twice the size). packaging/install.sh asks for `strip` and `panic` on
+# its source path, and a test holds the two to this profile.
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
