@@ -163,6 +163,21 @@ the workspace, the 1.88 MSRV check, shellcheck.
 Green means green. "Mostly green" is not a colour. It is a mood, and it is
 lying to you.
 
+While the machines deliberate, consult the one oracle that runs on your own
+desk:
+
+```sh
+packaging/unused-pub.sh
+```
+
+Since the engine became libraries, the compiler no longer mourns a `pub`
+function whose last caller died; in a library, a `pub` item is merely
+*offered*, and nobody checks whether anyone came. This lists the ones nobody
+came for. It is advisory and says so: it counts names, not paths, so it
+cannot prove anything alive, only point at what looks dead. Bury what is dead,
+or make it `pub(crate)` again. An empty list is the expected answer, and a
+pleasant one.
+
 ## IV. COMMUNE WITH THE ACTUAL RADIO 📻
 
 **No machine can do this for you. It is the law of this project: hardware
