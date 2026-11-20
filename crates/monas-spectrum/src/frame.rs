@@ -11,7 +11,7 @@
 
 use num_complex::Complex;
 
-use crate::hardware::{SampleFormat, SampleGeometry};
+use monas_dsp::sample::{SampleFormat, SampleGeometry};
 
 use super::DB_FLOOR;
 
@@ -111,7 +111,7 @@ pub fn decode_into(
 ///
 /// A zero bin floors rather than going to −∞, so nothing downstream has to guard
 /// against an infinity that only ever means "silence".
-pub(super) fn magnitudes_dbfs(samples: &[Complex<f32>], out: &mut [f32]) {
+pub fn magnitudes_dbfs(samples: &[Complex<f32>], out: &mut [f32]) {
     let n = samples.len() as f32;
     for (i, z) in samples.iter().enumerate() {
         let norm = z.norm() / n;
@@ -124,7 +124,7 @@ pub(super) fn magnitudes_dbfs(samples: &[Complex<f32>], out: &mut [f32]) {
 }
 
 /// Rotate the spectrum so DC sits in the middle, where the display expects it.
-pub(super) fn fftshift_into(mags: &[f32], out: &mut [f32]) {
+pub fn fftshift_into(mags: &[f32], out: &mut [f32]) {
     let n = mags.len();
     out[..n / 2].copy_from_slice(&mags[n / 2..]);
     out[n / 2..].copy_from_slice(&mags[..n / 2]);
@@ -135,7 +135,7 @@ pub(super) fn fftshift_into(mags: &[f32], out: &mut [f32]) {
 /// The first frame seeds both directly instead of averaging toward the floor,
 /// which would otherwise take several seconds to climb into view. `initialized`
 /// carries that across calls.
-pub(super) fn average(
+pub fn average(
     shifted: &[f32],
     smoothed: &mut [f32],
     peak: &mut [f32],
@@ -143,7 +143,7 @@ pub(super) fn average(
     decay_db: f32,
     initialized: &mut bool,
 ) {
-    crate::signal::stats::average_and_peak(shifted, smoothed, peak, alpha, decay_db, *initialized);
+    monas_dsp::stats::average_and_peak(shifted, smoothed, peak, alpha, decay_db, *initialized);
     *initialized = true;
 }
 

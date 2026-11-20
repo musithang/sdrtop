@@ -26,6 +26,7 @@ monas-dsp.workspace = true
 monas-ft8.workspace = true
 monas-pocsag.workspace = true
 monas-rds.workspace = true
+monas-spectrum.workspace = true
 monas-wifi.workspace = true
 libc.workspace = true
 tokio.workspace = true

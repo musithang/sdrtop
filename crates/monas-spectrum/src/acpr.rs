@@ -12,6 +12,7 @@
 /// the in-channel power (or lower) reports as "clean" rather than chasing
 /// floating-point underflow toward -inf. Distinct from the panel's own display
 /// scale - this is a measurement clamp, not a UI concern.
+use monas_dsp::modulation::Modulation;
 const ACPR_MEASURE_FLOOR_DB: f32 = -100.0;
 
 /// Adjacent-channel power ratio: the lower/upper adjacent-band power relative to
@@ -83,9 +84,64 @@ pub(super) fn acpr_bands(
     Some((lower_db, upper_db, adj_dbfs))
 }
 
+/// Adjacent-channel offset from centre for the ACPR measurement, by modulation.
+///
+/// One fixed spacing cannot serve every band: ±200 kHz is broadcast FM's channel
+/// step, and applying it to a 12.5 kHz narrow-FM channel measures a band eight
+/// channels away - a number that is arithmetically correct and answers nobody's
+/// question. So the offset follows what the carrier turns out to be.
+///
+/// These are the channel steps of the services the classifier can name, not
+/// regulatory ACPR masks (sdrtop asserts no mask; the Lab's ACPR scale says so where it ends). An unclassified carrier keeps the broadcast spacing,
+/// since that is the state the page rests in.
+///
+/// The value actually used is recorded in the engine's signal state rather
+/// than re-derived by the panel, so the label can never name a different offset
+/// than the one measured.
+pub fn acpr_offset_hz(modulation: Modulation) -> f64 {
+    match modulation {
+        Modulation::Nfm => 25_000.0,
+        Modulation::Am => 9_000.0,
+        _ => 200_000.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acpr_offset_follows_the_channel_step_of_the_service() {
+        // Broadcast FM's 200 kHz step applied to a 12.5 kHz narrow-FM channel would
+        // measure a band eight channels away.
+        assert_eq!(acpr_offset_hz(Modulation::Wfm), 200_000.0);
+        assert_eq!(acpr_offset_hz(Modulation::Nfm), 25_000.0);
+        assert_eq!(acpr_offset_hz(Modulation::Am), 9_000.0);
+        // An unclassified carrier rests in the broadcast shape, like the panel does.
+        assert_eq!(
+            acpr_offset_hz(Modulation::Unknown),
+            acpr_offset_hz(Modulation::Wfm)
+        );
+    }
+
+    #[test]
+    fn acpr_offset_clears_the_bandwidth_of_its_own_service() {
+        // The measurement is only meaningful while the adjacent bands sit clear of
+        // the channel, and each band is as wide as the occupied bandwidth. So every
+        // offset has to exceed what its own modulation typically occupies, or the
+        // overlap guard in `acpr_bands` would suppress the reading for good.
+        for (m, typical_bw) in [
+            (Modulation::Wfm, 120_000.0),
+            (Modulation::Nfm, 15_000.0),
+            (Modulation::Am, 8_000.0),
+        ] {
+            assert!(
+                acpr_offset_hz(m) > typical_bw,
+                "{m:?}: offset {} does not clear {typical_bw}",
+                acpr_offset_hz(m)
+            );
+        }
+    }
 
     #[test]
     fn acpr_bands_computes_relative_and_absolute_adjacent_levels() {

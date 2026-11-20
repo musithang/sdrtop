@@ -45,27 +45,9 @@ pub const SAT_CLIP_PCT: f32 = SAT_CRIT_PCT;
 /// level the auto-gain is content to hold.
 pub const ADC_COMFORT_DBFS: std::ops::RangeInclusive<f32> = -12.0..=-4.0;
 
-/// Adjacent-channel offset from centre for the ACPR measurement, by modulation.
-///
-/// One fixed spacing cannot serve every band: ±200 kHz is broadcast FM's channel
-/// step, and applying it to a 12.5 kHz narrow-FM channel measures a band eight
-/// channels away - a number that is arithmetically correct and answers nobody's
-/// question. So the offset follows what the carrier turns out to be.
-///
-/// These are the channel steps of the services the classifier can name, not
-/// regulatory ACPR masks (sdrtop asserts no mask; see [`ACPR_FLOOR_DB`]). An unclassified carrier keeps the broadcast spacing,
-/// since that is the state the page rests in.
-///
-/// The value actually used is recorded in [`SignalState::acpr_offset_hz`] rather
-/// than re-derived by the panel, so the label can never name a different offset
-/// than the one measured.
-pub fn acpr_offset_hz(modulation: Modulation) -> f64 {
-    match modulation {
-        Modulation::Nfm => 25_000.0,
-        Modulation::Am => 9_000.0,
-        _ => 200_000.0,
-    }
-}
+/// The ACPR offset a carrier of a given kind is measured at: the spectrum's
+/// own decision, named here as it always was.
+pub use crate::signal::fft::acpr_offset_hz;
 
 /// What the carrier at centre looks like it is, from its bandwidth: a
 /// building block of its own, named here as it always was.
@@ -416,39 +398,6 @@ mod tests {
         };
         s.snr_history.extend(samples.iter().copied());
         s
-    }
-
-    #[test]
-    fn acpr_offset_follows_the_channel_step_of_the_service() {
-        // Broadcast FM's 200 kHz step applied to a 12.5 kHz narrow-FM channel would
-        // measure a band eight channels away.
-        assert_eq!(acpr_offset_hz(Modulation::Wfm), 200_000.0);
-        assert_eq!(acpr_offset_hz(Modulation::Nfm), 25_000.0);
-        assert_eq!(acpr_offset_hz(Modulation::Am), 9_000.0);
-        // An unclassified carrier rests in the broadcast shape, like the panel does.
-        assert_eq!(
-            acpr_offset_hz(Modulation::Unknown),
-            acpr_offset_hz(Modulation::Wfm)
-        );
-    }
-
-    #[test]
-    fn acpr_offset_clears_the_bandwidth_of_its_own_service() {
-        // The measurement is only meaningful while the adjacent bands sit clear of
-        // the channel, and each band is as wide as the occupied bandwidth. So every
-        // offset has to exceed what its own modulation typically occupies, or the
-        // overlap guard in `acpr_bands` would suppress the reading for good.
-        for (m, typical_bw) in [
-            (Modulation::Wfm, 120_000.0),
-            (Modulation::Nfm, 15_000.0),
-            (Modulation::Am, 8_000.0),
-        ] {
-            assert!(
-                acpr_offset_hz(m) > typical_bw,
-                "{m:?}: offset {} does not clear {typical_bw}",
-                acpr_offset_hz(m)
-            );
-        }
     }
 
     #[test]

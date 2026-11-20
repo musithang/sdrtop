@@ -36,6 +36,7 @@ monas-ft8 = { path = "crates/monas-ft8", version = "=0.7.4" }
 monas-pocsag = { path = "crates/monas-pocsag", version = "=0.7.4" }
 monas-rds = { path = "crates/monas-rds", version = "=0.7.4" }
 monas-ble = { path = "crates/monas-ble", version = "=0.7.4" }
+monas-spectrum = { path = "crates/monas-spectrum", version = "=0.7.4" }
 monas-wifi = { path = "crates/monas-wifi", version = "=0.7.4" }
 
 ratatui = "0.30"

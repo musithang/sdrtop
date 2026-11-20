@@ -326,8 +326,8 @@ mod tests {
             "expected ~15 kHz, got {bw}"
         );
         assert_eq!(
-            crate::state::classify(50.0, bw),
-            crate::state::Modulation::Nfm
+            monas_dsp::modulation::classify(50.0, bw),
+            monas_dsp::modulation::Modulation::Nfm
         );
     }
 

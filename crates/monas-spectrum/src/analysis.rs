@@ -12,7 +12,7 @@
 //! It is also why this file carries most of the worker's tests: it is a pure
 //! function of a spectrum.
 
-use crate::state::Modulation;
+use monas_dsp::modulation::Modulation;
 
 use super::acpr::acpr_bands;
 use super::carrier::{carrier_window, centre_radius_bins, strongest_real_bin};
@@ -52,7 +52,7 @@ pub(super) fn carrier(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> 
 ///
 /// `scratch` is the worker's reused buffer; nothing is allocated here.
 pub(super) fn noise_floor(smoothed: &[f32], scratch: &mut [f32]) -> f32 {
-    crate::signal::stats::quietest_mean(smoothed, scratch, NOISE_FLOOR_FRACTION)
+    monas_dsp::stats::quietest_mean(smoothed, scratch, NOISE_FLOOR_FRACTION)
 }
 
 /// The SNR the worker publishes: the strongest real bin *near centre*, minus the
@@ -94,7 +94,7 @@ pub(super) fn to_linear(smoothed: &[f32], linear: &mut [f32]) {
 }
 
 /// Everything one display frame's analysis produces.
-pub(super) struct Reading {
+pub struct Reading {
     pub noise_floor: f32,
     pub peak_to_nf_db: f32,
     pub occupied_bw_hz: u64,
@@ -110,7 +110,7 @@ pub(super) struct Reading {
 ///
 /// `scratch` is the noise-floor partial-sort buffer. Both are the worker's reused
 /// allocations - this function allocates nothing.
-pub(super) fn measure(
+pub fn measure(
     smoothed: &[f32],
     linear: &mut [f32],
     scratch: &mut [f32],
@@ -124,8 +124,8 @@ pub(super) fn measure(
 
     // The modulation is needed before the ACPR, not after: it picks the channel
     // spacing the adjacent bands are measured at.
-    let modulation = crate::state::classify(peak_to_nf_db, c.occupied_bw_hz);
-    let acpr_offset_hz = crate::state::acpr_offset_hz(modulation);
+    let modulation = monas_dsp::modulation::classify(peak_to_nf_db, c.occupied_bw_hz);
+    let acpr_offset_hz = crate::acpr::acpr_offset_hz(modulation);
     // `None` becomes the undefined sentinel - never a guessed ratio.
     let (acpr_lower_db, acpr_upper_db, adj_carrier_dbfs) =
         acpr_bands(linear, sample_rate, c.occupied_bw_hz, acpr_offset_hz).unwrap_or((
