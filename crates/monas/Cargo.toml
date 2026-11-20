@@ -21,6 +21,7 @@ testing = ["monas-ble/testing", "monas-bt/testing", "monas-dsp/testing", "monas-
 [dependencies]
 monas-ble.workspace = true
 monas-bt.workspace = true
+monas-demod.workspace = true
 monas-dsp.workspace = true
 monas-ft8.workspace = true
 monas-pocsag.workspace = true

@@ -11,19 +11,10 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub use crate::signal::demod::{PilotMeasure, PilotState};
+pub use crate::signal::demod::{
+    AmMeasure, CtcssMeasure, FmMeasure, MpxFrame, PilotMeasure, PilotState,
+};
 pub use crate::signal::rds::{RdsData, PTY_NAMES};
-
-/// One MPX baseband spectrum. `mags_hz[k]` is the deviation contributed by the
-/// component at `k · bin_hz`, so the display reads directly in Hz.
-///
-/// Shared behind an `Arc`: `SdrMetrics` is deep-cloned every frame, and this is
-/// the one large field the demod adds.
-#[derive(Clone, Debug)]
-pub struct MpxFrame {
-    pub bin_hz: f64,
-    pub mags_hz: Vec<f32>,
-}
 
 /// Demod channel offsets step by this much per key press - coarse enough to walk
 /// a station off the DC spike in a couple of presses, fine enough to land inside
@@ -64,41 +55,6 @@ pub const RDS_AGED_AFTER: Duration = Duration::from_secs(5);
 /// building does not cost the station name, short enough that what is on screen is
 /// still about the here and now.
 pub const RDS_DROPPED_AFTER: Duration = Duration::from_secs(30);
-
-/// One AM envelope measurement.
-///
-/// `positive_pct` and `negative_pct` are reported separately from `depth_pct`
-/// because they fail differently: a negative depth approaching 100 % pinches the
-/// carrier off and splatters, while a mismatched pair points at a modulator fault
-/// rather than merely too much level.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct AmMeasure {
-    pub depth_pct: f32,
-    pub positive_pct: f32,
-    pub negative_pct: f32,
-    pub carrier_dbfs: f32,
-}
-
-/// A detected CTCSS tone. `margin_db` is how far it stood above the best
-/// non-adjacent candidate - the evidence for the identification, kept so the
-/// panel can show a confident detection differently from a borderline one.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CtcssMeasure {
-    pub tone_hz: f32,
-    pub deviation_hz: f32,
-    pub margin_db: f32,
-}
-
-/// One FM discriminator measurement, all in Hz.
-///
-/// `peak_dev_hz` / `rms_dev_hz` are measured *about* `carrier_offset_hz`, so a
-/// mistuned radio reports its tuning error as offset rather than as modulation.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FmMeasure {
-    pub peak_dev_hz: f32,
-    pub rms_dev_hz: f32,
-    pub carrier_offset_hz: f32,
-}
 
 #[derive(Clone, Debug)]
 pub struct DemodState {

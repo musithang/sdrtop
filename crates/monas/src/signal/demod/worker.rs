@@ -28,8 +28,17 @@ use super::super::dsp::fir::{design_lowpass, StreamingDecimator};
 use super::{
     am_envelope, am_stats, channel_rate, ctcss_detect, decimation_factor, decode, fm_discriminate,
     fm_stats, mix_offset, mpx_spectrum, pilot_measure, tap_count, target_rate_for, CTCSS_WINDOW_S,
-    EMA_ALPHA, MPX_FFT_SIZE, PEAK_DECAY_HZ, SLICE_PAIRS, UPDATE_INTERVAL,
+    MPX_FFT_SIZE, SLICE_PAIRS, UPDATE_INTERVAL,
 };
+
+/// Peak-deviation hold decay per update. The peak reading behaves like a bench
+/// instrument's peak hold - it latches the loudest excursion and bleeds down when
+/// modulation quietens, instead of flickering with every update.
+const PEAK_DECAY_HZ: f32 = 2_000.0;
+
+/// Smoothing applied to the RMS-deviation and carrier-offset readouts, so they
+/// settle instead of jittering at the update rate.
+const EMA_ALPHA: f32 = 0.3;
 
 pub struct DemodWorker {
     pub sample_rx: Receiver<StreamBlock>,

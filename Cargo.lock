@@ -1034,6 +1034,7 @@ dependencies = [
  "libloading",
  "monas-ble",
  "monas-bt",
+ "monas-demod",
  "monas-dsp",
  "monas-ft8",
  "monas-pocsag",
@@ -1062,6 +1063,15 @@ version = "0.7.4"
 dependencies = [
  "monas-dsp",
  "num-complex",
+]
+
+[[package]]
+name = "monas-demod"
+version = "0.7.4"
+dependencies = [
+ "monas-dsp",
+ "num-complex",
+ "rustfft",
 ]
 
 [[package]]
