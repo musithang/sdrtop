@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "monas"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1052,7 +1052,7 @@ dependencies = [
 
 [[package]]
 name = "monas-ble"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "monas-bt"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "monas-demod"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "monas-dsp"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "num-complex",
  "rustfft",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "monas-ft8"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "monas-pocsag"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "monas-rds"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "monas-spectrum"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "monas-wifi"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "monas-dsp",
  "num-complex",
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "monasd"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1754,7 +1754,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdrtop"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap",
