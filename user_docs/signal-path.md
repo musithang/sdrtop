@@ -43,6 +43,12 @@ those. If no view on screen reads the spectrum, the spectrum isn't computed.
 If you aren't looking at the NET section, the Bluetooth decoders sit idle.
 Your CPU has better things to do than draw a waterfall you can't see.
 
+Strictly speaking, everything on this page is done by Monas, the engine
+underneath sdrtop, and [monasd](monasd.md) runs the very same road with no
+screen at the end of it. There the numbers go to an API instead of your eyes,
+and the waterfall nobody can see is, for once, not a waste: nobody is computing
+it.
+
 ## When something gets lost
 
 Every queue in that picture is short on purpose. When sdrtop falls behind, it
@@ -133,9 +139,10 @@ because they want every block, and a deeper queue would start hiding losses
 instead of absorbing them. FT8 is 64 deep, because nothing there is in a hurry
 and a stall of the whole machine mustn't cost a 15-second cycle. Blocks carry
 their stream position, so a worker can tell a gap from a pause, and NET
-rebuilds its receivers at every break. The comments in
-[`crates/sdrtop/src/app/builder/mod.rs`](../crates/sdrtop/src/app/builder/mod.rs) say this better than I
-can here.
+rebuilds its receivers at every break. The comments where the queues are made,
+in [`crates/monas/src/engine/start.rs`](../crates/monas/src/engine/start.rs),
+say this better than I can here. A tinySA skips all of it: its finished traces
+go to a `power-worker` of their own, and none of the threads above even starts.
 
 **The 200 ms loop is split by when it holds the lock.** The UI thread clones
 the whole state under the same mutex on every frame, so a float computed while
@@ -153,7 +160,9 @@ The details live in [`crates/monas/src/tasks/rx/mod.rs`](../crates/monas/src/tas
 
 **The FFT worker is split the same way**: `frame` (per-frame DSP, full rate, no
 lock), `analysis` (the measurements, display rate, no lock, no clock),
-`readout`, then `publish`, the one lock block
+`readout`, then `publish`, the one lock block. The first two need neither the
+state nor a clock, so they live in a crate of their own, `monas-spectrum`; the
+last two stay with the worker
 ([`crates/monas/src/signal/fft/mod.rs`](../crates/monas/src/signal/fft/mod.rs)).
 
 **The NET worker is one thread that owns its state**, and within one block it
@@ -168,7 +177,31 @@ the physics (deviation, pilot, CTCSS tone, AM depth), with its work capped at
 grow with the sample rate. Narrow-band FM is the exception and pays for every
 block, because its CTCSS tones sit about 2 Hz apart, and telling them apart
 takes half a second of unbroken audio
-([`crates/monas/src/signal/demod/mod.rs`](../crates/monas/src/signal/demod/mod.rs)).
+([`crates/monas-demod/src/lib.rs`](../crates/monas-demod/src/lib.rs)).
+
+**And the same thing in crates.** The source is a Cargo workspace, and the
+lines above run through it like this:
+
+```mermaid
+flowchart TD
+    sdrtop["sdrtop<br/>the terminal"] --> monas
+    monasd["monasd<br/>no screen, an API"] --> monas
+    monas["monas<br/>the radio, the workers,<br/>the state they write"] --> sig
+    sig["monas-spectrum · monas-demod · monas-rds<br/>monas-wifi · monas-ble · monas-bt<br/>monas-ft8 · monas-pocsag"] --> dsp
+    monas --> dsp
+    dsp["monas-dsp<br/>filters, the sample vocabulary, GFSK"]
+```
+
+The rule for what gets a crate of its own is the line the code drew anyway: a
+receiver whose decoding needs no state, no radio and no threads (plain data
+in, plain data out) is a crate, and its worker, the loop that feeds it blocks
+and writes what it found into the state, stays in `monas`. So the FT8 decoder
+is [`monas-ft8`](../crates/monas-ft8/src/lib.rs) and the thread that runs it
+on your radio is
+[`crates/monas/src/signal/ft8/worker.rs`](../crates/monas/src/signal/ft8/worker.rs).
+The decoders don't know about each other, and none of them knows there is a
+screen; Cargo checks that for me now, which is more reliable than me checking
+it. sdrtop and monasd don't know about each other either.
 
 **Two rules hold everywhere.** A poisoned mutex never takes the screen down
 with it: every lock recovers the data and carries on. And no panel decides for

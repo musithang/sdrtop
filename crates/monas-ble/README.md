@@ -1,4 +1,11 @@
-# monas-ble
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/monas/monas-mark-on-dark-512.png">
+    <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/monas/monas-mark-on-light-512.png" alt="monas logo" width="75">
+  </picture>
+</p>
+
+<h1 align="center">monas-ble</h1>
 
 sdrtop's Bluetooth LE receiver and measurements.
 

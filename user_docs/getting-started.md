@@ -10,10 +10,13 @@ If you already have Rust, this is the whole thing:
 
 ```sh
 cargo install sdrtop --locked
+cargo install monasd --locked    # the same engine with no screen, if you want it
 ```
 
-sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Building needs Rust
-1.88+ and a C compiler/linker. Native SDR libraries are optional at runtime.
+sdrtop is on [crates.io](https://crates.io/crates/sdrtop), with the engine it
+is built on beside it (the `monas` crates, published only so that this line can
+work). Building needs Rust 1.88+ and a C compiler/linker. Native SDR libraries
+are optional at runtime. What [monasd](monasd.md) is for has a page of its own.
 
 ## The shorter way, if you don't want to think about it
 
@@ -27,10 +30,13 @@ curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/ins
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh -s -- --soapy
 ```
 
-The installer puts sdrtop into `/usr/local/bin`. Use `--prefix ~/.local` for
-a user-local install. It runs the binary to check compatibility with your machine.
-An incompatible architecture or libc triggers a source build through
-`cargo install sdrtop --locked`.
+The installer puts sdrtop into `/usr/local/bin`, and [monasd](monasd.md)
+beside it: it is small next to the terminal, and the server is the program
+people forget they wanted until they are standing next to one. Use `--prefix
+~/.local` for a user-local install. It runs both binaries to check they work on
+your machine. An incompatible architecture or libc triggers a source build
+through `cargo install`, which compiles the shared engine once for both.
+`--uninstall` takes both away again.
 
 Runtime installation is opt-in. `--hackrf` adds libhackrf. `--rtlsdr` adds
 librtlsdr. `--airspy` adds libairspy, for an Airspy R2. `--airspyhf` adds libairspyhf, for
@@ -110,7 +116,8 @@ They conflict with each other, so it's one of the three. `paru` or a plain
 [releases page](../../../releases), with its checksum pinned in the PKGBUILD.
 The other two compile with cargo, so expect the usual few minutes. All three
 install the binary to `/usr/bin`, the man page, and these docs under
-`/usr/share/doc`.
+`/usr/share/doc`. Whether they carry [monasd](monasd.md) too is the packager's call, not
+mine; until they do, `cargo install monasd --locked` puts it next to them.
 
 The optional dependencies are `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy
 R2 needs `airspy`, which the packages don't list yet, and the HF+ Discovery
@@ -240,6 +247,7 @@ tar -xzf sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz
 cd sdrtop-<version>-x86_64-unknown-linux-gnu
 sha256sum -c <(grep sdrtop- ../SHA256SUMS)   # check it before you trust it
 sudo install -Dm755 sdrtop /usr/local/bin/sdrtop
+sudo install -Dm755 monasd /usr/local/bin/monasd   # if you want it too
 ```
 
 The tarball needs x86_64 Linux with glibc 2.36+. Debian 12+ and Ubuntu 24.04+

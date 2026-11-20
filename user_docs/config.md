@@ -293,6 +293,30 @@ than `q`. And if you're driving sdrtop from a script or testing a layout,
 `--config /tmp/whatever.toml` keeps the experiment away from your real settings
 entirely.
 
+## Who writes what
+
+Two programs read this file now, sdrtop and [monasd](monasd.md), and they share
+it by each writing only the blocks that are theirs. Everything else in the file
+is left exactly as it was, including a block neither of them knows, so a key you
+added by hand, or one a newer version wrote, survives either of them.
+
+| Blocks | Whose | Written by |
+|---|---|---|
+| `[radio]`, `[sweep]`, `[net]`, `[record]`, `[pager]`, `[station]`, `[ft8]`, `[tinysa]`, `[airspy]`, `[airspyhf]`, `[sdrplay]`, `[plutosky]` | the engine's: the radio and what it measures with | sdrtop on `q`, monasd when it stops |
+| `[display]`, `[theme]`, `[presets.*]` | the terminal's: how it shows things | sdrtop on `q` |
+| `[monasd]` | yours | nobody; you edit it |
+
+So a monasd that ran all week in the attic can't reset your layout, and an
+sdrtop session on the laptop can't touch monasd's token. The radio's settings
+really are shared, which is the point: tune somewhere in sdrtop, quit, and
+monasd starts there next time, and the other way round.
+
+The `[monasd]` block holds `listen` (the address it serves on, `host:port`),
+`token` (what a client off this machine has to present; required for anything
+but loopback) and `mode` (what it computes, by a view's name). A flag on
+monasd's command line wins over the file. The [monasd page](monasd.md) has the
+rest.
+
 ---
 
 For workflows and less-obvious behaviour, see

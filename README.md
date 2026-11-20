@@ -88,6 +88,9 @@ https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 - **A demodulator that reads radios instead of playing them**: FM deviation, pilot, stereo, CTCSS, AM depth, RDS. No audio, on purpose. [Details](user_docs/demodulator.md)
 - **NET: the 2.4 GHz band, measured.** Bluetooth (BLE, LE Coded, classic) and Wi-Fi, decoded and held against the specification. Never transmits, never joins. [Details](user_docs/net.md)
 - **IQ correction, band sweeps, SigMF recording, observer mode** for a radio another app holds, and every lab panel marked **[STALE]** the moment its data stops being live.
+- **monasd, the same engine with no screen**: the radio in the attic, an HTTP API and a WebSocket to drive and watch it from somewhere warmer. Early, and honest about it. [Details](user_docs/monasd.md)
+
+Under the hood there are three names: **Monas** is the engine (the radio, the receivers, the measurements), **sdrtop** is the terminal on top of it, and **monasd** is Monas with no screen. You mostly only need the second one.
 
 > Because the only thing worse than no data is confidently wrong data.
 
@@ -101,7 +104,7 @@ Everything else, every key and every config field, is in the **[full user guide]
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 ```
 
-The installer takes the prebuilt binary, or compiles from source when that can't run on your machine. Add your radio's runtime with `sh -s -- --hackrf`, `--rtlsdr`, `--airspy`, `--airspyhf` or `--soapy`; `--sdrplay` checks SDRplay's API and service. Piping a script into `sh` means running code you haven't read, so read it first: [`packaging/install.sh`](packaging/install.sh). I'd want to.
+The installer takes the prebuilt binary, or compiles from source when that can't run on your machine, and puts [monasd](user_docs/monasd.md) beside sdrtop while it's at it. Add your radio's runtime with `sh -s -- --hackrf`, `--rtlsdr`, `--airspy`, `--airspyhf` or `--soapy`; `--sdrplay` checks SDRplay's API and service. Piping a script into `sh` means running code you haven't read, so read it first: [`packaging/install.sh`](packaging/install.sh). I'd want to.
 
 **On Arch**, from the [AUR](https://aur.archlinux.org/packages?K=sdrtop):
 
@@ -113,6 +116,7 @@ yay -S sdrtop-bin    # or sdrtop, or sdrtop-git
 
 ```sh
 cargo install sdrtop --locked
+cargo install monasd --locked    # optional: the engine with no screen
 ```
 
 No SDR library is needed to build; each radio's library is loaded at runtime, and a missing one disables only its own backend. Every flag, every distribution and the tarball by hand: **[Getting started](user_docs/getting-started.md)**.

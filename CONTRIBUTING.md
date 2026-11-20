@@ -41,14 +41,15 @@ that, and I would much rather say "yes, and here's how" at the start than
 ### 1. sdrtop decodes signals itself
 
 Every part of the signal chain is written in this repository: filters,
-oscillators, demodulators, symbol timing, CRCs, protocol decoders. Two crates are
-the only exceptions, and both are named in
+oscillators, demodulators, symbol timing, CRCs, protocol decoders. The
+`monas-*` crates under `crates/` are ours, and they are where it is written.
+Two outside crates are the only exceptions, and both are named in
 [the honest ledger](user_docs/demodulator.md#the-honest-ledger):
 
 - `rustfft`, for the forward FFT
 - `num-complex`, for the complex number type
 
-No other crate does signal processing or decoding here. Not in the app, and not
+No other outside crate does signal processing or decoding here. Not in the app, and not
 in the tests either. A reference to test against is written from the
 specification itself, the way the Bluetooth receiver is held to a reference
 transmitter and tester built from the Bluetooth SIG's own test documents.
@@ -59,9 +60,16 @@ with your bench equipment, the answer has to be a paragraph about what our code
 does, not a link to somebody else's issue tracker. A library can be excellent and
 still not be ours. It makes sdrtop slower to build, and that is the price.
 
+Where a new decoder goes: if it needs no state, no radio and no threads (plain
+data in, plain data out), it is a `monas-*` crate of its own, built on
+`monas-dsp` and on no other decoder; the worker that feeds it blocks and writes
+what it found stays in `crates/monas`. If that sounds like a lot of crates, it
+is, and the compiler now tells you when one reaches for something it shouldn't,
+which saves us both an awkward review.
+
 ### 2. A new dependency needs an issue first
 
-Any new crate, in `[dependencies]`, `[dev-dependencies]` or
+Any new outside crate, in `[dependencies]`, `[dev-dependencies]` or
 `[build-dependencies]`, is agreed in an issue before the pull request. The answer
 is usually no, and yes only when there is genuinely no other way to do the job. A
 crate that does signal processing or decoding is already answered by rule 1.

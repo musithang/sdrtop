@@ -1,4 +1,11 @@
-# monas
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/monas/monas-mark-on-dark-512.png">
+    <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/monas/monas-mark-on-light-512.png" alt="monas logo" width="75">
+  </picture>
+</p>
+
+<h1 align="center">monas</h1>
 
 The engine inside sdrtop and monasd: the radio, its workers and their state.
 

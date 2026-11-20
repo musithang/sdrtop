@@ -52,6 +52,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 | [The Lab presets](lab.md) | The four benches: what each measurement means and how to act on it |
 | [Tips and tricks](tips-and-tricks.md) | Setting gain, pulling weak signals out of the noise, capture checklists |
 | [Advanced features](advanced.md) | Multiple radios, observer mode, the session log, what sdrtop deliberately doesn't do |
+| [monasd](monasd.md) | The engine with no screen: starting it, the token, the API, running it as a service |
 | [From the antenna to the screen](signal-path.md) | How a sample travels through sdrtop, what happens when one gets lost, and a nerd section with the threads |
 
 ## Signals and decoders
@@ -133,7 +134,7 @@ numbers behind what the screen shows.
 
 | Page | What's in it |
 |---|---|
-| [Configuration](config.md) | The config file, markers, the sweep band |
+| [Configuration](config.md) | The config file, markers, the sweep band, and which program writes which block |
 | [Layout presets](presets.md) | The twenty-eight built-in layouts, and writing your own |
 | [Themes](themes.md) | The six palettes, per-field overrides, and writing your own |
 
