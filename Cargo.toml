@@ -65,6 +65,47 @@ opt-level = 3
 debug-assertions = false
 overflow-checks = false
 
+# The engine and its signal crates are optimised in a dev build too, so a dev
+# build runs the DSP at a usable rate on a real radio: at the default level
+# the intake digests 20 Msps where a HackRF sends 20, and the NET receivers
+# run 12 to 100 times slower than the air. Measured, against the release
+# build: the hot path at 85 to 95 % of its rate, the NET receive chain at
+# the same load. Debug assertions and overflow checks stay on for them, which
+# the tests rely on. The cost is in the build: a full dev build of the
+# workspace takes about four times as long, the test suite builds slower and
+# runs six times faster, and an edit to one panel or one decoder rebuilds as
+# fast as before.
+
+[profile.dev.package.monas]
+opt-level = 3
+
+[profile.dev.package.monas-dsp]
+opt-level = 3
+
+[profile.dev.package.monas-spectrum]
+opt-level = 3
+
+[profile.dev.package.monas-demod]
+opt-level = 3
+
+[profile.dev.package.monas-rds]
+opt-level = 3
+
+[profile.dev.package.monas-wifi]
+opt-level = 3
+
+[profile.dev.package.monas-ble]
+opt-level = 3
+
+[profile.dev.package.monas-bt]
+opt-level = 3
+
+[profile.dev.package.monas-ft8]
+opt-level = 3
+
+[profile.dev.package.monas-pocsag]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
