@@ -174,7 +174,7 @@ way to the radio should never change silently.
 **Events** arrive as `{"event": {...}, "lost_before": 0}`. The inner `event`
 says what happened: `applied` (a command and its reply, whichever client sent
 it), `log` (a log line), `gap` (samples went missing, with how many were the driver's and how
-many ours) and `stale` (the radio stopped delivering, or started again). A
+many the engine's own, `monas`) and `stale` (the radio stopped delivering, or started again). A
 client that falls behind loses events rather than slowing the radio down, and
 `lost_before` says how many it missed just before this one.
 

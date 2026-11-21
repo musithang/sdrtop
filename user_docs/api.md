@@ -112,7 +112,7 @@ The event, named by its `event` field:
 |---|---|---|
 | `"event": "applied"` | `command`: [`Command`](#commands)<br>`reply`: [`Reply`](#commands) | A command was decided and answered, by whoever sent it. |
 | `"event": "log"` | `at_epoch_secs`: integer<br>`level`: [`LogLevel`](#loglevel)<br>`text`: string | A line was added to the log. |
-| `"event": "gap"` | `at_unix_ms`: integer<br>`samples`: integer<br>`driver`: integer<br>`sdrtop`: integer | Samples went missing from the stream, split by whose loss it was. |
+| `"event": "gap"` | `at_unix_ms`: integer<br>`samples`: integer<br>`driver`: integer<br>`monas`: integer | Samples went missing from the stream, split by whose loss it was: the driver's, before the engine saw them, or the engine's own intake. |
 | `"event": "stale"` | `stale`: boolean | The radio stopped delivering (`stale: true`) or started again. |
 
 ## Types
@@ -282,13 +282,13 @@ One of: `"info"`, `"ok"`, `"warn"`, `"error"`.
 
 ### LostSamples
 
-Samples lost this session: by the driver before the engine saw them, or by the engine's own intake (named `sdrtop` since the first release).
+Samples lost this session: by the driver before the engine saw them, or by the engine's own intake.
 
 | Field | Type | |
 |---|---|---|
 | `all` | integer |  |
 | `driver` | integer |  |
-| `sdrtop` | integer |  |
+| `monas` | integer |  |
 
 ### Feeds
 

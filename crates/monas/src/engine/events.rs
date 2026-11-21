@@ -34,12 +34,13 @@ pub enum Event {
         level: LogLevel,
         text: String,
     },
-    /// Samples went missing from the stream, split by whose loss it was.
+    /// Samples went missing from the stream, split by whose loss it was:
+    /// the driver's, before the engine saw them, or the engine's own intake.
     Gap {
         at_unix_ms: u64,
         samples: u64,
         driver: u64,
-        sdrtop: u64,
+        monas: u64,
     },
     /// The radio stopped delivering (`stale: true`) or started again.
     Stale { stale: bool },

@@ -496,7 +496,8 @@ impl Lost {
     /// The log's line for it.
     pub(super) fn line(self) -> String {
         format!(
-            "Lost {} samples: driver {} \u{00b7} sdrtop {}",
+            // "ours": the program running the engine, whichever it is.
+            "Lost {} samples: driver {} \u{00b7} ours {}",
             self.all,
             self.driver,
             self.all.saturating_sub(self.driver)
@@ -509,7 +510,7 @@ impl Lost {
             at_unix_ms,
             samples: self.all,
             driver: self.driver,
-            sdrtop: self.all.saturating_sub(self.driver),
+            monas: self.all.saturating_sub(self.driver),
         }
     }
 }
@@ -618,7 +619,7 @@ mod tests {
             log.window((1000, 400), at(200))
                 .map(|l| l.line())
                 .as_deref(),
-            Some("Lost 1000 samples: driver 400 \u{00b7} sdrtop 600")
+            Some("Lost 1000 samples: driver 400 \u{00b7} ours 600")
         );
         assert_eq!(log.window((1500, 400), at(400)), None, "within the second");
         assert_eq!(log.window((1700, 450), at(800)), None);
@@ -626,13 +627,13 @@ mod tests {
             log.window((1700, 450), at(1200))
                 .map(|l| l.line())
                 .as_deref(),
-            Some("Lost 700 samples: driver 50 \u{00b7} sdrtop 650"),
+            Some("Lost 700 samples: driver 50 \u{00b7} ours 650"),
             "what came between, gathered"
         );
         assert_eq!(log.window((0, 0), at(3000)), None, "cleared, not lost");
         assert_eq!(
             log.window((10, 0), at(3200)).map(|l| l.line()).as_deref(),
-            Some("Lost 10 samples: driver 0 \u{00b7} sdrtop 10")
+            Some("Lost 10 samples: driver 0 \u{00b7} ours 10")
         );
     }
 
@@ -1352,7 +1353,7 @@ mod tests {
                 at_unix_ms: 7,
                 samples: 1000,
                 driver: 400,
-                sdrtop: 600,
+                monas: 600,
             }
         );
     }

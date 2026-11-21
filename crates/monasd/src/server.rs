@@ -182,12 +182,12 @@ pub struct Health {
 }
 
 /// Samples lost this session: by the driver before the engine saw them, or
-/// by the engine's own intake (named `sdrtop` since the first release).
+/// by the engine's own intake.
 #[derive(Clone, Debug, Serialize)]
 pub struct LostSamples {
     pub all: u64,
     pub driver: u64,
-    pub sdrtop: u64,
+    pub monas: u64,
 }
 
 /// The sample feeds, each one's refusals.
@@ -232,7 +232,7 @@ async fn health(State(access): State<Access>) -> Json<Health> {
             lost_samples: LostSamples {
                 all: m.signal.total_drops_session,
                 driver: m.signal.driver_drops_session,
-                sdrtop: m
+                monas: m
                     .signal
                     .total_drops_session
                     .saturating_sub(m.signal.driver_drops_session),
@@ -808,7 +808,7 @@ mod tests {
         let (_, json) = ask(router(Access::loopback(engine)), get("/v1/health")).await;
         assert_eq!(json["lost_samples"]["all"], 1000);
         assert_eq!(json["lost_samples"]["driver"], 400);
-        assert_eq!(json["lost_samples"]["sdrtop"], 600);
+        assert_eq!(json["lost_samples"]["monas"], 600);
         assert_eq!(json["feeds"]["net"]["refused_session"], 3);
         assert!(json["process"]["rss_mb"].is_number());
     }
