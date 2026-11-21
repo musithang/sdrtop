@@ -23,7 +23,7 @@ mod plan;
 mod server;
 
 /// The engine, under the names its parts have in Monas.
-pub(crate) use monas::{engine, hardware};
+pub(crate) use monas::{engine, export, hardware};
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

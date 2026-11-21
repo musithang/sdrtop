@@ -79,6 +79,19 @@ pub fn clock(secs: u64) -> String {
 /// `unix_secs` is passed in rather than read here so the block is a pure
 /// function of the state and the clock, and can be asserted whole.
 pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
+    std::iter::once(format!("{COMMENT} sdrtop {}", env!("CARGO_PKG_VERSION")))
+        .chain(
+            fields(state, unix_secs)
+                .into_iter()
+                .map(|(name, value)| format!("{COMMENT} {name:<12} {value}")),
+        )
+        .collect()
+}
+
+/// The header's fields, name and value, as [`block`] writes them and as the
+/// API serves them: one account of where a measurement came from, whichever
+/// way it leaves.
+pub fn fields(state: &SdrMetrics, unix_secs: i64) -> Vec<(&'static str, String)> {
     let now = std::time::Instant::now();
     let geometry = state.caps.sample_geometry;
     let session = state
@@ -86,19 +99,16 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
         .rx_start_time
         .map(|t| clock(now.saturating_duration_since(t).as_secs()))
         .unwrap_or_else(|| "not streaming".to_string());
-    let field = |name: &str, value: String| format!("{COMMENT} {name:<12} {value}");
-
-    vec![
-        format!("{COMMENT} sdrtop {}", env!("CARGO_PKG_VERSION")),
-        field("exported", iso8601(unix_secs)),
-        field(
+    let mut fields = vec![
+        ("exported", iso8601(unix_secs)),
+        (
             "device",
             format!(
                 "{}  serial {}",
                 state.system.board_name, state.system.serial
             ),
         ),
-        field(
+        (
             "tuning",
             format!(
                 "{:.3} MHz   {:.3} Msps   {} bit  fs={}",
@@ -108,31 +118,35 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
                 geometry.full_scale,
             ),
         ),
-        mode_line(state, &field),
-        // NET's rows show addresses in this mode, so the file says which;
-        // FT8's distances are measured from you, so it says from where.
-        if state.mode.feeds.ft8 {
-            field("station", station_line(state))
-        } else {
-            field("addresses", addresses_line(state))
-        },
-        field("reference", reference_line(state, now)),
-        field("session", session),
-    ]
+        ("mode", mode_text(state)),
+    ];
+    // NET's rows show addresses in this mode, so the file says which; FT8's
+    // distances are measured from you, so it says from where. A mode with
+    // neither has nothing to say about either.
+    if state.mode.feeds.ft8 {
+        fields.push(("station", station_line(state)));
+    } else if state.mode.feeds.net {
+        fields.push(("addresses", addresses_line(state)));
+    }
+    fields.push(("reference", reference_line(state, now)));
+    fields.push(("session", session));
+    fields
 }
 
-/// What the section was doing: NET's mode, or FT8 and the band it was on.
-fn mode_line(state: &SdrMetrics, field: &dyn Fn(&str, String) -> String) -> String {
+/// What the engine was doing: FT8 and the band it was on, NET's mode, or
+/// the view whose work it did.
+fn mode_text(state: &SdrMetrics) -> String {
     if state.mode.feeds.ft8 {
         let hz = state.radio.frequency;
         let band = crate::signal::ft8::bands::band_of(hz)
             .map_or("not an FT8 frequency".to_string(), str::to_string);
-        field(
-            "mode",
-            format!("FT8 / {band}, dial {:.3} MHz", hz as f64 / 1e6),
-        )
+        format!("FT8 / {band}, dial {:.3} MHz", hz as f64 / 1e6)
+    } else if state.mode.feeds.net {
+        format!("NET / {}", state.net.mode.label())
+    } else if state.mode.view.is_empty() {
+        "spectrum".to_string()
     } else {
-        field("mode", format!("NET / {}", state.net.mode.label()))
+        state.mode.view.clone()
     }
 }
 
@@ -165,30 +179,21 @@ fn addresses_line(state: &SdrMetrics) -> String {
 
 /// How the frequency reference is described, or why it is not.
 pub(crate) fn reference_line(state: &SdrMetrics, now: std::time::Instant) -> String {
-    let Some(r) = state.radio.reference.as_ref() else {
-        return "unreferenced, no reference established".to_string();
-    };
-    // **What it is worth now, not what it was worth when it was taken.** A stale
-    // reference exports the way the panel draws it: as no reference at all. The
-    // figure is deliberately left out - a number in a file outlives the sentence
-    // beside it, and this is the one number most likely to be read later as an
-    // absolute claim.
-    if r.is_stale(now) {
-        return format!(
-            "unreferenced, a {} reference against {} expired after {}",
-            r.provenance.label().to_lowercase(),
+    // **What it is worth now, not what it was worth when it was taken**, as
+    // the engine's view decides it: an expired reference exports as no
+    // reference at all, its figure left out, because a number in a file
+    // outlives the sentence beside it.
+    match crate::engine::view::reference(state, now) {
+        crate::engine::view::Reading::Value(r) => format!(
+            "{}, {:.2} ppm +/- {:.2} against {}, measured {} ago",
+            r.provenance,
+            r.ppm,
+            r.sigma_ppm,
             r.source,
-            clock(crate::state::REFERENCE_STALE_S)
-        );
+            clock(r.age_s)
+        ),
+        crate::engine::view::Reading::Absent(why) => format!("unreferenced, {why}"),
     }
-    format!(
-        "{}, {:.2} ppm +/- {:.2} against {}, measured {} ago",
-        r.provenance.label().to_lowercase(),
-        r.ppm,
-        r.sigma_ppm,
-        r.source,
-        clock(r.age(now).as_secs())
-    )
 }
 
 #[cfg(test)]
@@ -252,7 +257,8 @@ mod tests {
     /// radio.
     #[test]
     fn the_block_carries_every_field_the_design_lists() {
-        let m = SdrMetrics::fixture().streaming();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.show_section(crate::signal::net::SECTION);
         let lines = block(&m, 1_788_632_561);
         let joined = lines.join("\n");
 
@@ -274,6 +280,24 @@ mod tests {
         assert!(joined.contains(env!("CARGO_PKG_VERSION")), "{joined}");
         assert!(joined.contains("2026-09-05T18:22:41Z"), "{joined}");
         assert!(joined.contains("HackRF"), "{joined}");
+    }
+
+    /// A header written outside NET and FT8 (the API's, in the spectrum's
+    /// mode) names the view whose work was done, and says nothing about
+    /// addresses or a station it had no use for.
+    #[test]
+    fn outside_net_and_ft8_the_header_names_the_view() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let joined = block(&m, 1_788_632_561).join("\n");
+        assert!(joined.contains("# mode         spectrum"), "{joined}");
+        m.mode = crate::engine::mode::Mode::named("wifi_survey").unwrap();
+        assert!(fields(&m, 0).iter().any(|(n, _)| *n == "addresses"));
+        m.mode = crate::engine::mode::Mode::for_view("lab", "lab_signal");
+        let fields = fields(&m, 0);
+        assert!(fields.contains(&("mode", "lab_signal".to_string())));
+        assert!(!fields
+            .iter()
+            .any(|(n, _)| *n == "addresses" || *n == "station"));
     }
 
     /// **An FT8 file says FT8**, its band and where its distances are from,

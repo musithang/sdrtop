@@ -114,6 +114,8 @@ pub fn router(access: Access) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/radios", get(radios))
         .route("/v1/config", get(config))
+        .route("/v1/snapshot", get(snapshot))
+        .route("/v1/provenance", get(provenance))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -178,6 +180,34 @@ async fn health(State(access): State<Access>) -> Json<serde_json::Value> {
             },
         })
     }))
+}
+
+/// Everything the engine reads: each reading a value or the reason it has
+/// none, each group with its testimony. Built from a copy of the state, so
+/// the engine's lock is held only for the copy.
+async fn snapshot(State(access): State<Access>) -> Json<crate::engine::view::Snapshot> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::snapshot(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// Where the measurements come from: the same fields an export's header
+/// carries, by the same names.
+async fn provenance(
+    State(access): State<Access>,
+) -> Json<serde_json::Map<String, serde_json::Value>> {
+    let state = access.engine.snapshot();
+    let unix_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let mut fields = serde_json::Map::new();
+    fields.insert("monas".into(), env!("CARGO_PKG_VERSION").into());
+    for (name, value) in crate::export::provenance::fields(&state, unix_secs) {
+        fields.insert(name.into(), value.into());
+    }
+    Json(fields)
 }
 
 /// The radios found at start, verified or reasoned, and which one runs.
@@ -323,6 +353,43 @@ mod tests {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(json["reply"], "refused");
         assert!(json["reason"].as_str().unwrap().contains("not a frequency"));
+    }
+
+    /// The snapshot says what it cannot: a radio not streaming, with no
+    /// frame yet, gives its groups stale and its figures absent with a
+    /// reason, never a zero.
+    #[tokio::test]
+    async fn the_snapshot_says_what_it_cannot_read() {
+        let (engine, _) = engine_on(Bench::new());
+        let (status, json) = ask(router(Access::loopback(engine)), get("/v1/snapshot")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["radio"]["testimony"]["stale"], true);
+        assert_eq!(json["signal"]["testimony"]["stale"], true);
+        assert!(
+            json["signal"]["peak_to_nf_db"]["absent"].is_string(),
+            "{json}"
+        );
+        assert!(json["radio"]["frequency_hz"].is_u64(), "{json}");
+        assert!(json["at_unix_ms"].as_u64().unwrap() > 1_700_000_000_000);
+    }
+
+    /// The provenance is the export header's fields, as JSON.
+    #[tokio::test]
+    async fn the_provenance_is_the_export_headers_fields() {
+        let (engine, _) = engine_on(Bench::new());
+        let (status, json) = ask(router(Access::loopback(engine)), get("/v1/provenance")).await;
+        assert_eq!(status, StatusCode::OK);
+        for field in [
+            "monas",
+            "exported",
+            "device",
+            "tuning",
+            "mode",
+            "reference",
+            "session",
+        ] {
+            assert!(json[field].is_string(), "no {field}: {json}");
+        }
     }
 
     /// Off loopback, every route wants the token; the wrong one is as good

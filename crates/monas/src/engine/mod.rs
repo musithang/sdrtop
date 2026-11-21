@@ -26,6 +26,7 @@ pub mod start;
 pub mod testimony;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod view;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 

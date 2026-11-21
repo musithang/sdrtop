@@ -335,7 +335,6 @@ impl SdrMetrics {
     /// a stage outside its measured band those dB are not what the stage
     /// gives, so the target would land somewhere nobody chose.
     pub fn chain_db_refusal(&self) -> Option<String> {
-        let hz = self.radio.frequency;
         let stages = self.caps.gain.stages();
         let auto: Vec<&str> = stages
             .iter()
@@ -346,12 +345,22 @@ impl SdrMetrics {
         if !auto.is_empty() {
             return Some(format!("the tuner AGC sets {}", auto.join(" and ")));
         }
-        let stage = self
-            .caps
-            .gain
-            .stages()
-            .into_iter()
-            .find(|s| !s.db_holds_at(hz))?;
+        (0..stages.len()).find_map(|i| self.stage_db_refusal(i))
+    }
+
+    /// Why stage `index` has no gain in dB at the tuned frequency, or `None`
+    /// when it has one: the AGC sets it, or its dB was not measured here.
+    /// The one account of it, which [`Self::chain_db_refusal`] gives for the
+    /// first stage that has one.
+    pub fn stage_db_refusal(&self, index: usize) -> Option<String> {
+        let hz = self.radio.frequency;
+        let stage = self.caps.gain.stages().into_iter().nth(index)?;
+        if self.agc_sets(index) {
+            return Some(format!("the tuner AGC sets {}", stage.name));
+        }
+        if stage.db_holds_at(hz) {
+            return None;
+        }
         if stage.is_banded() {
             return Some(format!(
                 "{}'s gain in dB was not measured at {:.3} MHz",
