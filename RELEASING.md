@@ -324,17 +324,20 @@ against the X.Y.Z already published, not against its own sources, so the
 first change that adds anything to `monas` fails `cargo package` in CI with an
 import that plainly exists, and you spend an evening doubting your eyes. So
 in the root `Cargo.toml`, both places as in II, the version becomes the next
-one with `-dev` on it:
+patch with `-dev` on it. The next patch, not the next minor: what the next
+release turns out to be is decided at rite II, by what it holds, and a `-dev`
+that promised a minor too early is a prophecy with nothing behind it.
 
 ```sh
-#   [workspace.package]       version = "X.Y+1.0-dev"
-#   [workspace.dependencies]  every pin becomes "=X.Y+1.0-dev"
+#   [workspace.package]       version = "X.Y.Z+1-dev"
+#   [workspace.dependencies]  every pin becomes "=X.Y.Z+1-dev"
 cargo check --offline
-packaging/version.sh           # X.Y+1.0-dev
+packaging/version.sh           # X.Y.Z+1-dev
 ```
 
 Commit it on its own. A `-dev` number is never tagged and never published; at
-the next release, rite II simply drops the `-dev`.
+the next release, rite II drops the `-dev`, or speaks a larger number if the
+changelog says the release earned one.
 
 Go outside. You have earned weather. 🎉
 
