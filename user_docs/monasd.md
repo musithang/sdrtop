@@ -54,7 +54,9 @@ monasd --config /etc/sdrtop/config.toml
 
 With more than one radio plugged in, monasd will not guess which one you
 meant: there is nobody at a terminal to ask, so it refuses and lists them, and
-`--device` says which. `man monasd` has every flag.
+`--device` says which. `monasd --help` has every flag, the modes, the API
+and a few examples, and `man monasd` the same words in a man page. `-h` is the
+short version, for when you only forgot one flag's name.
 
 ### The modes
 

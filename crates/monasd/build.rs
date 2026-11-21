@@ -45,7 +45,7 @@ fn generate_man_page() {
         .name("monasd")
         .version(env!("CARGO_PKG_VERSION"));
     let mut page = Vec::new();
-    if clap_mangen::Man::new(cmd).render(&mut page).is_err() {
+    if render(&clap_mangen::Man::new(cmd), cli::SECTIONS, &mut page).is_err() {
         // A missing man page is a lintian warning, not a broken build.
         println!("cargo:warning=could not render the man page");
         return;
@@ -56,6 +56,37 @@ fn generate_man_page() {
         return;
     }
     let _ = std::fs::write(dir.join("monasd.1"), page);
+}
+
+/// The man page: clap's own sections, then `sections` (the words `--help`
+/// prints after the flags), each under its heading in capitals.
+///
+/// clap_mangen would put `after_long_help` under one heading, EXTRA, as
+/// running text; a page whose MODES, EXAMPLES and EXIT STATUS are sections of
+/// their own is the page `man` readers expect. The bodies are set unfilled
+/// (`.nf`), so a table is still a table.
+fn render(
+    man: &clap_mangen::Man,
+    sections: &[(&str, &str)],
+    out: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    use clap_mangen::roff::{roman, Roff};
+    man.render_title(out)?;
+    man.render_name_section(out)?;
+    man.render_synopsis_section(out)?;
+    man.render_description_section(out)?;
+    man.render_options_section(out)?;
+    let mut roff = Roff::default();
+    for (heading, body) in sections {
+        roff.control("SH", [heading.to_uppercase().as_str()]);
+        roff.control("nf", []);
+        for line in body.lines() {
+            roff.text([roman(line)]);
+        }
+        roff.control("fi", []);
+    }
+    roff.to_writer(out)?;
+    man.render_version_section(out)
 }
 
 /// Emit `MONASD_VERSION`, the string `--version` prints: `0.4.1 (2ec9491)`.

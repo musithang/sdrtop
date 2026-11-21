@@ -426,6 +426,189 @@ mod cli_tests {
         out
     }
 
+    /// The body of one of the sections `--help` prints after the flags.
+    fn section(heading: &str) -> &'static str {
+        crate::cli::SECTIONS
+            .iter()
+            .find(|(h, _)| *h == heading)
+            .map(|(_, body)| *body)
+            .unwrap_or_else(|| panic!("--help has no {heading} section"))
+    }
+
+    /// The first line of a flag's help: what `-h` shows.
+    fn flag_summary(name: &str) -> String {
+        let cmd = Cli::command();
+        let arg = cmd
+            .get_arguments()
+            .find(|a| a.get_long() == Some(name))
+            .unwrap_or_else(|| panic!("there is no --{name}"));
+        arg.get_help().map(ToString::to_string).unwrap_or_default()
+    }
+
+    /// Every key the help offers a newcomer is one the key handler answers.
+    /// The full list is the menu's, which has its own test; these are the
+    /// few worth knowing before opening it.
+    #[test]
+    fn the_first_keys_in_the_help_are_keys_sdrtop_answers() {
+        let handler = include_str!("app/input/global/mod.rs");
+        let mut checked = 0;
+        for line in section("First keys")
+            .lines()
+            .filter(|l| l.starts_with("  "))
+        {
+            let (keys, _) = line
+                .trim()
+                .split_once("  ")
+                .expect("a key, then what it does");
+            let arms: Vec<String> = match keys.trim() {
+                "Esc" => vec!["KeyCode::Esc".into()],
+                "Space" => vec!["KeyCode::Char(' ')".into()],
+                "Tab" => vec!["KeyCode::Tab".into()],
+                "Up, Down" => vec!["KeyCode::Up".into(), "KeyCode::Down".into()],
+                "1 to 9" => vec!["'1'..='9'".into()],
+                k if k.chars().count() == 1 => vec![format!("KeyCode::Char('{k}')")],
+                other => panic!("the help names a key this test cannot read: {other:?}"),
+            };
+            for arm in arms {
+                assert!(
+                    handler.contains(&arm),
+                    "the help offers {keys}, but no {arm} arm answers it"
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked >= 8, "the key table was not found");
+    }
+
+    /// The files the help names are the paths sdrtop uses, each of them.
+    #[test]
+    fn the_help_names_the_files_sdrtop_uses() {
+        let home = std::env::var("HOME").expect("HOME");
+        let listed: Vec<std::path::PathBuf> = section("Files")
+            .lines()
+            .filter_map(|l| {
+                l.trim_start()
+                    .strip_prefix("~/")
+                    .filter(|_| l.starts_with("  "))
+            })
+            .map(|rest| {
+                let path = rest.split_whitespace().next().unwrap_or_default();
+                std::path::Path::new(&home).join(path.trim_end_matches('/'))
+            })
+            .collect();
+        let config = super::default_config_path().expect("a default config path");
+        let mut used = vec![
+            config.clone(),
+            crate::config::TuiConfig::themes_dir(&config).unwrap(),
+            crate::config::LayoutConfig::presets_dir(&config).unwrap(),
+            super::log_path(),
+        ];
+        // The data folder as it is when $XDG_DATA_HOME is not set, which is
+        // what the help's path names; the help says the other case in words.
+        if std::env::var_os("XDG_DATA_HOME").is_none() {
+            used.push(monas::export::destination::default_dir());
+        } else {
+            used.push(std::path::Path::new(&home).join(".local/share/sdrtop"));
+        }
+        let mut listed_sorted = listed.clone();
+        listed_sorted.sort();
+        used.sort();
+        assert_eq!(
+            listed_sorted, used,
+            "the help's files are not the ones sdrtop uses"
+        );
+    }
+
+    /// The built-in themes the help names are the built-ins, all of them.
+    #[test]
+    fn the_help_names_every_built_in_theme() {
+        let summary = flag_summary("theme");
+        let (_, list) = summary.split_once(": ").expect("the themes follow a colon");
+        let mut named: Vec<&str> = list
+            .split(", ")
+            .map(str::trim)
+            .filter(|n| !n.starts_with("or "))
+            .collect();
+        let mut builtin: Vec<&str> = crate::theme::Theme::builtin_names().collect();
+        named.sort_unstable();
+        builtin.sort_unstable();
+        assert_eq!(named, builtin, "the help's themes are not the built-ins");
+    }
+
+    /// The kinds of radio `--device` names are the ones its parser takes,
+    /// and the parser takes no kind the help leaves out.
+    #[test]
+    fn the_help_names_every_kind_of_radio_and_only_those() {
+        let summary = flag_summary("device");
+        let (_, list) = summary.split_once(": ").expect("the kinds follow a colon");
+        let mut named: Vec<&str> = list.split(", ").map(str::trim).collect();
+        for kind in &named {
+            assert!(
+                monas::hardware::discovery::parse_device_arg(kind).is_ok(),
+                "--device {kind} is in the help but refused"
+            );
+        }
+        // The parser's refusal lists the names it takes, each in quotes.
+        let refusal = monas::hardware::discovery::parse_device_arg("nonsense")
+            .unwrap_err()
+            .to_string();
+        let mut taken: Vec<&str> = refusal
+            .split('\'')
+            .skip(3)
+            .step_by(2)
+            .filter(|w| w.chars().all(|c| c.is_ascii_lowercase()))
+            .collect();
+        named.sort_unstable();
+        taken.sort_unstable();
+        assert_eq!(named, taken, "the help's kinds are not the parser's");
+    }
+
+    /// The long help fits an 80-column terminal as written, and is ASCII,
+    /// for the man page.
+    #[test]
+    fn the_help_fits_eighty_columns_and_is_ascii() {
+        let cmd = Cli::command();
+        let long_about = cmd
+            .get_long_about()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        let after = crate::cli::after_long_help();
+        for line in long_about.lines().chain(after.lines()) {
+            assert!(line.len() <= 80, "wider than 80 columns: {line:?}");
+            assert!(line.is_ascii(), "not ASCII: {line:?}");
+        }
+        for arg in cmd.get_arguments() {
+            for help in [arg.get_help(), arg.get_long_help()].into_iter().flatten() {
+                assert!(
+                    help.to_string().is_ascii(),
+                    "--{:?} help is not ASCII",
+                    arg.get_long()
+                );
+            }
+        }
+    }
+
+    /// The man page carries each section `--help` adds, under its own heading.
+    #[test]
+    fn the_man_page_has_the_sections_the_help_has() {
+        let page = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../target/man/sdrtop.1"
+        ))
+        .expect("build.rs should have generated target/man/sdrtop.1");
+        for (heading, _) in crate::cli::SECTIONS {
+            assert!(
+                page.contains(&format!(".SH \"{}\"", heading.to_uppercase()))
+                    || page.contains(&format!(".SH {}\n", heading.to_uppercase())),
+                "the man page has no {heading} section"
+            );
+        }
+        assert!(
+            !page.contains(".SH EXTRA"),
+            "the sections ran together under EXTRA"
+        );
+    }
+
     /// The crate metadata is what the generated man page and `--help` are built
     /// from, and what a release page quotes. Asserted here so it cannot be
     /// broken by an edit to `Cargo.toml` that nothing else notices.
