@@ -109,7 +109,7 @@ impl Clock {
     }
 }
 
-/// Everything the engine reads, as of `clock`.
+/// Everything the engine reads, at one moment.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Snapshot {
     /// When the snapshot was taken, milliseconds since the Unix epoch.

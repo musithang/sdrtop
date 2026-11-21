@@ -41,7 +41,8 @@ pub enum Command {
     Boost { on: bool },
     /// Back to the radio's own defaults: rate, gains, frequency, boost off.
     Reset,
-    /// Compute for this view in this section. See [`super::mode`].
+    /// Compute what this view in this section asks for, by the terminal's
+    /// own names for both.
     SetMode { section: String, view: String },
     /// Stream from the radio, or stop.
     Stream { on: bool },

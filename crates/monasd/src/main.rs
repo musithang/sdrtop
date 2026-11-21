@@ -9,6 +9,8 @@
 //! own `[monasd]`), writes back only the engine's, and runs until SIGTERM or
 //! Ctrl-C.
 
+#[cfg(test)]
+mod api_doc;
 /// The command line.
 ///
 /// In its own file so `build.rs` can `include!` it and generate the man page from

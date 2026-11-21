@@ -135,6 +135,9 @@ cargo check --offline          # updates Cargo.lock to match
 packaging/version.sh           # must print X.Y.Z, and nothing else
 ```
 
+On `main` the number has been `X.Y.Z-dev` since the last release (rite X); here
+the `-dev` falls away, and nothing else changes.
+
 The root `Cargo.toml` is the only file a bump touches: every crate inherits its
 version from `[workspace.package]`, and every crate names the others through an
 exact `=X.Y.Z` pin, because a `monas` of one version works with an `sdrtop` of
@@ -312,6 +315,26 @@ cargo install monasd --locked --force
 sdrtop --version        # X.Y.Z and a commit hash. Both. Look at them.
 monasd --version        # the same X.Y.Z. If not, one of them is lying.
 ```
+
+## X. Let the number move on ➡️
+
+The number you just spoke belongs to crates.io now (the First Law), and `main`
+must not go on wearing it. A `main` still calling itself X.Y.Z is packaged
+against the X.Y.Z already published, not against its own sources, so the
+first change that adds anything to `monas` fails `cargo package` in CI with an
+import that plainly exists, and you spend an evening doubting your eyes. So
+in the root `Cargo.toml`, both places as in II, the version becomes the next
+one with `-dev` on it:
+
+```sh
+#   [workspace.package]       version = "X.Y+1.0-dev"
+#   [workspace.dependencies]  every pin becomes "=X.Y+1.0-dev"
+cargo check --offline
+packaging/version.sh           # X.Y+1.0-dev
+```
+
+Commit it on its own. A `-dev` number is never tagged and never published; at
+the next release, rite II simply drops the `-dev`.
 
 Go outside. You have earned weather. 🎉
 

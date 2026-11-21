@@ -56,7 +56,7 @@ pub struct Pager {
     /// The rate a receiver is locked at now: a transmission is being read.
     pub locked_baud: Option<u32>,
     pub masked: bool,
-    /// The address the pager answers to; `None` is every address.
+    /// The address the pager answers to; none for every address.
     pub mine: Option<u32>,
     pub feed: Feed,
 }
@@ -84,7 +84,7 @@ pub struct PageView {
     pub function: char,
     /// `tone`, `numeric` or `alpha`.
     pub kind: &'static str,
-    /// Digits or characters; `None` for a tone.
+    /// Digits or characters; none for a tone.
     pub length: Option<usize>,
     /// The text as the screen shows it, or why it is not shown.
     pub text: Reading<String>,

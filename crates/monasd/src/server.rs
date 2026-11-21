@@ -162,35 +162,92 @@ async fn require_token(State(access): State<Access>, req: Request, next: Next) -
     next.run(req).await
 }
 
-/// Whether the radio is delivering, and which radio, where, doing what;
-/// the samples lost this session, split as the timing bench splits them;
-/// each sample feed's own account; and what the process costs the machine.
-async fn health(State(access): State<Access>) -> Json<serde_json::Value> {
+/// How the radio and the process are doing.
+#[derive(Clone, Debug, Serialize)]
+pub struct Health {
+    /// The radio's name.
+    pub radio: String,
+    pub streaming: bool,
+    /// Whether its readings have stopped being live.
+    pub stale: bool,
+    pub frequency_hz: u64,
+    pub sample_rate_hz: f64,
+    /// The view whose work the engine does.
+    pub view: String,
+    /// Samples lost this session, and whose loss each was.
+    pub lost_samples: LostSamples,
+    /// Each sample feed's refusals: blocks it had no room for.
+    pub feeds: Feeds,
+    pub process: Process,
+}
+
+/// Samples lost this session: by the driver before the engine saw them, or
+/// by the engine's own intake (named `sdrtop` since the first release).
+#[derive(Clone, Debug, Serialize)]
+pub struct LostSamples {
+    pub all: u64,
+    pub driver: u64,
+    pub sdrtop: u64,
+}
+
+/// The sample feeds, each one's refusals.
+#[derive(Clone, Debug, Serialize)]
+pub struct Feeds {
+    pub spectrum: Feed,
+    pub net: Feed,
+    pub pager: Feed,
+    pub ft8: Feed,
+}
+
+/// One feed's refusals, lately and over the session.
+#[derive(Clone, Debug, Serialize)]
+pub struct Feed {
+    pub refused: u64,
+    pub refused_session: u64,
+}
+
+/// What the process costs the machine.
+#[derive(Clone, Debug, Serialize)]
+pub struct Process {
+    pub cpu_pct: f32,
+    pub rss_mb: u64,
+}
+
+/// Whether the radio is delivering, and which radio, where, doing what; the
+/// samples lost this session, split as the timing bench splits them; each
+/// sample feed's own account; and what the process costs the machine.
+async fn health(State(access): State<Access>) -> Json<Health> {
     Json(access.engine.with_state(|m| {
-        let feed = |refused, session| serde_json::json!({ "refused": refused, "refused_session": session });
-        serde_json::json!({
-            "radio": &*m.system.board_name,
-            "streaming": m.radio.hw_streaming,
-            "stale": Staleness::NotStreaming.resolve(m),
-            "frequency_hz": m.radio.frequency,
-            "sample_rate_hz": m.radio.config_sample_rate,
-            "view": m.mode.view,
-            "lost_samples": {
-                "all": m.signal.total_drops_session,
-                "driver": m.signal.driver_drops_session,
-                "sdrtop": m.signal.total_drops_session.saturating_sub(m.signal.driver_drops_session),
+        let feed = |refused, refused_session| Feed {
+            refused,
+            refused_session,
+        };
+        Health {
+            radio: m.system.board_name.to_string(),
+            streaming: m.radio.hw_streaming,
+            stale: Staleness::NotStreaming.resolve(m),
+            frequency_hz: m.radio.frequency,
+            sample_rate_hz: m.radio.config_sample_rate,
+            view: m.mode.view.clone(),
+            lost_samples: LostSamples {
+                all: m.signal.total_drops_session,
+                driver: m.signal.driver_drops_session,
+                sdrtop: m
+                    .signal
+                    .total_drops_session
+                    .saturating_sub(m.signal.driver_drops_session),
             },
-            "feeds": {
-                "spectrum": feed(m.iq.fft_drops, m.iq.fft_drops_session),
-                "net": feed(m.net.health.refused, m.net.health.refused_session),
-                "pager": feed(m.pager.feed.refused, m.pager.feed.refused_session),
-                "ft8": feed(m.ft8.feed.refused, m.ft8.feed.refused_session),
+            feeds: Feeds {
+                spectrum: feed(m.iq.fft_drops, m.iq.fft_drops_session),
+                net: feed(m.net.health.refused, m.net.health.refused_session),
+                pager: feed(m.pager.feed.refused, m.pager.feed.refused_session),
+                ft8: feed(m.ft8.feed.refused, m.ft8.feed.refused_session),
             },
-            "process": {
-                "cpu_pct": m.system.process_cpu_pct,
-                "rss_mb": m.system.process_rss_mb,
+            process: Process {
+                cpu_pct: m.system.process_cpu_pct,
+                rss_mb: m.system.process_rss_mb,
             },
-        })
+        }
     }))
 }
 

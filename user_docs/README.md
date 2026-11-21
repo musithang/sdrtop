@@ -53,6 +53,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 | [Tips and tricks](tips-and-tricks.md) | Setting gain, pulling weak signals out of the noise, capture checklists |
 | [Advanced features](advanced.md) | Multiple radios, observer mode, the session log, what sdrtop deliberately doesn't do |
 | [monasd](monasd.md) | The engine with no screen: starting it, the token, the API, running it as a service |
+| [The monasd API](api.md) | Every route, field, command and event, written from the code by a test |
 | [From the antenna to the screen](signal-path.md) | How a sample travels through sdrtop, what happens when one gets lost, and a nerd section with the threads |
 
 ## Signals and decoders

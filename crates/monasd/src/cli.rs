@@ -124,8 +124,8 @@ carries the token from the config, and monasd will not start without one:
   Authorization: Bearer TOKEN
 
 There is no TLS: across a network you do not trust, use an SSH tunnel.
-The commands, their replies and the events are described in
-https://github.com/musithang/sdrtop/blob/main/user_docs/monasd.md",
+Every field of every answer, every command and every event:
+https://github.com/musithang/sdrtop/blob/main/user_docs/api.md",
     ),
     (
         "Config",

@@ -109,8 +109,10 @@ loopback), which is what I do.
 ## The API
 
 Everything lives under `/v1`, so a later change of shape is a new prefix
-rather than a surprise for every script written against this one.
-Nineteen routes:
+rather than a surprise for every script written against this one. Every
+field of every answer, every command and every event is in
+**[the API reference](api.md)**, which a test writes from the code, so it
+can't fall behind it. The routes, in short:
 
 | Route | What it gives |
 |---|---|

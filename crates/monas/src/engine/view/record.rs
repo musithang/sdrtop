@@ -27,7 +27,7 @@ pub struct Recording {
     /// Drops the radio counted in itself while recording, where it keeps
     /// such a count.
     pub radio_drops: Option<u64>,
-    /// Why it ended; `None` while it runs.
+    /// Why it ended; none while it runs.
     pub ended: Option<String>,
 }
 
