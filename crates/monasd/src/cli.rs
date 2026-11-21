@@ -107,6 +107,10 @@ Everything is under http://ADDR/v1, JSON in and out:
   GET  /v1/ft8         the FT8 decodes and their physics (?since=N: newer)
   GET  /v1/net/band    2.4 GHz occupancy by MHz, duty with its uncertainty
   GET  /v1/net/census  the transmitters heard, each with its readings
+  GET  /v1/net/ble     BLE packets and their physics (?since=N: newer)
+  GET  /v1/net/coded   LE Coded packets, the same way (?since=N: newer)
+  GET  /v1/net/bt      classic Bluetooth hits, slot timing and headers
+  GET  /v1/net/fer     the frame error rate against SNR
   GET  /v1/provenance  which radio, tuned where, against what reference
   POST /v1/command     one command, answered with what was done or why not
   GET  /v1/events      a WebSocket: commands applied, log lines, gaps, stalls

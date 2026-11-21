@@ -29,9 +29,9 @@ it serves nearly everything the screen has: the radio with its gain chain
 and frequency reference, the signal's figures, the I/Q front end, the
 pipeline's vital signs, the recorder, the spectrum itself, the demodulator,
 the pagers and FT8 decodes with their physics, and on 2.4 GHz the band's
-occupancy and the census of transmitters, each with the same right to say
-"I don't know" that the screen has. Still to come from 2.4 GHz: the packet
-lists, the frame error curve and Wi-Fi.
+occupancy, the census of transmitters, the packet lists and the frame error
+curve, each with the same right to say "I don't know" that the screen has.
+Still to come from 2.4 GHz: Wi-Fi.
 
 ## Starting it
 
@@ -107,7 +107,7 @@ loopback), which is what I do.
 ## The API
 
 Everything lives under `/v1`, so a later change of shape is a new prefix
-rather than a surprise for every script written against this one. Twelve
+rather than a surprise for every script written against this one. Sixteen
 routes:
 
 | Route | What it gives |
@@ -121,6 +121,10 @@ routes:
 | `GET /v1/ft8` | The FT8 decodes held, each with what it measured beside what it said: the same fields as the CSV export, `null` wherever the file is blank. `?since=N` the same way |
 | `GET /v1/net/band` | The 2.4 GHz band, one megahertz to a cell, measured on the survey: each cell's duty cycle with its uncertainty, how much of its time was watched, its levels. A cell nobody looked at says so instead of reading zero, a duty cycle too uncertain to state has no value but keeps its uncertainty, and a floor that failed its own checks takes the whole band with it. The occupancy export's figures, as JSON |
 | `GET /v1/net/census` | Every transmitter heard, in the order the census panel shows them, with what it said about itself and what was measured of it (SNR, crystal offset, modulation index, advertising timing), each with its uncertainty. Addresses are shown the way the panel's address mode shows them. The census export's figures, as JSON |
+| `GET /v1/net/ble` | The BLE packet list as it is showing, newest first: what each packet said (type, address as the address mode shows it, what it advertised) and what was measured of it (SNR, offset, modulation index, Δf1 and Δf2, drift), each with its uncertainty, and nothing read from a packet whose CRC failed. The note says when the list was held, filtered or narrowed. `?since=N` sends only packets after number `N` |
+| `GET /v1/net/coded` | The LE Coded list, the same way, its readings the Coded tests' own |
+| `GET /v1/net/bt` | The classic Bluetooth hits kept, oldest first: channel, LAP and UAP, the slot residual against the piconet's fitted grid, its clock, and the header where it could be read |
+| `GET /v1/net/fer` | The frame error rate against SNR, for all traffic and for each device, the counts always and a rate only where there are enough packets to give one |
 
 How much of what is heard gets shown is yours to say, the same switches the
 terminal has: addresses in full, by registrant or masked, and pager text or

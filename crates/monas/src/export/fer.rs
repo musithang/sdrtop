@@ -12,7 +12,6 @@
 //! failures are the exact-address ones (`census::observe_crc_failure`), a
 //! ceiling on its link's error rate, which the note line says.
 
-use crate::signal::ble::fer::{edges, FerCurve};
 use crate::state::SdrMetrics;
 
 pub const HEADER: &str = "scope,snr_from_db,snr_to_db,packets,crc_failed,fer_pct,fer_pct_sigma";
@@ -21,45 +20,26 @@ pub const HEADER: &str = "scope,snr_from_db,snr_to_db,packets,crc_failed,fer_pct
 pub const NOTE: &str = "CRC failures among packets whose length matched; a \
 device's failures are those whose address survived, so its rate is a ceiling";
 
-/// One curve's bins with packets, as rows under `scope`.
-fn curve_rows(scope: &str, curve: &FerCurve) -> Vec<String> {
-    let Some(span) = curve.span() else {
-        return Vec::new();
-    };
-    span.filter(|&b| curve.packets(b) > 0)
+/// The section's curve, then each device's, in the census's order: the
+/// engine's account of each bin ([`crate::engine::view::bt::fer_bins`])
+/// written as text, the rate blank where the account has none.
+pub fn rows(state: &SdrMetrics) -> Vec<String> {
+    let opt = |v: Option<String>| v.unwrap_or_default();
+    crate::engine::view::bt::fer_bins(state)
+        .into_iter()
         .map(|b| {
-            let (from, to) = edges(b);
-            let (rate, sigma) = curve
-                .rate(b)
-                .map(|r| {
-                    (
-                        format!("{:.2}", r.value() * 100.0),
-                        format!("{:.2}", r.sigma() * 100.0),
-                    )
-                })
-                .unwrap_or_default();
             [
-                super::csv_field(scope).into_owned(),
-                from.map(|v| format!("{v:.0}")).unwrap_or_default(),
-                to.map(|v| format!("{v:.0}")).unwrap_or_default(),
-                curve.packets(b).to_string(),
-                curve.failed[b].to_string(),
-                rate,
-                sigma,
+                super::csv_field(&b.scope).into_owned(),
+                opt(b.snr_from_db.map(|v| format!("{v:.0}"))),
+                opt(b.snr_to_db.map(|v| format!("{v:.0}"))),
+                b.packets.to_string(),
+                b.crc_failed.to_string(),
+                opt(b.fer_pct.map(|r| format!("{:.2}", r.value))),
+                opt(b.fer_pct.map(|r| format!("{:.2}", r.sigma))),
             ]
             .join(",")
         })
         .collect()
-}
-
-/// The section's curve, then each device's, in the census's order.
-pub fn rows(state: &SdrMetrics) -> Vec<String> {
-    let now = std::time::Instant::now();
-    let mut out = curve_rows("all", &state.net.fer);
-    for d in state.net.census.ordered(now, &state.radio) {
-        out.extend(curve_rows(&d.address_text(&state.net, None), &d.fer));
-    }
-    out
 }
 
 #[cfg(test)]

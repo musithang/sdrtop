@@ -22,9 +22,6 @@
 //! checked against a classic transmitter on the air (`signal::bt::header`),
 //! and the note says so beside the columns it fills (rule 1).
 
-use crate::signal::bt::header::PacketType;
-use crate::signal::bt::piconet::{HeaderRead, Inquiry, Kind};
-use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::SdrMetrics;
 
 /// The columns, in order. `lap_kind` is `piconet`; `GIAC`, `LIAC` or `DIAC`
@@ -59,84 +56,33 @@ pub fn note(state: &SdrMetrics) -> String {
     parts.join("; ")
 }
 
-/// The hits as CSV rows, oldest first.
+/// The hits as CSV rows, oldest first: the engine's account of each
+/// ([`crate::engine::view::bt::hit_records`]) written as text, blank where
+/// the account has nothing.
 pub fn rows(state: &SdrMetrics) -> Vec<String> {
-    let now = std::time::Instant::now();
-    state
-        .net
-        .bt_hops
-        .iter()
-        .rev()
+    let opt = |v: Option<String>| v.unwrap_or_default();
+    crate::engine::view::bt::hit_records(state)
+        .into_iter()
         .map(|h| {
-            let uaps = state.net.bt_uap.get(&h.lap);
-            let piconet = state.net.bt_piconets.iter().find(|p| p.lap == h.lap);
-            let residual = piconet
-                .filter(|p| p.slots_stream == h.stream)
-                .and_then(|p| p.slots.as_ref())
-                .and_then(|s| s.as_ref().ok())
-                .and_then(|fit| fit.residual_at(h.at_us))
-                .map(|r| format!("{r:.3}"))
-                .unwrap_or_default();
-            // The piconet's clock error from the same fit, as the roster's
-            // TIMING block shows it: corrected by the reference where there
-            // is one, relative where not, which the file's note says. Blank
-            // where the residual is: no fit on this hit's stream.
-            let clock = piconet
-                .filter(|p| p.slots_stream == h.stream)
-                .and_then(|p| p.slots.as_ref())
-                .and_then(|s| s.as_ref().ok())
-                .map(|fit| {
-                    let raw = Uncertain::from_sigma(-fit.rate_ppm, fit.rate_sigma_ppm);
-                    state.radio.corrected_ppm(raw, now).0
-                });
-            let (status, fields) = match h.header {
-                None => ("none", None),
-                Some(HeaderRead::Unresolved) => ("not read: UAP unresolved", None),
-                Some(HeaderRead::Undecoded) => ("did not decode", None),
-                Some(HeaderRead::Decoded(hd)) => ("decoded", Some(hd)),
-            };
-            let mut f = vec![
-                now.saturating_duration_since(h.seen).as_secs().to_string(),
-                format!("{:.2}", h.at_us),
+            [
+                h.age_s.to_string(),
+                format!("{:.2}", h.stream_us),
                 h.channel.to_string(),
-                // As the address mode allows, as on screen: an inquiry code
-                // in hex still (it is no one's address), a masked LAP by its
-                // roster number, and the UAP value hidden with it.
-                match crate::signal::bt::piconet::Inquiry::of(h.lap) {
-                    Some(_) => format!("{:#08x}", h.lap),
-                    None => state.net.show_lap(h.lap),
-                },
-                match piconet.map(|p| p.kind()) {
-                    Some(Kind::Inquiry(i)) => i.short(),
-                    Some(k) => k.word(),
-                    None => Inquiry::of(h.lap).map_or("piconet", |i| i.short()),
-                }
-                .to_string(),
-                match uaps.map(|u| u.as_slice()) {
-                    Some([one]) => state.net.show_uap(*one),
-                    _ => String::new(),
-                },
-                uaps.map(|u| u.len().to_string()).unwrap_or_default(),
-                residual,
-                clock
-                    .map(|c| format!("{:.3}", c.value()))
-                    .unwrap_or_default(),
-                clock
-                    .map(|c| format!("{:.3}", c.sigma()))
-                    .unwrap_or_default(),
-                status.to_string(),
-            ];
-            match fields {
-                Some(hd) => f.extend([
-                    hd.lt_addr.to_string(),
-                    PacketType::from_code(hd.packet_type.code()).shown(),
-                    (hd.flags & 1).to_string(),
-                    (hd.flags >> 1 & 1).to_string(),
-                    (hd.flags >> 2 & 1).to_string(),
-                ]),
-                None => f.extend(std::iter::repeat_n(String::new(), 5)),
-            }
-            f.join(",")
+                h.lap,
+                h.lap_kind.to_string(),
+                opt(h.uap),
+                opt(h.uap_candidates.map(|n| n.to_string())),
+                opt(h.slot_residual_us.map(|r| format!("{r:.3}"))),
+                opt(h.clock_ppm.map(|c| format!("{:.3}", c.value))),
+                opt(h.clock_ppm.map(|c| format!("{:.3}", c.sigma))),
+                h.header.to_string(),
+                opt(h.lt_addr.map(|v| v.to_string())),
+                opt(h.packet_type),
+                opt(h.flow.map(|v| v.to_string())),
+                opt(h.arqn.map(|v| v.to_string())),
+                opt(h.seqn.map(|v| v.to_string())),
+            ]
+            .join(",")
         })
         .collect()
 }
@@ -145,7 +91,9 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::signal::bt::header::Header;
+    use crate::signal::bt::header::PacketType;
     use crate::signal::bt::piconet::observe;
+    use crate::signal::bt::piconet::HeaderRead;
     use crate::state::BtHop;
     use std::time::{Duration, Instant};
 

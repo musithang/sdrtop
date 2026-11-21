@@ -26,9 +26,6 @@
 //! `ad::printable`, so a control character a device put in it cannot break a
 //! row or a terminal that shows the file.
 
-use crate::signal::ble::ad::{self, Ad, Structure};
-use crate::signal::ble::pdu::PduType;
-use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::{BlePacket, SdrMetrics};
 
 /// The columns, in order. Offsets are corrected for our oscillator exactly as
@@ -81,106 +78,15 @@ pub fn coded_note(state: &SdrMetrics) -> String {
     parts.join("; ")
 }
 
-/// What became of an AuxPtr, one word to a row.
-fn aux_word(aux: crate::signal::ble::aux_ptr::AuxOutcome) -> String {
-    use crate::signal::ble::aux_ptr::AuxOutcome;
-    match aux {
-        AuxOutcome::Pending => "pending".to_string(),
-        AuxOutcome::Heard { .. } => "heard".to_string(),
-        AuxOutcome::Missed => "missed".to_string(),
-        AuxOutcome::NotInView => "not_in_view".to_string(),
-        AuxOutcome::FeedLost => "feed_lost".to_string(),
-        AuxOutcome::NonePromised => "none_promised".to_string(),
-        AuxOutcome::Refused(why) => format!("refused: {why}"),
-    }
-}
-
 /// A value and its sigma to `places`, or two blanks.
-fn with_sigma(u: Option<Uncertain>, places: usize) -> [String; 2] {
+fn with_sigma(u: Option<crate::engine::view::net::Sigma>, places: usize) -> [String; 2] {
     match u {
-        Some(u) if u.value().is_finite() && u.sigma().is_finite() => [
-            format!("{:.places$}", u.value()),
-            format!("{:.places$}", u.sigma()),
+        Some(u) => [
+            format!("{:.places$}", u.value),
+            format!("{:.places$}", u.sigma),
         ],
-        _ => [String::new(), String::new()],
+        None => [String::new(), String::new()],
     }
-}
-
-/// The eleven advertising columns, `name` through `malformed`, flattened from
-/// the packet's AD structures; blank where the packet carries none, or where
-/// its CRC failed. The name and the raw bytes as the address mode allows
-/// them, as on screen (`NetState::show_name`, `show_bytes`); the bytes
-/// compact, without the screen's spaces.
-fn advertised(p: &BlePacket, net: &crate::state::NetState) -> Vec<String> {
-    let masked = net.address_display == crate::state::AddressDisplay::Masked;
-    let bytes = |data: &[u8]| {
-        if masked {
-            net.show_bytes(data)
-        } else {
-            ad::hex(data).replace(' ', "")
-        }
-    };
-    let mut name = String::new();
-    let mut complete = String::new();
-    let mut flags = Vec::new();
-    let mut tx_power = String::new();
-    let mut services = Vec::new();
-    let mut service_data = Vec::new();
-    let mut company_id = String::new();
-    let mut company = String::new();
-    let mut mfr_data = Vec::new();
-    let mut other = Vec::new();
-    let mut malformed = String::new();
-    // An extended PDU's advertising data follows its extended header; a type
-    // 7 not read as one carries none this file can find.
-    let data = match &p.ext {
-        Some(ext) => Some(ext.header.adv_data.as_slice()),
-        None => ad::adv_data(p.pdu_type, &p.payload).filter(|_| p.pdu_type != PduType::Other(0x07)),
-    }
-    .filter(|_| p.crc_ok);
-    for structure in data.map(ad::parse).unwrap_or_default() {
-        match structure {
-            Structure::Malformed { offset, why } => malformed = format!("octet {offset}: {why}"),
-            Structure::Ad { ad, .. } => match ad {
-                Ad::Flags(bits) => flags.extend(ad::flag_names(bits)),
-                Ad::Name { complete: c, text } => {
-                    // The complete name wins, as on screen (`ad::name`).
-                    if name.is_empty() || c {
-                        name = net.show_name(&text);
-                        complete = c.to_string();
-                    }
-                }
-                Ad::TxPower(dbm) => tx_power = dbm.to_string(),
-                Ad::Uuids { uuids, .. } => {
-                    services.extend(uuids.iter().map(|u| ad::uuid_text(u)));
-                }
-                Ad::ServiceData { uuid, data } => {
-                    service_data.push(format!("{}={}", ad::uuid_text(&uuid), bytes(&data)))
-                }
-                Ad::Manufacturer { company: id, data } => {
-                    company_id = format!("0x{id:04X}");
-                    company = crate::signal::assigned::company(id)
-                        .unwrap_or_default()
-                        .to_string();
-                    mfr_data.push(bytes(&data));
-                }
-                Ad::Other { code, data } => other.push(format!("0x{code:02X}={}", bytes(&data))),
-            },
-        }
-    }
-    vec![
-        name,
-        complete,
-        flags.join(";"),
-        tx_power,
-        services.join(";"),
-        service_data.join(";"),
-        company_id,
-        company,
-        mfr_data.join(";"),
-        other.join(";"),
-        malformed,
-    ]
 }
 
 /// The LE 1M packets as CSV rows, in the order the list is showing them.
@@ -193,101 +99,56 @@ pub fn coded_rows(state: &SdrMetrics) -> Vec<String> {
     rows_of(state, state.net.coded_shown())
 }
 
+/// The engine's account of each packet
+/// ([`crate::engine::view::ble::records`]) written as text, blank where the
+/// account has nothing.
 fn rows_of(state: &SdrMetrics, packets: Vec<&BlePacket>) -> Vec<String> {
-    let now = std::time::Instant::now();
-    packets
+    let opt = |v: Option<String>| v.unwrap_or_default();
+    crate::engine::view::ble::records(state, packets)
         .into_iter()
         .map(|p| {
-            let carrier = crate::signal::ble::channel::centre_hz(p.channel);
-            let offset =
-                |hz: Uncertain| carrier.map(|c| state.radio.transmitter_offset(hz, c as f64, now));
-            let cfo = p.freq_offset_hz.and_then(offset);
-            let measured = p.crc_ok;
-            // An LE Coded packet's readings are its own suite's; each packet
-            // carries one kind or the other, never both.
-            let coded = p
-                .coded
-                .as_ref()
-                .and_then(|c| c.reading)
-                .filter(|_| measured);
-            let drift = p.drift.or(coded.and_then(|r| r.drift)).filter(|_| measured);
-            let quality = p.modulation.filter(|_| measured);
-            let df1 = quality
-                .map(|q| q.delta_f1_avg_hz)
-                .or(coded.and_then(|r| r.modulation).map(|m| m.delta_f1_avg_hz));
-            let targeted = matches!(
-                p.pdu_type,
-                PduType::AdvDirectInd | PduType::ScanReq | PduType::ConnectInd
-            );
-            let ch_sel_defined = matches!(
-                p.pdu_type,
-                PduType::AdvInd | PduType::AdvDirectInd | PduType::ConnectInd
-            );
-
+            let a = &p.advertised;
             let mut f = vec![
                 p.seq.to_string(),
-                now.saturating_duration_since(p.seen).as_secs().to_string(),
+                p.age_s.to_string(),
                 p.channel.to_string(),
-                p.phy.label().to_string(),
-                // An extended PDU's type code is one for three; its role says
-                // which, as on screen.
-                p.ext
-                    .as_ref()
-                    .map_or(p.pdu_type.label(), |e| e.role.label().to_string()),
+                p.phy.to_string(),
+                p.pdu_type.clone(),
                 p.crc_ok.to_string(),
                 p.length.to_string(),
-                p.adv_addr
-                    .map(|a| state.net.show_address(a, p.tx_add_random, None))
-                    .unwrap_or_default(),
-                p.adv_addr
-                    .map(|a| {
-                        crate::signal::ble::address::kind(a, p.tx_add_random)
-                            .label()
-                            .to_string()
-                    })
-                    .unwrap_or_default(),
-                if p.tx_add_random { "random" } else { "public" }.to_string(),
-                if targeted {
-                    if p.rx_add_random { "random" } else { "public" }.to_string()
-                } else {
-                    String::new()
-                },
-                if ch_sel_defined {
-                    p.ch_sel.to_string()
-                } else {
-                    String::new()
-                },
+                opt(p.address.clone()),
+                opt(p.address_kind.map(str::to_string)),
+                p.tx_add.to_string(),
+                opt(p.rx_add.map(str::to_string)),
+                opt(p.ch_sel.map(|c| c.to_string())),
+                opt(a.name.clone()),
+                opt(a.name_complete.map(|c| c.to_string())),
+                a.flags.join(";"),
+                opt(a.tx_power_dbm.map(|d| d.to_string())),
+                a.services.join(";"),
+                a.service_data.join(";"),
+                opt(a.company_id.map(|id| format!("0x{id:04X}"))),
+                opt(a
+                    .company_id
+                    .map(|_| a.company.unwrap_or_default().to_string())),
+                a.mfr_data.join(";"),
+                a.other_ad.join(";"),
+                opt(a.malformed.clone()),
+                opt(p.snr_db.map(|db| format!("{db:.1}"))),
             ];
-            f.extend(advertised(p, &state.net));
-            f.push(p.snr_db.map(|db| format!("{db:.1}")).unwrap_or_default());
-            f.extend(with_sigma(cfo.map(|t| t.khz), 2));
-            f.extend(with_sigma(cfo.map(|t| t.ppm), 2));
-            for end in [drift.map(|d| d.initial_hz), drift.map(|d| d.final_hz)] {
-                f.extend(with_sigma(end.and_then(offset).map(|t| t.khz), 2));
-            }
-            f.extend(with_sigma(quality.map(|q| q.modulation_index), 4));
-            f.extend(with_sigma(df1.map(|d| d.scale(1e-3)), 2));
-            f.extend(with_sigma(
-                quality.map(|q| q.delta_f2_avg_hz.scale(1e-3)),
-                2,
-            ));
-            f.extend(with_sigma(quality.map(|q| q.ratio), 3));
-            f.extend(with_sigma(drift.map(|d| d.drift_hz.scale(1e-3)), 2));
-            f.extend(with_sigma(drift.map(|d| d.drift_rate_hz_per_us), 2));
-            f.push(
-                p.coded
-                    .as_ref()
-                    .map(|c| c.fec_repairs.to_string())
-                    .unwrap_or_default(),
-            );
-            f.push(
-                p.ext
-                    .as_ref()
-                    .and_then(|e| e.header.adi)
-                    .map(|a| a.sid.to_string())
-                    .unwrap_or_default(),
-            );
-            f.push(p.ext.as_ref().map(|e| aux_word(e.aux)).unwrap_or_default());
+            f.extend(with_sigma(p.cfo_khz, 2));
+            f.extend(with_sigma(p.cfo_ppm, 2));
+            f.extend(with_sigma(p.start_khz, 2));
+            f.extend(with_sigma(p.end_khz, 2));
+            f.extend(with_sigma(p.mod_index, 4));
+            f.extend(with_sigma(p.df1_avg_khz, 2));
+            f.extend(with_sigma(p.df2_avg_khz, 2));
+            f.extend(with_sigma(p.df2_df1_ratio, 3));
+            f.extend(with_sigma(p.drift_khz, 2));
+            f.extend(with_sigma(p.drift_rate_hz_per_us, 2));
+            f.push(opt(p.fec_repairs.map(|r| r.to_string())));
+            f.push(opt(p.sid.map(|s| s.to_string())));
+            f.push(opt(p.aux.clone()));
             f.iter()
                 .map(|field| super::csv_field(field).into_owned())
                 .collect::<Vec<_>>()
@@ -300,7 +161,9 @@ fn rows_of(state: &SdrMetrics, packets: Vec<&BlePacket>) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::signal::ble::measure::{Drift, ModulationQuality};
+    use crate::signal::ble::pdu::PduType;
     use crate::signal::ble::Phy;
+    use crate::signal::dsp::uncertainty::Uncertain;
     use std::time::Instant;
 
     /// One CSV row into its fields, honouring RFC 4180 quoting.

@@ -17,6 +17,8 @@
 //! scalar would be inventing it. What each reading carries alone is whether
 //! it is there, and if not, why.
 
+pub mod ble;
+pub mod bt;
 pub mod demod;
 pub mod ft8;
 pub mod iq;

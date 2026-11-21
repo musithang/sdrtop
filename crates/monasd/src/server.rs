@@ -121,6 +121,10 @@ pub fn router(access: Access) -> Router {
         .route("/v1/ft8", get(ft8))
         .route("/v1/net/band", get(net_band))
         .route("/v1/net/census", get(net_census))
+        .route("/v1/net/ble", get(net_ble))
+        .route("/v1/net/coded", get(net_coded))
+        .route("/v1/net/bt", get(net_bt))
+        .route("/v1/net/fer", get(net_fer))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -264,6 +268,58 @@ async fn net_census(
 ) -> Json<crate::engine::view::Group<crate::engine::view::net::Census>> {
     let state = access.engine.snapshot();
     Json(crate::engine::view::net::census(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// The LE 1M and 2M packet list as it is showing, newest first, each with
+/// what was measured of it: the BLE export's account. `?since=N` sends only
+/// packets numbered after `N`.
+async fn net_ble(
+    State(access): State<Access>,
+    Query(q): Query<Since>,
+) -> Json<crate::engine::view::Group<crate::engine::view::ble::Packets>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::ble::ble(
+        &state,
+        crate::engine::view::Clock::now(),
+        q.since,
+    ))
+}
+
+/// The LE Coded packet list, the same way.
+async fn net_coded(
+    State(access): State<Access>,
+    Query(q): Query<Since>,
+) -> Json<crate::engine::view::Group<crate::engine::view::ble::Packets>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::ble::coded(
+        &state,
+        crate::engine::view::Clock::now(),
+        q.since,
+    ))
+}
+
+/// The classic Bluetooth hits kept, oldest first: the BR/EDR export's
+/// account.
+async fn net_bt(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::bt::Hits>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::bt::hits(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// The frame error rate against SNR, all traffic and each device: the FER
+/// export's account.
+async fn net_fer(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::bt::Fer>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::bt::fer(
         &state,
         crate::engine::view::Clock::now(),
     ))
@@ -506,6 +562,35 @@ mod tests {
             "{json}"
         );
         assert!(json["testimony"].is_object(), "{json}");
+    }
+
+    /// The packet lists, the hits and the error curve answer with nothing
+    /// heard as empty lists and their notes.
+    #[tokio::test]
+    async fn the_packet_lists_answer_empty_with_their_notes() {
+        let (engine, _) = engine_on(Bench::new());
+        let app = router(Access::loopback(engine));
+        for (route, list) in [
+            ("/v1/net/ble?since=0", "packets"),
+            ("/v1/net/coded", "packets"),
+            ("/v1/net/bt", "hits"),
+            ("/v1/net/fer", "bins"),
+        ] {
+            let (status, json) = ask(app.clone(), get(route)).await;
+            assert_eq!(status, StatusCode::OK, "{route}");
+            assert!(
+                json[list].as_array().is_some_and(Vec::is_empty),
+                "{route}: {json}"
+            );
+            assert!(json["testimony"].is_object(), "{route}: {json}");
+        }
+        let (_, coded) = ask(app, get("/v1/net/coded")).await;
+        assert!(
+            coded["note"]
+                .as_str()
+                .is_some_and(|n| n.contains("LE Coded")),
+            "{coded}"
+        );
     }
 
     /// The provenance is the export header's fields, as JSON.
