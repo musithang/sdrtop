@@ -33,6 +33,33 @@ pub(crate) const VERSION: &str = match option_env!("MONASD_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+/// The Monas mark beside its name, as `--help` opens and as monasd greets a
+/// terminal: the moon over the sun and its two waves.
+///
+/// Not ASCII, and the one exception to the rule above: it never reaches the
+/// man page, because clap_mangen does not render `before_help`.
+pub const LOGO: [&str; 2] = ["  \u{2570}\u{2500}\u{256f}", " ((\u{b7}))  monas"];
+
+/// [`LOGO`], with the dot in the mark's amber and the outer wave in its grey
+/// when `colour`, the rest in the terminal's own colour so it reads on a
+/// light background as on a dark one.
+///
+/// clap prints `--help` through a stream that drops the colours where the
+/// output is not a terminal or `NO_COLOR` is set, so `--help` can always be
+/// given the coloured one.
+pub fn logo(colour: bool) -> String {
+    if !colour {
+        return LOGO.join("\n");
+    }
+    const AMBER: &str = "\x1b[38;2;255;181;71m";
+    const ASH: &str = "\x1b[38;2;107;112;104m";
+    const RESET: &str = "\x1b[0m";
+    format!(
+        "{}\n {ASH}({RESET}({AMBER}\u{b7}{RESET}){ASH}){RESET}  monas",
+        LOGO[0]
+    )
+}
+
 /// The sections `--help` adds after the flags, and the man page after its
 /// OPTIONS: a heading and its text, the same words in both.
 ///
@@ -146,6 +173,7 @@ pub fn after_long_help() -> String {
     name = "monasd",
     version = VERSION,
     about = "Monas with no screen: one radio, its receivers, and an HTTP API",
+    before_help = logo(true),
     long_about = "\
 monasd runs Monas, the engine under sdrtop, with no screen. It opens one
 radio, computes what one of sdrtop's views would compute, and serves the

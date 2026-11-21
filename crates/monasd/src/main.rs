@@ -46,6 +46,11 @@ fn default_config_path() -> Option<PathBuf> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // The mark, for a person at a terminal; a pipe or the journal gets the
+    // log alone.
+    if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        eprintln!("{}\n", cli::logo(std::env::var_os("NO_COLOR").is_none()));
+    }
 
     let config_path = cli.config.or_else(default_config_path);
     let MonasdConfig { mut engine, monasd } = config_path
@@ -530,6 +535,33 @@ mod cli_tests {
                 );
             }
         }
+    }
+
+    /// The mark opens `--help`, its colours are the only thing the coloured
+    /// one adds, and it stays out of the man page, which is ASCII.
+    #[test]
+    fn the_logo_opens_the_help_and_stays_out_of_the_man_page() {
+        let plain = crate::cli::logo(false);
+        assert_eq!(plain.lines().collect::<Vec<_>>(), crate::cli::LOGO);
+        // The coloured one, its escapes taken out, is the plain one.
+        let coloured = crate::cli::logo(true);
+        let mut stripped = String::new();
+        let mut rest = coloured.as_str();
+        while let Some(at) = rest.find('\x1b') {
+            stripped.push_str(&rest[..at]);
+            rest = &rest[at..];
+            rest = &rest[rest.find('m').expect("an escape ends in m") + 1..];
+        }
+        stripped.push_str(rest);
+        assert_eq!(stripped, plain);
+        let before = Cli::command().get_before_help().map(|h| h.to_string());
+        assert!(before.is_some_and(|h| h.contains("monas")));
+        let page = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../target/man/monasd.1"
+        ))
+        .expect("build.rs should have generated target/man/monasd.1");
+        assert!(page.is_ascii(), "the man page is not ASCII");
     }
 
     /// The man page carries each section `--help` adds, under its own heading.

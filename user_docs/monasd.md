@@ -39,7 +39,8 @@ That opens the one radio it finds, computes the plain spectrum, and serves on
 `127.0.0.1:7373`. The log goes to stderr, a line per line, so a terminal, a
 pipe or the journal can take it. `Ctrl-C` or `SIGTERM` stops the stream and
 writes the radio's settings back to the config, the same way `q` does in
-sdrtop.
+sdrtop. On a terminal it opens with the Monas mark, the same one `--help`
+starts with; a pipe or the journal is spared and gets only the log.
 
 The flags are the ones that make sense without a screen:
 
