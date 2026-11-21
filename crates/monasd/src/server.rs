@@ -17,14 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Request, State};
+use axum::extract::{Query, Request, State};
 use axum::http::{header::AUTHORIZATION, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::EngineConfig;
 use crate::engine::command::{Command, Reply};
@@ -117,6 +117,8 @@ pub fn router(access: Access) -> Router {
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/provenance", get(provenance))
         .route("/v1/spectrum", get(spectrum))
+        .route("/v1/pager", get(pager))
+        .route("/v1/ft8", get(ft8))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -207,6 +209,37 @@ async fn spectrum(
         &state,
         crate::engine::view::Clock::now(),
     ))
+}
+
+/// `?since=N`: only what was numbered after `N`, so a client polling a list
+/// is sent each entry once.
+#[derive(Deserialize)]
+struct Since {
+    since: Option<u64>,
+}
+
+/// The pages the pager shows, as it shows them: masked, only the kind and
+/// length; answering one address, only that address's.
+async fn pager(
+    State(access): State<Access>,
+    Query(q): Query<Since>,
+) -> Json<crate::engine::view::Group<crate::engine::view::pager::Pages>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::pager::pages(
+        &state,
+        crate::engine::view::Clock::now(),
+        q.since,
+    ))
+}
+
+/// The FT8 decodes held, each with what it measured beside what it said:
+/// the CSV export's account, as JSON.
+async fn ft8(
+    State(access): State<Access>,
+    Query(q): Query<Since>,
+) -> Json<crate::engine::view::Group<crate::engine::view::ft8::Decodes>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::ft8::decodes(&state, q.since))
 }
 
 /// Where the measurements come from: the same fields an export's header
@@ -387,7 +420,9 @@ mod tests {
         );
         assert!(json["radio"]["frequency_hz"].is_u64(), "{json}");
         assert!(json["at_unix_ms"].as_u64().unwrap() > 1_700_000_000_000);
-        for group in ["radio", "signal", "iq", "vitals", "record"] {
+        for group in [
+            "radio", "signal", "iq", "vitals", "record", "pager", "ft8", "demod",
+        ] {
             assert!(json[group]["testimony"].is_object(), "no {group}: {json}");
         }
     }
@@ -401,6 +436,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["absent"], "no spectrum frame yet", "{json}");
         assert_eq!(json["testimony"]["stale"], true);
+    }
+
+    /// The lists answer with nothing held as an empty list and the reason,
+    /// and take `since`.
+    #[tokio::test]
+    async fn the_decode_lists_answer_and_take_since() {
+        let (engine, _) = engine_on(Bench::new());
+        let app = router(Access::loopback(engine));
+        let (status, json) = ask(app.clone(), get("/v1/pager?since=3")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json["pages"].as_array().is_some_and(Vec::is_empty),
+            "{json}"
+        );
+        let (status, json) = ask(app, get("/v1/ft8")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            json["note"], "nothing has been decoded this session",
+            "{json}"
+        );
     }
 
     /// The provenance is the export header's fields, as JSON.

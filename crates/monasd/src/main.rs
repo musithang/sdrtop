@@ -175,10 +175,11 @@ pub async fn run(
         anyhow::bail!("{reason}");
     }
     // What the terminal sets from the panels on screen, set here from the
-    // plan: nothing reads the demodulator or the sweep headless yet.
+    // plan: the demodulator for a mode whose work includes it (as long as it
+    // has not been switched off), and no sweep, which nothing reads headless.
     engine.with_state(|m| {
         m.spectrum.wanted = plan.spectrum;
-        m.demod.enabled = false;
+        m.demod.enabled = plan.mode.feeds.demod && m.demod.user_on;
         m.sweep.active = false;
     });
     engine.apply(Command::Stream { on: true });

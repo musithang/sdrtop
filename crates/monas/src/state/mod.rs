@@ -56,7 +56,7 @@ pub use net::{Family, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, Wif
 #[cfg(any(test, feature = "testing"))]
 pub use net::{FramesView, Holdoff, Trigger};
 pub use observer::{ObserverState, RelayAccount};
-pub use pager::{PagerState, PagerView};
+pub use pager::{PagerFeed, PagerState, PagerView};
 pub use radio::{
     offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioOverload, RadioState,
     REFERENCE_STALE_S,

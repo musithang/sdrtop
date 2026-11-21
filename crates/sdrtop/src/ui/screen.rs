@@ -583,6 +583,14 @@ mod tests {
             assert_eq!(mode.feeds.pager, ui.is_pager_section(), "{at}: pager feed");
             assert_eq!(mode.feeds.ft8, ui.is_ft8_section(), "{at}: ft8 feed");
             assert_eq!(mode.ft8_lab, ui.is_ft8_lab(), "{at}: ft8 lab");
+            // The terminal feeds the demodulator to the views that show its
+            // panel; the engine's mode, which monasd runs by, names the same
+            // views.
+            assert_eq!(
+                mode.feeds.demod,
+                cfg.panels.iter().any(|p| p.name == "fm_demod"),
+                "{at}: demod feed"
+            );
             let p = preset.as_str();
             assert_eq!(
                 mode.net.classic,

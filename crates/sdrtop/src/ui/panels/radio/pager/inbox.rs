@@ -129,10 +129,11 @@ impl Panel for PagerInboxPanel {
                     style,
                 ),
             ]));
+            // Masked, a page is its kind and length, in the engine's words,
+            // which are the API's too.
             let text = match (&e.page.content, p.view.masked) {
                 (Content::Tone, _) => None,
-                (Content::Numeric(_), true) => Some(format!("{kind}, {len} digits")),
-                (_, true) => Some(format!("{kind}, {len} characters")),
+                (content, true) => crate::engine::view::pager::masked_text(content),
                 (_, false) => Some(e.page.text()),
             };
             if let Some(text) = text {
@@ -189,6 +190,29 @@ mod tests {
             all.contains("alpha, 12 characters") && all.contains("[MASKED]"),
             "{all}"
         );
+    }
+
+    /// The list and the API show a page the same way, masked or not: the
+    /// text, or the same words for its kind and length.
+    #[test]
+    fn the_list_shows_each_page_as_the_view_does() {
+        use crate::engine::view::{pager::pages, Clock};
+        let mut m = with_pages(&[(8, "SECRET WORDS"), (9, "OTHER")]);
+        for masked in [false, true] {
+            m.pager.view.masked = masked;
+            let all = draw(PagerInboxPanel, 70, 12, &m).join("\n");
+            for p in pages(&m, Clock::now(), None).readings.pages {
+                let shown = match (p.text.value(), p.text.absent()) {
+                    (Some(text), _) => text.clone(),
+                    (None, Some(why)) => why.trim_start_matches("masked: ").to_string(),
+                    _ => unreachable!(),
+                };
+                assert!(
+                    all.contains(&shown),
+                    "masked={masked}: {shown:?} not in\n{all}"
+                );
+            }
+        }
     }
 
     /// Empty, it says where it is listening.

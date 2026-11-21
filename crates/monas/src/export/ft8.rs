@@ -20,7 +20,6 @@
 //! one the sender sent itself, as known when the file was written: what the
 //! map and the list measure the distance from.
 
-use crate::geo::{maidenhead, sphere};
 use crate::state::SdrMetrics;
 
 pub const HEADER: &str = "utc,cycle,band,dial_hz,tone_hz,tone_sigma_hz,\
@@ -51,78 +50,48 @@ fn iso(unix: f64) -> String {
     )
 }
 
-/// Every decode held, as rows under [`HEADER`].
+/// Every decode held, as rows under [`HEADER`]: the engine's account of
+/// each ([`crate::engine::view::ft8::decode_list`]), written as text, blank
+/// where the account has nothing.
 pub fn rows(state: &SdrMetrics) -> Vec<String> {
-    let f = &state.ft8;
-    let home = state.home.position();
-    f.decodes
-        .iter()
-        .map(|e| {
-            let d = &e.decode;
-            let p = &d.physics;
-            let msg = &d.message;
-            let from = msg.sender();
-            let station_loc = from
-                .and_then(|c| f.stations.get(c))
-                .and_then(|s| s.locator.clone());
-            let place = station_loc.as_deref().and_then(maidenhead::centre);
-            let path = home
-                .zip(place)
-                .map(|(h, pl)| (sphere::distance_km(h, pl), sphere::bearing_deg(h, pl)));
-            let clock = f
-                .cycles
-                .iter()
-                .find(|c| c.start_unix == e.cycle_unix)
-                .and_then(|c| c.clock);
-            // The hour's mark of the cycle: whether the radio held its level
-            // in it, and the noise under the band. Older than the hour, or
-            // held, changed or refused: blank.
-            let mark = f.cycle_hour.iter().find(|c| c.start_unix == e.cycle_unix);
-            let opt = |v: Option<String>| v.unwrap_or_default();
+    let opt = |v: Option<String>| v.unwrap_or_default();
+    crate::engine::view::ft8::decode_list(state)
+        .into_iter()
+        .map(|d| {
             [
-                iso(e.cycle_unix),
-                if (e.cycle_unix / 15.0).round() as i64 % 2 == 0 {
-                    "even"
-                } else {
-                    "odd"
-                }
-                .to_string(),
-                crate::signal::ft8::bands::band_of(e.dial_hz)
-                    .unwrap_or_default()
-                    .to_string(),
-                e.dial_hz.to_string(),
-                format!("{:.2}", p.f0),
-                format!("{:.3}", p.f0_sigma),
-                format!("{:.1}", p.snr_db),
-                format!("{:.3}", d.dt),
-                format!("{:.2}", p.drift),
-                format!("{:.2}", p.coherence),
-                d.costas.to_string(),
-                d.iterations.to_string(),
-                d.repaired.to_string(),
-                opt(d.osd.map(|o| o.to_string())),
+                iso(d.cycle_unix),
+                d.slot.to_string(),
+                d.band.unwrap_or_default().to_string(),
+                d.dial_hz.to_string(),
+                format!("{:.2}", d.tone_hz),
+                format!("{:.3}", d.tone_sigma_hz),
+                format!("{:.1}", d.snr_db),
+                format!("{:.3}", d.dt_s),
+                format!("{:.2}", d.drift_hz),
+                format!("{:.2}", d.coherence),
+                d.sync_of_21.to_string(),
+                d.ldpc_iterations.to_string(),
+                d.bits_repaired.to_string(),
+                opt(d.osd_order.map(|o| o.to_string())),
                 d.block.to_string(),
                 d.pass.to_string(),
-                super::csv_field(&msg.text()).into_owned(),
-                opt(from.map(str::to_string)),
-                super::csv_field(&msg.addressees().join(" ")).into_owned(),
-                e.for_you.to_string(),
-                opt(msg.locator().map(str::to_string)),
-                opt(station_loc.clone()),
-                opt(place.map(|(lat, _)| format!("{lat:.3}"))),
-                opt(place.map(|(_, lon)| format!("{lon:.3}"))),
-                opt(path.map(|(km, _)| format!("{km:.0}"))),
-                opt(path.map(|(_, b)| format!("{b:.0}"))),
-                opt(clock.map(|c| format!("{:.3}", c.median_dt))),
-                opt(clock.map(|c| format!("{:.3}", c.spread))),
-                opt(clock.map(|c| c.decodes.to_string())),
-                format!("{:.1}", d.trace.least_margin_db()),
-                opt(mark.map(|c| c.held.to_string())),
-                opt(mark.and_then(|c| c.floor_db_hz).map(|v| format!("{v:.1}"))),
-                opt(d.unread.map(|u| match u {
-                    crate::signal::ft8::demod::Unread::Start => "start".to_string(),
-                    crate::signal::ft8::demod::Unread::End => "end".to_string(),
-                })),
+                super::csv_field(&d.message).into_owned(),
+                opt(d.from),
+                super::csv_field(&d.to.join(" ")).into_owned(),
+                d.for_me.to_string(),
+                opt(d.locator),
+                opt(d.station_locator),
+                opt(d.lat.map(|lat| format!("{lat:.3}"))),
+                opt(d.lon.map(|lon| format!("{lon:.3}"))),
+                opt(d.km.map(|km| format!("{km:.0}"))),
+                opt(d.bearing_deg.map(|b| format!("{b:.0}"))),
+                opt(d.clock.map(|c| format!("{:.3}", c.median_dt_s))),
+                opt(d.clock.map(|c| format!("{:.3}", c.spread_s))),
+                opt(d.clock.map(|c| c.decodes.to_string())),
+                format!("{:.1}", d.margin_min_db),
+                opt(d.held.map(|h| h.to_string())),
+                opt(d.floor_db_hz.map(|v| format!("{v:.1}"))),
+                opt(d.unread.map(str::to_string)),
             ]
             .join(",")
         })

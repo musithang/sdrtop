@@ -88,9 +88,10 @@ and the person at the terminal mean the same thing by net_survey:
   Pagers             radio_pocsag
   FT8                radio_ft8
   FT8 Lab            lab_ft8_signal, lab_ft8_band, lab_ft8_receiver
+  Demodulator        lab_signal
 
-spectrum is the default. The Lab benches and the compact views read nothing
-beyond the spectrum, so they need no mode of their own.",
+spectrum is the default. The other Lab benches and the compact views read
+nothing beyond the spectrum, so they need no mode of their own.",
     ),
     (
         "API",
@@ -102,6 +103,8 @@ Everything is under http://ADDR/v1, JSON in and out:
   GET  /v1/config      the engine's settings, as they would be saved now
   GET  /v1/snapshot    every reading, or why it has none, and when it was read
   GET  /v1/spectrum    the latest spectrum frame, its bins and their RBW
+  GET  /v1/pager       the pages, as the pager shows them (?since=N: newer)
+  GET  /v1/ft8         the FT8 decodes and their physics (?since=N: newer)
   GET  /v1/provenance  which radio, tuned where, against what reference
   POST /v1/command     one command, answered with what was done or why not
   GET  /v1/events      a WebSocket: commands applied, log lines, gaps, stalls

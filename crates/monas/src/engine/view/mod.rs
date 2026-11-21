@@ -17,7 +17,10 @@
 //! scalar would be inventing it. What each reading carries alone is whether
 //! it is there, and if not, why.
 
+pub mod demod;
+pub mod ft8;
 pub mod iq;
+pub mod pager;
 pub mod record;
 pub mod spectrum;
 pub mod vitals;
@@ -116,6 +119,9 @@ pub struct Snapshot {
     pub iq: Group<iq::Iq>,
     pub vitals: Group<vitals::Vitals>,
     pub record: Group<Reading<record::Recording>>,
+    pub pager: Group<pager::Pager>,
+    pub ft8: Group<ft8::Ft8>,
+    pub demod: Group<demod::Demod>,
 }
 
 /// The snapshot of `m` as of `clock`.
@@ -129,6 +135,9 @@ pub fn snapshot(m: &SdrMetrics, clock: Clock) -> Snapshot {
         iq: iq::iq(m, clock),
         vitals: vitals::vitals(m, clock),
         record: record::record(m),
+        pager: pager::pager(m, clock),
+        ft8: ft8::ft8(m),
+        demod: demod::demod(m, clock),
     }
 }
 

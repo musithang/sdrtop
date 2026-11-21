@@ -23,8 +23,8 @@ use crate::signal::net::lock::{
     ADVERTISING_VIEWS, CLASSIC_VIEWS, CODED_VIEWS, SURVEY_VIEW, WIFI_VISIT_VIEWS,
 };
 
-/// Which sample feeds run besides the spectrum's and the demodulator's, each
-/// a full copy of every block while it is on.
+/// Which sample feeds run besides the spectrum's, each a full copy of every
+/// block while it is on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
 pub struct Feeds {
     /// The 2.4 GHz receivers, Bluetooth and Wi-Fi.
@@ -33,7 +33,14 @@ pub struct Feeds {
     pub pager: bool,
     /// The FT8 decoder.
     pub ft8: bool,
+    /// The demodulator: FM and AM, the pilot, CTCSS and RDS. The terminal
+    /// switches it by what is on screen (and the user's own switch); a
+    /// headless instance by this.
+    pub demod: bool,
 }
+
+/// The views whose work includes the demodulator's.
+pub const DEMOD_VIEWS: &[&str] = &["lab_signal"];
 
 /// What the 2.4 GHz receivers are asked to do, once their feed is on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
@@ -77,6 +84,7 @@ impl Mode {
                 net,
                 pager: section == crate::signal::pocsag::SECTION,
                 ft8: crate::signal::ft8::SECTIONS.contains(&section),
+                demod: DEMOD_VIEWS.contains(&view),
             },
             net: NetView {
                 classic: CLASSIC_VIEWS.contains(&view),
@@ -90,8 +98,7 @@ impl Mode {
         }
     }
 
-    /// Nothing asked for: no feed beyond what the spectrum and the
-    /// demodulator ask for on their own.
+    /// Nothing asked for: no feed beyond the spectrum's.
     pub fn idle() -> Mode {
         Mode::for_view("", "")
     }
@@ -109,8 +116,9 @@ impl Mode {
 /// section that name belongs to: the plain spectrum, and every view that asks
 /// for a feed of its own. Named as the terminal's views are, so a script and
 /// the person at the terminal mean the same thing by `net_survey`. A view
-/// that asks for nothing beyond the spectrum (the Lab benches, the micro
-/// views) needs no name of its own here: `spectrum` computes what it shows.
+/// that asks for nothing beyond the spectrum (the other Lab benches, the
+/// micro views) needs no name of its own here: `spectrum` computes what it
+/// shows. The Lab's signal bench asks for the demodulator too, so it has one.
 pub const MODES: &[(&str, &str)] = &[
     ("spectrum", ""),
     ("net", crate::signal::net::SECTION),
@@ -130,6 +138,7 @@ pub const MODES: &[(&str, &str)] = &[
     ("lab_ft8_signal", crate::signal::ft8::LAB_SECTION),
     ("lab_ft8_band", crate::signal::ft8::LAB_SECTION),
     ("lab_ft8_receiver", crate::signal::ft8::LAB_SECTION),
+    ("lab_signal", "lab"),
 ];
 
 #[cfg(test)]

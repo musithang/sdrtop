@@ -25,12 +25,12 @@ are two programs built on the same engine. Neither knows the other exists.
 **What it does today, honestly.** monasd opens the radio, computes the mode
 you ask for (the same receivers sdrtop would run for that view), takes
 commands, tells you how it is doing and streams events. Of the measurements
-it serves the instrument's own readings so far: the radio with its gain
-chain and frequency reference, the signal's figures, the I/Q front end, the
-pipeline's vital signs, the recorder and the spectrum itself, each with the
-same right to say "I don't know" that the screen has. The decoders (pagers,
-FT8) and the 2.4 GHz band are next, so for now monasd is the bench without
-the radio stations.
+it serves everything but the 2.4 GHz band: the radio with its gain chain and
+frequency reference, the signal's figures, the I/Q front end, the pipeline's
+vital signs, the recorder, the spectrum itself, the demodulator, and the
+pagers and FT8 decodes with their physics, each with the same right to say
+"I don't know" that the screen has. The 2.4 GHz band (Bluetooth, Wi-Fi) is
+next, and it is the biggest piece, which is why it is last.
 
 ## Starting it
 
@@ -70,11 +70,12 @@ script and the person at the terminal mean the same thing by `net_survey`:
 `spectrum` (the default), `net`, `net_survey`, `net_ble`, `net_census`,
 `net_connection`, `net_coded`, `net_bt`, `net_piconet`, `net_bench`,
 `wifi_survey`, `wifi_frames`, `wifi_airtime`, `radio_pocsag`, `radio_ft8`,
-`lab_ft8_signal`, `lab_ft8_band`, `lab_ft8_receiver`.
+`lab_ft8_signal`, `lab_ft8_band`, `lab_ft8_receiver`, `lab_signal`.
 
-A name it doesn't know is refused with that list. The Lab benches and the
-compact views have no name of their own here because they ask for nothing
-beyond the spectrum, and `spectrum` computes that. Your own layouts from
+A name it doesn't know is refused with that list. `lab_signal` is the one
+Lab bench with a name, because it runs the demodulator; the other benches
+and the compact views ask for nothing beyond the spectrum, and `spectrum`
+computes that. Your own layouts from
 `~/.config/sdrtop/presets/` don't count: monasd doesn't read sdrtop's presets,
 on purpose.
 
@@ -105,7 +106,7 @@ loopback), which is what I do.
 ## The API
 
 Everything lives under `/v1`, so a later change of shape is a new prefix
-rather than a surprise for every script written against this one. Eight
+rather than a surprise for every script written against this one. Ten
 routes:
 
 | Route | What it gives |
@@ -113,8 +114,15 @@ routes:
 | `GET /v1/health` | The radio, whether it streams, whether its data is stale, the tuning, the mode, samples lost (the driver's and sdrtop's own, apart), each feed's refusals, the process's CPU and memory |
 | `GET /v1/radios` | Every radio found at start, which one is open, and whether its support was tested on a real one or written from the library's headers |
 | `GET /v1/config` | The engine's blocks of the config, as they would be saved now |
-| `GET /v1/snapshot` | What the engine reads, group by group: the radio and its gain chain, the signal's figures, the I/Q front end, the pipeline's vitals, the recorder. Each figure a `value` or the reason it is `absent`, each group with its testimony: when it was read, whether it is stale |
+| `GET /v1/snapshot` | What the engine reads, group by group: the radio and its gain chain, the signal's figures, the I/Q front end, the pipeline's vitals, the recorder, the demodulator, and the pager's and FT8's counts. Each figure a `value` or the reason it is `absent`, each group with its testimony: when it was read, whether it is stale |
 | `GET /v1/spectrum` | The latest spectrum frame: every bin in dBFS, the axis they lie on and the resolution bandwidth they were measured in. Its own route, so a script that wants five numbers isn't handed eight thousand |
+| `GET /v1/pager` | The pages, as the pager view shows them: with the text, or with the pager masked, only each page's kind and length; only its own address's when it answers to one. Each with the transmission's physics (rate, clock error, shift, SNR, level, repairs). `?since=N` sends only the ones after page `N` |
+| `GET /v1/ft8` | The FT8 decodes held, each with what it measured beside what it said: the same fields as the CSV export, `null` wherever the file is blank. `?since=N` the same way |
+
+The pager's mask and its own address are set from sdrtop's pager view, and
+monasd has no switch for either yet, so the pages it serves carry their text.
+If that is not what you want on a box other people can reach, don't run the
+pager mode there until the switch exists.
 | `GET /v1/provenance` | Which radio, tuned where, in which mode, against what frequency reference, for how long: the same fields an export's header carries |
 | `POST /v1/command` | One command, answered |
 | `GET /v1/events` | A WebSocket, one JSON message per event |
