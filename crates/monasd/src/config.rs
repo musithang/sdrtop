@@ -29,6 +29,17 @@ pub struct MonasdSettings {
     /// today and used by nothing yet: no route records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recordings_dir: Option<PathBuf>,
+    /// How addresses are shown from the start: `full`, `oui` or `masked`.
+    /// The screen's choice is not saved, so a server says its own here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addresses: Option<String>,
+    /// Whether the pager's text is masked to its kind and length from the
+    /// start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pager_masked: Option<bool>,
+    /// The one pager address shown from the start; every address without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pager_mine: Option<u32>,
 }
 
 impl MonasdSettings {
@@ -85,6 +96,9 @@ mod tests {
                 token: Some("s3cret".into()),
                 mode: Some("net_survey".into()),
                 recordings_dir: Some(PathBuf::from("/srv/rec")),
+                addresses: Some("masked".into()),
+                pager_masked: Some(true),
+                pager_mine: Some(1234),
             }
         );
         assert_eq!(cfg.engine.tinysa.points, 900);

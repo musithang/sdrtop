@@ -122,12 +122,20 @@ routes:
 | `GET /v1/net/band` | The 2.4 GHz band, one megahertz to a cell, measured on the survey: each cell's duty cycle with its uncertainty, how much of its time was watched, its levels. A cell nobody looked at says so instead of reading zero, a duty cycle too uncertain to state has no value but keeps its uncertainty, and a floor that failed its own checks takes the whole band with it. The occupancy export's figures, as JSON |
 | `GET /v1/net/census` | Every transmitter heard, in the order the census panel shows them, with what it said about itself and what was measured of it (SNR, crystal offset, modulation index, advertising timing), each with its uncertainty. Addresses are shown the way the panel's address mode shows them. The census export's figures, as JSON |
 
-The pager's mask and its own address, and the way the census shows
-addresses, are set from sdrtop's views, and monasd has no switch for any of
-them yet: its pages carry their text and its census the full addresses. If
-that is not what you want on a box other people can reach, don't run the
-pager or NET modes there until the switches exist. They are next on the list,
-right after the packet lists.
+How much of what is heard gets shown is yours to say, the same switches the
+terminal has: addresses in full, by registrant or masked, and pager text or
+only its kind and length. Out of the box both show everything, as sdrtop
+does; on a box other people can reach, say otherwise in the config, so it
+holds from the first request and survives a restart:
+
+```toml
+[monasd]
+addresses = "masked"     # full, oui or masked
+pager_masked = true
+pager_mine = 1234567     # only this pager address, if you like
+```
+
+or at run time, with the `addresses` and `pager` commands below.
 | `GET /v1/provenance` | Which radio, tuned where, in which mode, against what frequency reference, for how long: the same fields an export's header carries |
 | `POST /v1/command` | One command, answered |
 | `GET /v1/events` | A WebSocket, one JSON message per event |
@@ -144,7 +152,9 @@ or `422` with `{"reply":"refused","reason":"..."}` when it wasn't, and then
 nothing was changed. The commands are `tune` (`hz`), `sample_rate` (`hz`),
 `gain` (`stage`, `db`), `gains` (`values`, front to back), `agc` (`on`),
 `boost` (`on`), `reset`, `set_mode` (`section`, `view`), `stream` (`on`),
-`dc_block` (`on`) and `device_option` (`id`, `choice`). A frequency the radio
+`dc_block` (`on`), `device_option` (`id`, `choice`), `addresses` (`show`:
+`full`, `oui` or `masked`) and `pager` (`masked`, and `mine`, one address or
+`null` for all). A frequency the radio
 doesn't tune, a rate outside its range or a stage it doesn't have is refused
 with the reason. A gain between two of a stage's steps lands on the nearest
 one, and the reply's `detail` says so, because a number that changed on its

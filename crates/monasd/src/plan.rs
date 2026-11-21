@@ -10,7 +10,9 @@
 use std::net::SocketAddr;
 
 use crate::config::MonasdSettings;
+use crate::engine::command::{Command, PAGER_ADDRESS_MAX};
 use crate::engine::mode::{Mode, MODES};
+use crate::state::AddressDisplay;
 
 /// The port the API listens on when none is named.
 pub const DEFAULT_PORT: u16 = 7373;
@@ -24,6 +26,9 @@ pub struct HeadlessPlan {
     /// Whether the spectrum is computed. Off on the 2.4 GHz views, where it
     /// would cost a core at the rates they run at and nothing there reads it.
     pub spectrum: bool,
+    /// The display switches to set before anything is served: how addresses
+    /// are shown, and the pager's mask and own address.
+    pub display: Vec<Command>,
 }
 
 /// Decide a headless run from the flags (`listen`, `mode`), which win, and
@@ -61,11 +66,35 @@ pub fn plan(
             names.join(", ")
         ));
     };
+    let mut display = Vec::new();
+    if let Some(show) = &settings.addresses {
+        if AddressDisplay::named(show).is_none() {
+            let names: Vec<&str> = AddressDisplay::ALL.iter().map(|m| m.label()).collect();
+            return Err(format!(
+                "addresses = \"{show}\" in [monasd] is no address mode; the modes are {}",
+                names.join(", ")
+            ));
+        }
+        display.push(Command::Addresses { show: show.clone() });
+    }
+    if let Some(ric) = settings.pager_mine.filter(|&r| r > PAGER_ADDRESS_MAX) {
+        return Err(format!(
+            "pager_mine = {ric} in [monasd] is not a pager address: an address is 21 bits, \
+             at most {PAGER_ADDRESS_MAX}"
+        ));
+    }
+    if settings.pager_masked.is_some() || settings.pager_mine.is_some() {
+        display.push(Command::Pager {
+            masked: settings.pager_masked.unwrap_or(false),
+            mine: settings.pager_mine,
+        });
+    }
     Ok(HeadlessPlan {
         listen,
         token,
         spectrum: !mode.feeds.net,
         mode,
+        display,
     })
 }
 
@@ -108,6 +137,47 @@ mod tests {
         };
         let plan = plan(Some("0.0.0.0:7373"), None, &with_token).unwrap();
         assert!(!plan.listen.ip().is_loopback());
+    }
+
+    /// The display switches in the file are set before anything is served;
+    /// one that names no mode, or no address, stops the start with why.
+    #[test]
+    fn the_display_switches_are_planned_or_refused_at_the_start() {
+        let file = MonasdSettings {
+            addresses: Some("masked".into()),
+            pager_masked: Some(true),
+            ..MonasdSettings::default()
+        };
+        let plan = plan(None, None, &file).unwrap();
+        assert_eq!(
+            plan.display,
+            vec![
+                Command::Addresses {
+                    show: "masked".into()
+                },
+                Command::Pager {
+                    masked: true,
+                    mine: None
+                },
+            ]
+        );
+        assert!(super::plan(None, None, &MonasdSettings::default())
+            .unwrap()
+            .display
+            .is_empty());
+        let wrong = MonasdSettings {
+            addresses: Some("secret".into()),
+            ..MonasdSettings::default()
+        };
+        let why = super::plan(None, None, &wrong).unwrap_err();
+        assert!(why.contains("full, oui, masked"), "{why}");
+        let wide = MonasdSettings {
+            pager_mine: Some(PAGER_ADDRESS_MAX + 1),
+            ..MonasdSettings::default()
+        };
+        assert!(super::plan(None, None, &wide)
+            .unwrap_err()
+            .contains("21 bits"));
     }
 
     #[test]

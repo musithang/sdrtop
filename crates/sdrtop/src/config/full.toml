@@ -28,8 +28,11 @@ this_band = true
 window = "15 min"
 
 [monasd]
+addresses = "masked"
 listen = "0.0.0.0:7373"
 mode = "net_survey"
+pager_masked = true
+pager_mine = 1234
 recordings_dir = "/srv/rec"
 token = "s3cret"
 

@@ -127,11 +127,16 @@ The radio's settings are shared with sdrtop, from the same file. monasd's
 own are one block, and a flag wins over the line it matches:
 
   [monasd]
-  listen = \"0.0.0.0:7373\"
-  token  = \"a long random string, not this one\"
-  mode   = \"net_survey\"
+  listen    = \"0.0.0.0:7373\"
+  token     = \"a long random string, not this one\"
+  mode      = \"net_survey\"
+  addresses = \"masked\"
+  pager_masked = true
 
-On exit monasd writes back the radio's settings and nothing else.",
+addresses (full, oui or masked) and pager_masked decide how much of what
+is heard is shown, on every route, from the first request; pager_mine
+shows one pager address alone. On exit monasd writes back the radio's
+settings and nothing else.",
     ),
     (
         "Examples",

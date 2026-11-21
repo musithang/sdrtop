@@ -677,6 +677,25 @@ mod source_tests {
         named.then_some("a plan's name")
     }
 
+    /// **The config with every block set is one file in two packages.** Each
+    /// front end's tests read it back byte for byte, and each package carries
+    /// its own copy because a published crate holds nothing outside itself;
+    /// a block added to one copy and not the other passes one suite and
+    /// silently tests less in the other.
+    #[test]
+    fn both_front_ends_test_against_the_same_full_config() {
+        let ours = include_str!("config/full.toml");
+        let monasd = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../monasd/src/config/full.toml"
+        ))
+        .expect("monasd's copy of the full config");
+        assert_eq!(
+            ours, monasd,
+            "crates/sdrtop/src/config/full.toml and crates/monasd/src/config/full.toml differ"
+        );
+    }
+
     /// **The installer's source build is the release profile, less the
     /// link-time optimisation.** A published crate carries no profile, so
     /// packaging/install.sh asks `cargo install` for the release profile's

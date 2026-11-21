@@ -23,7 +23,7 @@ mod plan;
 mod server;
 
 /// The engine, under the names its parts have in Monas.
-pub(crate) use monas::{engine, export, hardware};
+pub(crate) use monas::{engine, export, hardware, state};
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -182,6 +182,13 @@ pub async fn run(
         m.demod.enabled = plan.mode.feeds.demod && m.demod.user_on;
         m.sweep.active = false;
     });
+    // The display switches, before anything is served: a server's choice of
+    // how much to show is set before the first client can ask.
+    for command in &plan.display {
+        if let Reply::Refused { reason } = engine.apply(command.clone()) {
+            anyhow::bail!("{reason}");
+        }
+    }
     engine.apply(Command::Stream { on: true });
     // Bound before anything streams: an address already taken is said
     // before the radio is put to work.

@@ -50,7 +50,16 @@ pub enum Command {
     DcBlock { on: bool },
     /// Set one of the radio's own options, by its id, to one of its choices.
     DeviceOption { id: String, choice: String },
+    /// Show addresses `full`, by registrant (`oui`) or `masked`, on every
+    /// screen and in every export and API answer alike.
+    Addresses { show: String },
+    /// The pager's view: text `masked` to its kind and length, and the one
+    /// address it answers to (`mine`, none for every address).
+    Pager { masked: bool, mine: Option<u32> },
 }
+
+/// The highest pager address: an address is 21 bits.
+pub const PAGER_ADDRESS_MAX: u32 = 0x1F_FFFF;
 
 /// The answer to a command.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
@@ -186,6 +195,26 @@ pub fn plan(m: &SdrMetrics, command: &Command) -> Result<Planned, String> {
                 )),
             }
         }
+        Command::Addresses { show } => {
+            if crate::state::AddressDisplay::named(show).is_some() {
+                Ok(Planned::as_asked(command))
+            } else {
+                let names: Vec<&str> = crate::state::AddressDisplay::ALL
+                    .iter()
+                    .map(|m| m.label())
+                    .collect();
+                Err(format!(
+                    "there is no address mode called {show}; the modes are {}",
+                    names.join(", ")
+                ))
+            }
+        }
+        Command::Pager {
+            mine: Some(ric), ..
+        } if *ric > PAGER_ADDRESS_MAX => Err(format!(
+            "{ric} is not a pager address: an address is 21 bits, at most {PAGER_ADDRESS_MAX}"
+        )),
+        Command::Pager { .. } => Ok(Planned::as_asked(command)),
         Command::Agc { .. }
         | Command::Boost { .. }
         | Command::Reset
@@ -365,6 +394,29 @@ impl Engine {
                     Err(e) => refused(e),
                 }
             }
+            Command::Addresses { show } => {
+                // Planned: the name is one of the modes.
+                if let Some(mode) = crate::state::AddressDisplay::named(&show) {
+                    self.lock().net.address_display = mode;
+                }
+                Reply::Applied {
+                    detail: format!("addresses shown {show}"),
+                }
+            }
+            Command::Pager { masked, mine } => {
+                {
+                    let mut m = self.lock();
+                    m.pager.view.masked = masked;
+                    m.pager.view.mine = mine;
+                }
+                Reply::Applied {
+                    detail: format!(
+                        "pager text {}, {}",
+                        if masked { "masked" } else { "shown" },
+                        mine.map_or("every address".to_string(), |r| format!("address {r} only"))
+                    ),
+                }
+            }
             Command::SetMode { section, view } => {
                 self.lock().mode = super::mode::Mode::for_view(&section, &view);
                 Reply::Applied {
@@ -497,6 +549,59 @@ mod tests {
         )
         .unwrap();
         assert_eq!(planned.note, None);
+    }
+
+    /// The display switches reach every reader of the state: an address
+    /// mode by its name, the pager's mask and own address; a name that is no
+    /// mode, or an address wider than 21 bits, is refused with why.
+    #[test]
+    fn the_display_switches_are_set_or_refused_with_why() {
+        let (engine, _) = engine_on(Bench::new());
+        let reply = engine.apply(Command::Addresses {
+            show: "masked".into(),
+        });
+        assert!(matches!(reply, Reply::Applied { .. }), "{reply:?}");
+        assert_eq!(
+            engine.snapshot().net.address_display,
+            crate::state::AddressDisplay::Masked
+        );
+        let Reply::Refused { reason } = engine.apply(Command::Addresses {
+            show: "hidden".into(),
+        }) else {
+            panic!("an unknown mode was applied");
+        };
+        assert!(reason.contains("full, oui, masked"), "{reason}");
+
+        let reply = engine.apply(Command::Pager {
+            masked: true,
+            mine: Some(1234),
+        });
+        assert!(matches!(reply, Reply::Applied { .. }), "{reply:?}");
+        let view = engine.snapshot().pager.view;
+        assert!(view.masked);
+        assert_eq!(view.mine, Some(1234));
+        let Reply::Refused { reason } = engine.apply(Command::Pager {
+            masked: false,
+            mine: Some(PAGER_ADDRESS_MAX + 1),
+        }) else {
+            panic!("a 22-bit address was applied");
+        };
+        assert!(reason.contains("21 bits"), "{reason}");
+        assert!(
+            engine.snapshot().pager.view.masked,
+            "a refusal changed nothing"
+        );
+
+        // On the wire, as a client sends them.
+        let json: Command =
+            serde_json::from_str(r#"{"command":"pager","masked":true,"mine":null}"#).unwrap();
+        assert_eq!(
+            json,
+            Command::Pager {
+                masked: true,
+                mine: None
+            }
+        );
     }
 
     #[test]

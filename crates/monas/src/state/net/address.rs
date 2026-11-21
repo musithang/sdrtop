@@ -62,6 +62,14 @@ impl AddressDisplay {
         }
     }
 
+    /// Every mode, in the order `next` walks them.
+    pub const ALL: [AddressDisplay; 3] = [Self::Full, Self::Oui, Self::Masked];
+
+    /// The mode whose [`Self::label`] is `name`.
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.label() == name)
+    }
+
     /// [`Self::show_with`] with no company: the tests' form.
     #[cfg(test)]
     pub fn show(
