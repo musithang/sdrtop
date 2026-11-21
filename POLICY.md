@@ -478,7 +478,8 @@ Not after the datasheet was read closely. After it was **held**.
 
 A datasheet cannot be asked a follow-up question, and everything that has ever
 mattered was in the follow-up question. This rule is expensive, and the expense
-is why the supported list is short and moves at the speed of a hobby budget.
+is why the supported list is short and grows only as fast as radios arrive on
+the bench.
 
 *The tide gauge. The mountain.*
 

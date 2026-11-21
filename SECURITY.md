@@ -23,7 +23,7 @@ Tell me:
 
 ## What happens then
 
-This is a one-person hobby project, so I can't promise a security team's
+This is a one-person project, so I can't promise a security team's
 response times. What I can promise:
 
 - **An answer within 7 days**, even if the answer is "got it, looking".

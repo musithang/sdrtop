@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
   <a href="user_docs/platforms.md"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux"></a>
   <a href="user_docs/platforms.md#macos-unofficially"><img src="https://img.shields.io/badge/macOS-unofficial-000000?logo=apple&logoColor=white" alt="macOS, unofficial"></a>
-  <img src="https://img.shields.io/badge/stage-early%20development-red" alt="Early development">
+  <a href="crates/monas"><img src="https://img.shields.io/badge/powered%20by-monas-0B0C0B?labelColor=232623&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjkgOSA0MiA0MiI+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRTZFMkQ2IiBzdHJva2Utd2lkdGg9IjQuNiIgc3Ryb2tlLWxpbmVjYXA9InNxdWFyZSI+PHBhdGggZD0iTTE4IDEzQTEyIDEyIDAgMCAwIDQyIDEzIi8+PGNpcmNsZSBjeD0iMzAiIGN5PSIzNiIgcj0iMTEiLz48cGF0aCBkPSJNNDMuNzkgMjUuMjNBMTcuNSAxNy41IDAgMCAxIDQzLjc5IDQ2Ljc3TTE2LjIxIDQ2Ljc3QTE3LjUgMTcuNSAwIDAgMSAxNi4yMSAyNS4yMyIvPjwvZz48Y2lyY2xlIGN4PSIzMCIgY3k9IjM2IiByPSIyLjgiIGZpbGw9IiNGRkI1NDciLz48L3N2Zz4K" alt="Powered by Monas"></a>
 </p>
 
 <p align="center">
@@ -60,14 +60,11 @@
 
 **Hey there! This is my take on a terminal monitor for SDR hardware.** Raw, real-time diagnostics from your radio, with a spectrum, a waterfall and a set of bench instruments, in a tmux pane, an SSH session, or the postage-stamp screen of a cyberdeck. I set out to print a few numbers. There is now a Friis noise figure model in here. I'm not entirely sure how that happened.
 
-It's a hobby project, and honestly, I made it for *you* ❤️. Beat on it, open issues, send ideas and pull requests. This is an open table, not my private garage.
+Honestly, I made it for *you* ❤️. Beat on it, open issues, send ideas and pull requests. This is an open table, not my private garage.
 
 https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
 
 <sub>It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.</sub>
-
-> [!IMPORTANT]
-> **Early development.** New features keep coming, each one measured against the specification and then polished until it reads at a glance. Known issues: plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
 **Piconet follow** · classic Bluetooth<br>
 <sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net-classic.md)</sub>
@@ -88,7 +85,7 @@ https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 - **A demodulator that reads radios instead of playing them**: FM deviation, pilot, stereo, CTCSS, AM depth, RDS. No audio, on purpose. [Details](user_docs/demodulator.md)
 - **NET: the 2.4 GHz band, measured.** Bluetooth (BLE, LE Coded, classic) and Wi-Fi, decoded and held against the specification. Never transmits, never joins. [Details](user_docs/net.md)
 - **IQ correction, band sweeps, SigMF recording, observer mode** for a radio another app holds, and every lab panel marked **[STALE]** the moment its data stops being live.
-- **monasd, the same engine with no screen**: the radio in the attic, an HTTP API and a WebSocket to drive and watch it from somewhere warmer. Early, and honest about it. [Details](user_docs/monasd.md)
+- **monasd, the same engine with no screen**: the radio in the attic, an HTTP API and a WebSocket to drive and watch it from somewhere warmer, honest about what it serves so far. [Details](user_docs/monasd.md)
 
 Under the hood there are three names: **Monas** is the engine (the radio, the receivers, the measurements), **sdrtop** is the terminal on top of it, and **monasd** is Monas with no screen. You mostly only need the second one.
 

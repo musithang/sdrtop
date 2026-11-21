@@ -35,8 +35,8 @@ screen leaves out because it would mean nothing) is on its page.
 | HackRF Pro | Planned, needs hardware to test |
 | LimeSDR, bladeRF, other PlutoSDR boards, other SDRplay RSPs | Should already work [through SoapySDR](soapysdr.md). Nobody has told me yet |
 
-Native support means owning and testing the radio, so the list moves at exactly
-the speed of a hobby budget. If you'd like to move it along, the project has a
+Native support means owning and testing the radio, so the list grows exactly as
+fast as radios arrive on my desk. If you'd like to move it along, the project has a
 [GitHub Sponsors page](https://github.com/sponsors/musithang).
 
 ---
