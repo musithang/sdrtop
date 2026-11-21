@@ -111,6 +111,9 @@ Everything is under http://ADDR/v1, JSON in and out:
   GET  /v1/net/coded   LE Coded packets, the same way (?since=N: newer)
   GET  /v1/net/bt      classic Bluetooth hits, slot timing and headers
   GET  /v1/net/fer     the frame error rate against SNR
+  GET  /v1/net/wifi/survey   Wi-Fi channels 1 to 13: busy, airtime, quietest
+  GET  /v1/net/wifi/frames   Wi-Fi frames on this channel (?since=N: newer)
+  GET  /v1/net/wifi/airtime  this channel's airtime: share, spenders, gaps
   GET  /v1/provenance  which radio, tuned where, against what reference
   POST /v1/command     one command, answered with what was done or why not
   GET  /v1/events      a WebSocket: commands applied, log lines, gaps, stalls

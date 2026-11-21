@@ -27,6 +27,7 @@ pub mod pager;
 pub mod record;
 pub mod spectrum;
 pub mod vitals;
+pub mod wifi;
 
 use std::time::Instant;
 

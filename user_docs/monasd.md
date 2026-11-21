@@ -30,8 +30,10 @@ and frequency reference, the signal's figures, the I/Q front end, the
 pipeline's vital signs, the recorder, the spectrum itself, the demodulator,
 the pagers and FT8 decodes with their physics, and on 2.4 GHz the band's
 occupancy, the census of transmitters, the packet lists and the frame error
-curve, each with the same right to say "I don't know" that the screen has.
-Still to come from 2.4 GHz: Wi-Fi.
+curve, and Wi-Fi's survey, frames and airtime, each with the same right to
+say "I don't know" that the screen has. Still only on the screen: the band
+sweep, the timing bench's finer figures (jitter, the callback deviations) and
+the RF bench's staging verdicts. And the colours, which I'm keeping.
 
 ## Starting it
 
@@ -107,8 +109,8 @@ loopback), which is what I do.
 ## The API
 
 Everything lives under `/v1`, so a later change of shape is a new prefix
-rather than a surprise for every script written against this one. Sixteen
-routes:
+rather than a surprise for every script written against this one.
+Nineteen routes:
 
 | Route | What it gives |
 |---|---|
@@ -125,6 +127,9 @@ routes:
 | `GET /v1/net/coded` | The LE Coded list, the same way, its readings the Coded tests' own |
 | `GET /v1/net/bt` | The classic Bluetooth hits kept, oldest first: channel, LAP and UAP, the slot residual against the piconet's fitted grid, its clock, and the header where it could be read |
 | `GET /v1/net/fer` | The frame error rate against SNR, for all traffic and for each device, the counts always and a rate only where there are enough packets to give one |
+| `GET /v1/net/wifi/survey` | Channels 1 to 13 as the survey visits them: each one's busy share with its uncertainty, its airtime by family, and which channel is quietest, or why that can't be said yet |
+| `GET /v1/net/wifi/frames` | The Wi-Fi frames heard on the channel the radio sits on, newest first, worded as the Frames list words them (format, rate, length), with their airtime, gap, offset and SNR. Another channel's frame is only how far off it was, because nothing it said was read. `?since=N` the same way |
+| `GET /v1/net/wifi/airtime` | The locked channel's airtime: its share of the time, who spent it at which rate, and the rhythm of the gaps between frames |
 
 How much of what is heard gets shown is yours to say, the same switches the
 terminal has: addresses in full, by registrant or masked, and pager text or

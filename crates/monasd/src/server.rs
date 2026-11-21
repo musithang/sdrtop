@@ -125,6 +125,9 @@ pub fn router(access: Access) -> Router {
         .route("/v1/net/coded", get(net_coded))
         .route("/v1/net/bt", get(net_bt))
         .route("/v1/net/fer", get(net_fer))
+        .route("/v1/net/wifi/survey", get(wifi_survey))
+        .route("/v1/net/wifi/frames", get(wifi_frames))
+        .route("/v1/net/wifi/airtime", get(wifi_airtime))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -320,6 +323,45 @@ async fn net_fer(
 ) -> Json<crate::engine::view::Group<crate::engine::view::bt::Fer>> {
     let state = access.engine.snapshot();
     Json(crate::engine::view::bt::fer(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// The Wi-Fi survey: each channel's busy share over its visits, its
+/// airtime by family, and which channel is least busy or why none can be
+/// named yet.
+async fn wifi_survey(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::wifi::Survey>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::wifi::survey(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// The Wi-Fi frames heard on the radio's centre, newest first, worded as
+/// the Frames list words them. `?since=N` sends only frames after `N`.
+async fn wifi_frames(
+    State(access): State<Access>,
+    Query(q): Query<Since>,
+) -> Json<crate::engine::view::Group<crate::engine::view::wifi::Frames>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::wifi::frames(
+        &state,
+        crate::engine::view::Clock::now(),
+        q.since,
+    ))
+}
+
+/// The locked channel's airtime: its share, who spent it, and the rhythm
+/// of the gaps.
+async fn wifi_airtime(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::wifi::Airtime>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::wifi::airtime(
         &state,
         crate::engine::view::Clock::now(),
     ))
@@ -575,15 +617,23 @@ mod tests {
             ("/v1/net/coded", "packets"),
             ("/v1/net/bt", "hits"),
             ("/v1/net/fer", "bins"),
+            ("/v1/net/wifi/survey", "channels"),
+            ("/v1/net/wifi/frames?since=0", "frames"),
         ] {
             let (status, json) = ask(app.clone(), get(route)).await;
             assert_eq!(status, StatusCode::OK, "{route}");
-            assert!(
-                json[list].as_array().is_some_and(Vec::is_empty),
-                "{route}: {json}"
-            );
+            // The survey always lists its thirteen channels, each saying it
+            // was not visited; every other list is empty.
+            let empty =
+                route.ends_with("survey") || json[list].as_array().is_some_and(Vec::is_empty);
+            assert!(json[list].is_array() && empty, "{route}: {json}");
             assert!(json["testimony"].is_object(), "{route}: {json}");
         }
+        let (_, air) = ask(app.clone(), get("/v1/net/wifi/airtime")).await;
+        assert_eq!(
+            air["share"]["absent"], "not locked on a Wi-Fi channel",
+            "{air}"
+        );
         let (_, coded) = ask(app, get("/v1/net/coded")).await;
         assert!(
             coded["note"]

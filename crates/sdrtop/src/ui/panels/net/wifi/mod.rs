@@ -94,11 +94,10 @@ fn channel_silence(state: &SdrMetrics, view: &str) -> Option<Silence> {
     })
 }
 
-/// The channel the radio is locked on, when it is.
+/// The channel the radio is locked on, when it is: the engine's answer,
+/// which the API's airtime gives too.
 fn locked(state: &SdrMetrics) -> Option<u8> {
-    (state.net.mode == NetMode::Lock)
-        .then(|| crate::signal::net::band::wifi_channel(state.radio.frequency))
-        .flatten()
+    crate::engine::view::wifi::locked(state)
 }
 
 /// Write `s` from `x` on row `y`, clipped to `area`; where it ended.

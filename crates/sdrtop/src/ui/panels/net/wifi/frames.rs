@@ -28,8 +28,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::wifi::format::{Format, Heard};
-use crate::signal::wifi::hesig::{HeKind, HePpdu};
 use crate::state::{Capture, RowKind, SdrMetrics, WifiRow};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 
@@ -39,19 +37,10 @@ pub struct NetWifiFramesPanel;
 const FULL: usize = 110;
 const MID: usize = 94;
 
-/// The frames heard on the radio's centre, newest first. The survey's
-/// visits to other channels leave their frames in the ring too; they are
-/// those channels' lists, not this one's.
+/// The frames heard on the radio's centre, newest first: the engine's list,
+/// which the API serves too.
 pub fn shown(state: &SdrMetrics) -> Vec<&WifiRow> {
-    let centre = state.radio.frequency as f64;
-    state
-        .net
-        .wifi
-        .rows
-        .iter()
-        .rev()
-        .filter(|r| (r.carrier_hz - centre).abs() < 1.0)
-        .collect()
+    crate::engine::view::wifi::shown(state)
 }
 
 /// The capture shown, when it was taken on this channel's centre: one
@@ -93,99 +82,16 @@ fn gap(g: Option<f64>) -> String {
     }
 }
 
-/// A format's name, as its signalling said it.
-fn format_name(heard: &Heard) -> &'static str {
-    match heard.format {
-        None => "unreadable",
-        Some(Format::NonHt) => "non-HT",
-        Some(Format::HtMixed(_)) => "HT",
-        Some(Format::Greenfield(Ok(_))) => "HT GF",
-        Some(Format::Greenfield(Err(_))) => "unreadable",
-        Some(Format::Vht(_)) => "VHT",
-        Some(Format::He { sig_a: Ok(a), .. }) => match a.ppdu {
-            HePpdu::Su => "HE SU",
-            HePpdu::ErSu => "HE ER SU",
-            HePpdu::Mu => "HE MU",
-            HePpdu::Tb => "HE TB",
-        },
-        Some(Format::He { kind, .. }) => match kind {
-            HeKind::SuOrTb => "HE",
-            HeKind::Mu => "HE MU",
-            HeKind::ErSu => "HE ER SU",
-        },
-        Some(Format::USig { sig: Ok(u), .. }) if u.version == 0 => "EHT",
-        Some(Format::USig { sig: Ok(_), .. }) => "after EHT",
-        Some(Format::USig { sig: Err(_), .. }) => "unreadable",
-    }
-}
-
 /// What a row's columns say: its format's name, its rate, its length and,
-/// for HE and later, its network.
+/// for HE and later, its network, in the engine's words, which are the API's.
 fn said(kind: &RowKind) -> (String, String, String, String) {
-    let preamble = |p| match p {
-        crate::signal::wifi::dsss::header::Preamble::Long => "long",
-        crate::signal::wifi::dsss::header::Preamble::Short => "short",
-    };
-    let dsss = |header: &Result<_, _>| match header {
-        Ok(h) => {
-            let h: &crate::signal::wifi::dsss::header::Header = h;
-            (
-                format!("{} Mb/s", h.rate.mbps()),
-                format!("{} B", h.octets()),
-            )
-        }
-        Err(_) => (String::new(), String::new()),
-    };
-    let network = |bss: &crate::signal::wifi::hesig::Bss| {
-        format!(
-            "colour {} {}",
-            bss.colour,
-            if bss.uplink { "\u{2191}" } else { "\u{2193}" }
-        )
-    };
-    match kind {
-        RowKind::Ofdm(heard) => {
-            let (rate, length) = match (heard.format, heard.lsig) {
-                (Some(Format::NonHt), Some(Ok(l))) => {
-                    (format!("{} Mb/s", l.rate.mbps()), format!("{} B", l.length))
-                }
-                (Some(Format::HtMixed(Ok(h)) | Format::Greenfield(Ok(h))), _) => {
-                    (format!("MCS {}", h.mcs), format!("{} B", h.length))
-                }
-                _ => (String::new(), String::new()),
-            };
-            let extra = match heard.format {
-                Some(Format::He { sig_a: Ok(a), .. }) => network(&a.bss),
-                Some(Format::USig { sig: Ok(u), .. }) => network(&u.bss),
-                _ => String::new(),
-            };
-            (format_name(heard).to_string(), rate, length, extra)
-        }
-        RowKind::Dsss {
-            preamble: p,
-            header,
-        } => {
-            let (rate, length) = dsss(header);
-            (format!("11b {}", preamble(*p)), rate, length, String::new())
-        }
-        RowKind::OtherOfdm { shift_mhz } => (
-            format!("{shift_mhz:+} MHz \u{b7} OFDM"),
-            String::new(),
-            String::new(),
-            String::new(),
-        ),
-        RowKind::OtherDsss {
-            shift_mhz, header, ..
-        } => {
-            let (rate, length) = dsss(header);
-            (
-                format!("{shift_mhz:+} MHz \u{b7} 11b"),
-                rate,
-                length,
-                String::new(),
-            )
-        }
-    }
+    let s = crate::engine::view::wifi::said(kind);
+    (
+        s.format,
+        s.rate.unwrap_or_default(),
+        s.length_bytes.map(|n| format!("{n} B")).unwrap_or_default(),
+        s.network.unwrap_or_default(),
+    )
 }
 
 /// The SNR's height in eighths over the river's fixed 0 to 24 dB, never
