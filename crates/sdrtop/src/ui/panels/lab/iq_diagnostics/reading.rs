@@ -10,7 +10,8 @@
 //! the decision then has nothing to do with drawing, and can be tested by
 //! writing down a handful of numbers.
 
-use crate::signal::image_rejection_db;
+pub(super) use crate::engine::view::iq::LoLine;
+use crate::engine::view::iq::{dc_spike_dbfs, image_rejection, lo_line};
 use crate::state::SdrMetrics;
 
 /// The IQ front-end's condition as one set of readings.
@@ -31,7 +32,10 @@ pub(super) struct Reading {
     pub dc_over_signal_db: Option<f64>,
     pub amp_db: f32,
     pub phase_deg: f32,
+    /// The image rejection, capped where the formula stops meaning a radio.
     pub irr_db: f64,
+    /// `irr_db` is the cap, and the formula said more.
+    pub irr_at_least: bool,
     /// Where the LO sits, Hz from the centre (`RadioState::lo_offset_hz`).
     /// Zero on a radio that mixes straight to 0 Hz, where the DC above is
     /// the LO's leak; anything else puts the leak somewhere the DC is not.
@@ -53,6 +57,7 @@ impl Reading {
         let dc_mag = (dc_i as f64).hypot(dc_q as f64);
         let spike_dbfs = dc_spike_dbfs(dc_mag);
         let rms_dbfs = state.signal.adc_rms_dbfs as f64;
+        let irr = image_rejection(state.iq.iq_imbalance_db, state.iq.phase_imbalance_deg);
         Self {
             dc_i,
             dc_q,
@@ -61,7 +66,8 @@ impl Reading {
             dc_over_signal_db: spike_dbfs.map(|s| s - rms_dbfs),
             amp_db: state.iq.iq_imbalance_db,
             phase_deg: state.iq.phase_imbalance_deg,
-            irr_db: image_rejection_db(state.iq.iq_imbalance_db, state.iq.phase_imbalance_deg),
+            irr_db: irr.db,
+            irr_at_least: irr.at_least,
             lo_offset_hz: state.radio.lo_offset_hz,
             lo_line: lo_line(state),
             balance_refusal: state.iq_balance_refusal(),
@@ -83,7 +89,7 @@ impl Reading {
     /// formula runs away to hundreds of dB as the imbalance approaches zero and
     /// no front end measures that.
     pub(super) fn irr_text(&self, decimals: usize) -> String {
-        if self.irr_db >= 60.0 {
+        if self.irr_at_least {
             if decimals == 0 {
                 "> 60".to_string()
             } else {
@@ -100,72 +106,9 @@ impl Reading {
     }
 }
 
-/// What the spectrum says at an LO off the centre.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum LoLine {
-    /// The LO is at the centre: the DC reading is its leak.
-    AtTheCentre,
-    /// No spectrum frame to read it from yet.
-    NoSpectrum,
-    /// Off the edge of the frame.
-    OutOfSpan,
-    /// The highest of the five bins round it, dBFS per bin.
-    Level(f64),
-}
-
-fn lo_line(state: &SdrMetrics) -> LoLine {
-    let offset = state.radio.lo_offset_hz;
-    if offset == 0 {
-        return LoLine::AtTheCentre;
-    }
-    let Some(frame) = state.waterfall.last_fft.as_ref() else {
-        return LoLine::NoSpectrum;
-    };
-    let n = frame.bins_dbfs.len();
-    if n == 0 || frame.sample_rate <= 0.0 {
-        return LoLine::NoSpectrum;
-    }
-    let at = (n as f64 / 2.0 + offset as f64 * n as f64 / frame.sample_rate).round();
-    if at < 0.0 || at >= n as f64 {
-        return LoLine::OutOfSpan;
-    }
-    let at = at as usize;
-    let peak = frame.bins_dbfs[at.saturating_sub(2)..=(at + 2).min(n - 1)]
-        .iter()
-        .copied()
-        .fold(f32::NEG_INFINITY, f32::max);
-    LoLine::Level(f64::from(peak))
-}
-
-/// DC spike level in dBFS: how tall the centre-frequency spike is in the spectrum.
-///   DC spike = 20·log₁₀(dc_magnitude)
-/// Returns None when dc_mag is zero (no spike).
-fn dc_spike_dbfs(dc_mag: f64) -> Option<f64> {
-    if dc_mag <= 0.0 {
-        return None;
-    }
-    Some(20.0 * dc_mag.log10())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dc_spike_typical_values() {
-        // dc_mag = 0.005 → spike = 20*log10(0.005) ≈ -46 dBFS
-        let s = dc_spike_dbfs(0.005).unwrap();
-        assert!(
-            (s - (-46.0)).abs() < 0.2,
-            "expected ~-46 dBFS, got {:.1}",
-            s
-        );
-    }
-
-    #[test]
-    fn dc_spike_zero_is_none() {
-        assert!(dc_spike_dbfs(0.0).is_none());
-    }
 
     /// The magnitude is the distance from zero, not the sum: an offset of the
     /// same size in both channels is 1.41× one of them, not 2×.

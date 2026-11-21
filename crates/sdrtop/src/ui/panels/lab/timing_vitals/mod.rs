@@ -106,6 +106,42 @@ mod tests {
 
     /// A stopped radio dashes every measured value rather than showing the last
     /// one it had - and says plainly that it is idle.
+    /// The bench dashes a figure exactly where the engine's view has none,
+    /// stopped and live: the screen and the API refuse the same numbers.
+    #[test]
+    fn the_bench_dashes_exactly_what_the_view_leaves_absent() {
+        for (what, m) in [("stopped", SdrMetrics::fixture()), ("live", live())] {
+            let v = crate::engine::view::vitals::vitals_readings(&m);
+            let lines = draw(TimingVitalsPanel, W, H, &m);
+            let row = |label: &str| {
+                lines
+                    .iter()
+                    .find(|l| l.contains(label))
+                    .unwrap_or_else(|| panic!("{what}: no {label} row"))
+                    .clone()
+            };
+            let delivered = if v.throughput.value().is_some_and(|t| t.what == "bus") {
+                "Bus throughput"
+            } else {
+                "Delivered"
+            };
+            for (label, absent) in [
+                ("Sample drops", v.drops_per_s.absent().is_some()),
+                ("ADC saturation", v.adc_saturation_pct.absent().is_some()),
+                (delivered, v.throughput.absent().is_some()),
+                ("Blocks dropped", v.fft_blocks_dropped.absent().is_some()),
+                ("queue peak", v.fft_queue_peak_pct.absent().is_some()),
+            ] {
+                let line = row(label);
+                assert_eq!(
+                    line.contains("---"),
+                    absent,
+                    "{what}: {label} reads {line:?}, the view says absent={absent}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_stopped_radio_dashes_its_readings() {
         let out = draw(TimingVitalsPanel, W, H, &SdrMetrics::fixture()).join("\n");

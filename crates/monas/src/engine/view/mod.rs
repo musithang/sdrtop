@@ -17,6 +17,11 @@
 //! scalar would be inventing it. What each reading carries alone is whether
 //! it is there, and if not, why.
 
+pub mod iq;
+pub mod record;
+pub mod spectrum;
+pub mod vitals;
+
 use std::time::Instant;
 
 use serde::Serialize;
@@ -108,6 +113,9 @@ pub struct Snapshot {
     pub mode: String,
     pub radio: Group<Radio>,
     pub signal: Group<Signal>,
+    pub iq: Group<iq::Iq>,
+    pub vitals: Group<vitals::Vitals>,
+    pub record: Group<Reading<record::Recording>>,
 }
 
 /// The snapshot of `m` as of `clock`.
@@ -118,6 +126,9 @@ pub fn snapshot(m: &SdrMetrics, clock: Clock) -> Snapshot {
         mode: m.mode.view.clone(),
         radio: radio(m, clock),
         signal: signal(m, clock),
+        iq: iq::iq(m, clock),
+        vitals: vitals::vitals(m, clock),
+        record: record::record(m),
     }
 }
 

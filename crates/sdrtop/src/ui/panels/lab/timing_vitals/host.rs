@@ -13,7 +13,6 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 
-use super::calc::link_ceiling_mbps;
 use super::rows::{load_color, Rows};
 
 pub(super) fn cpu_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
@@ -72,19 +71,18 @@ pub(super) fn usb_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
     // delivered pairs at the wire's bytes per pair (an R2 packing 12-bit
     // samples carries 3 for every 4 delivered). Where it does not, the
     // delivered figure under its own name.
-    let delivered = state.timing.throughput_mean_mbps;
-    let per_pair = state.caps.sample_geometry.bytes_per_pair() as f64;
-    let wire = state.timing.wire_bytes_per_pair.filter(|&w| w > 0.0);
-    let (name, mbps, bytes) = match wire {
-        Some(w) => ("Bus throughput ", delivered * w / per_pair, w),
-        None => ("Delivered ", delivered, per_pair),
-    };
-    let ceiling = link_ceiling_mbps(state.caps.sample_rate_max_hz, bytes);
-    let util = if ceiling > 0.0 {
-        (mbps / ceiling).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
+    // The figures are the engine's, the ones the API serves too.
+    let t = crate::engine::view::vitals::throughput(state);
+    let (name, mbps, ceiling, util) = (
+        if t.what == "bus" {
+            "Bus throughput "
+        } else {
+            "Delivered "
+        },
+        t.mb_s,
+        t.ceiling_mb_s,
+        t.utilisation,
+    );
     out.push(Line::from(if r.stale {
         vec![Span::raw(" "), Span::styled(name, r.lbl()), r.dash()]
     } else {

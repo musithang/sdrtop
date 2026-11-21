@@ -107,7 +107,15 @@ impl<'a> Rows<'a> {
         hi: Color,
         val_col: Color,
     ) -> Line<'static> {
-        let vw = value_str.chars().count() + 1;
+        // The tail's width is what is printed: the value, or the dash that
+        // stands for it while stale. Measured from the value alone, a short
+        // one (`0%`) left the dash no room and it printed as `--`.
+        let shown = if self.stale {
+            "---".chars().count()
+        } else {
+            value_str.chars().count()
+        };
+        let vw = shown + 1;
         let bar_w = self.iw.saturating_sub(1 + LABEL_W + 1 + vw).max(4);
         let mut spans = vec![
             Span::raw(" "),

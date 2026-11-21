@@ -25,12 +25,12 @@ are two programs built on the same engine. Neither knows the other exists.
 **What it does today, honestly.** monasd opens the radio, computes the mode
 you ask for (the same receivers sdrtop would run for that view), takes
 commands, tells you how it is doing and streams events. Of the measurements
-it serves the first few so far: the radio with its gain chain and frequency
-reference, and the signal's figures (peak over noise, channel power, occupied
-bandwidth, noise floor), each with the same right to say "I don't know" that
-the screen has. The spectrum itself, the I/Q bench, the decoders and the
-2.4 GHz band are next, so for now monasd is a radio you can drive and read a
-handful of honest numbers off, not yet the whole instrument.
+it serves the instrument's own readings so far: the radio with its gain
+chain and frequency reference, the signal's figures, the I/Q front end, the
+pipeline's vital signs, the recorder and the spectrum itself, each with the
+same right to say "I don't know" that the screen has. The decoders (pagers,
+FT8) and the 2.4 GHz band are next, so for now monasd is the bench without
+the radio stations.
 
 ## Starting it
 
@@ -105,7 +105,7 @@ loopback), which is what I do.
 ## The API
 
 Everything lives under `/v1`, so a later change of shape is a new prefix
-rather than a surprise for every script written against this one. Seven
+rather than a surprise for every script written against this one. Eight
 routes:
 
 | Route | What it gives |
@@ -113,7 +113,8 @@ routes:
 | `GET /v1/health` | The radio, whether it streams, whether its data is stale, the tuning, the mode, samples lost (the driver's and sdrtop's own, apart), each feed's refusals, the process's CPU and memory |
 | `GET /v1/radios` | Every radio found at start, which one is open, and whether its support was tested on a real one or written from the library's headers |
 | `GET /v1/config` | The engine's blocks of the config, as they would be saved now |
-| `GET /v1/snapshot` | What the engine reads (the radio and its gain chain, the signal's figures), each figure a `value` or the reason it is `absent`, each group with its testimony: when it was read, whether it is stale |
+| `GET /v1/snapshot` | What the engine reads, group by group: the radio and its gain chain, the signal's figures, the I/Q front end, the pipeline's vitals, the recorder. Each figure a `value` or the reason it is `absent`, each group with its testimony: when it was read, whether it is stale |
+| `GET /v1/spectrum` | The latest spectrum frame: every bin in dBFS, the axis they lie on and the resolution bandwidth they were measured in. Its own route, so a script that wants five numbers isn't handed eight thousand |
 | `GET /v1/provenance` | Which radio, tuned where, in which mode, against what frequency reference, for how long: the same fields an export's header carries |
 | `POST /v1/command` | One command, answered |
 | `GET /v1/events` | A WebSocket, one JSON message per event |

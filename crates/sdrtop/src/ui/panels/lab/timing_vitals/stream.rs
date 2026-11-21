@@ -57,14 +57,10 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
             Span::styled("In the radio ", r.lbl()),
             Span::styled(format!("not counted: {why}"), r.dim()),
         ])),
-        RadioDropAccount::Counted {
-            stream,
-            longest_bytes,
-            ..
-        } => {
-            let geometry = state.caps.sample_geometry;
-            let rate = state.radio.config_sample_rate.max(1.0);
-            let longest_ms = *longest_bytes as f64 / geometry.bytes_per_pair() as f64 / rate * 1e3;
+        RadioDropAccount::Counted { stream, .. } => {
+            let longest_ms = crate::engine::view::vitals::radio_drops(state)
+                .value()
+                .map_or(0.0, |d| d.longest_ms);
             let tail = if *stream > 0 {
                 format!("   this stream, the longest {longest_ms:.1} ms")
             } else {

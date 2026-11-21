@@ -116,6 +116,7 @@ pub fn router(access: Access) -> Router {
         .route("/v1/config", get(config))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/provenance", get(provenance))
+        .route("/v1/spectrum", get(spectrum))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -188,6 +189,21 @@ async fn health(State(access): State<Access>) -> Json<serde_json::Value> {
 async fn snapshot(State(access): State<Access>) -> Json<crate::engine::view::Snapshot> {
     let state = access.engine.snapshot();
     Json(crate::engine::view::snapshot(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// The latest spectrum frame with its testimony, or why there is none.
+/// Its own route, so a client that wants the figures is not sent thousands
+/// of bins with every snapshot.
+async fn spectrum(
+    State(access): State<Access>,
+) -> Json<
+    crate::engine::view::Group<crate::engine::view::Reading<crate::engine::view::spectrum::Frame>>,
+> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::spectrum::spectrum(
         &state,
         crate::engine::view::Clock::now(),
     ))
@@ -371,6 +387,20 @@ mod tests {
         );
         assert!(json["radio"]["frequency_hz"].is_u64(), "{json}");
         assert!(json["at_unix_ms"].as_u64().unwrap() > 1_700_000_000_000);
+        for group in ["radio", "signal", "iq", "vitals", "record"] {
+            assert!(json[group]["testimony"].is_object(), "no {group}: {json}");
+        }
+    }
+
+    /// With no frame yet, the spectrum route says so rather than sending an
+    /// empty array a client could read as a silent band.
+    #[tokio::test]
+    async fn the_spectrum_says_when_there_is_no_frame() {
+        let (engine, _) = engine_on(Bench::new());
+        let (status, json) = ask(router(Access::loopback(engine)), get("/v1/spectrum")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["absent"], "no spectrum frame yet", "{json}");
+        assert_eq!(json["testimony"]["stale"], true);
     }
 
     /// The provenance is the export header's fields, as JSON.

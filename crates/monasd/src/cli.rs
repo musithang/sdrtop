@@ -101,6 +101,7 @@ Everything is under http://ADDR/v1, JSON in and out:
   GET  /v1/radios      the radios found, and which one is open
   GET  /v1/config      the engine's settings, as they would be saved now
   GET  /v1/snapshot    every reading, or why it has none, and when it was read
+  GET  /v1/spectrum    the latest spectrum frame, its bins and their RBW
   GET  /v1/provenance  which radio, tuned where, against what reference
   POST /v1/command     one command, answered with what was done or why not
   GET  /v1/events      a WebSocket: commands applied, log lines, gaps, stalls

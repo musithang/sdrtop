@@ -79,7 +79,13 @@ impl Panel for IqDiagnosticsPanel {
         theme: &crate::Theme,
         _focused: bool,
     ) {
-        if !state.radio.hw_streaming {
+        // The engine decides whether the front end can be read; with no
+        // stream it cannot, and every figure is dashed.
+        if crate::engine::view::iq::iq_readings(state)
+            .dc_i
+            .absent()
+            .is_some()
+        {
             f.render_widget(
                 Paragraph::new(Span::styled("---", Style::default().fg(theme.label))),
                 inner,
@@ -138,6 +144,45 @@ mod tests {
         );
         let plain = draw(IqDiagnosticsPanel, 72, 30, &bench()).join("\n");
         assert!(!plain.contains("SDRplay"), "{plain}");
+    }
+
+    /// The bench shows what the engine's view says and refuses what it
+    /// refuses: nothing with no stream, the balance withheld for the reason
+    /// the view gives, every figure when both can be read.
+    #[test]
+    fn the_bench_shows_exactly_what_the_view_reads() {
+        use crate::engine::view::iq::iq_readings;
+
+        let stopped = SdrMetrics::fixture();
+        let v = iq_readings(&stopped);
+        assert!(v.dc_i.absent().is_some() && v.gain_imbalance_db.absent().is_some());
+        let out = draw(IqDiagnosticsPanel, 72, 30, &stopped).join("\n");
+        assert!(out.contains("---") && !out.contains("gain"), "{out}");
+
+        let mut turned = bench();
+        turned.radio.lo_offset_hz = 250_000;
+        let v = iq_readings(&turned);
+        let why = v
+            .gain_imbalance_db
+            .absent()
+            .expect("the balance is withheld");
+        assert!(v.dc_i.value().is_some());
+        let out = draw(IqDiagnosticsPanel, 72, 40, &turned).join(" ");
+        let flat = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        let first_words = why.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+        assert!(flat.contains("Not measured:"), "{flat}");
+        assert!(
+            flat.contains(&first_words),
+            "the view says {why:?}, the bench:\n{flat}"
+        );
+
+        let v = iq_readings(&bench());
+        assert!(v.gain_imbalance_db.value().is_some() && v.image_rejection.value().is_some());
+        let out = draw(IqDiagnosticsPanel, 72, 30, &bench()).join("\n");
+        assert!(
+            !out.contains("Not measured") && out.contains("gain"),
+            "{out}"
+        );
     }
 
     /// A stopped radio shows no readings at all, rather than the last ones it
