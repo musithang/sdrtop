@@ -20,6 +20,7 @@
 pub mod demod;
 pub mod ft8;
 pub mod iq;
+pub mod net;
 pub mod pager;
 pub mod record;
 pub mod spectrum;
@@ -122,6 +123,7 @@ pub struct Snapshot {
     pub pager: Group<pager::Pager>,
     pub ft8: Group<ft8::Ft8>,
     pub demod: Group<demod::Demod>,
+    pub net: Group<net::Net>,
 }
 
 /// The snapshot of `m` as of `clock`.
@@ -138,6 +140,7 @@ pub fn snapshot(m: &SdrMetrics, clock: Clock) -> Snapshot {
         pager: pager::pager(m, clock),
         ft8: ft8::ft8(m),
         demod: demod::demod(m, clock),
+        net: net::net(m, clock),
     }
 }
 

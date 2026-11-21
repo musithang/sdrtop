@@ -119,6 +119,8 @@ pub fn router(access: Access) -> Router {
         .route("/v1/spectrum", get(spectrum))
         .route("/v1/pager", get(pager))
         .route("/v1/ft8", get(ft8))
+        .route("/v1/net/band", get(net_band))
+        .route("/v1/net/census", get(net_census))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -240,6 +242,31 @@ async fn ft8(
 ) -> Json<crate::engine::view::Group<crate::engine::view::ft8::Decodes>> {
     let state = access.engine.snapshot();
     Json(crate::engine::view::ft8::decodes(&state, q.since))
+}
+
+/// The 2.4 GHz band's occupancy, one megahertz to a cell: the occupancy
+/// export's account, unobserved cells unobserved rather than zero.
+async fn net_band(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::Reading<crate::engine::view::net::Band>>>
+{
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::net::band(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
+}
+
+/// The census of transmitters, in the panel's order, addresses shown as
+/// the panel shows them: the census export's account.
+async fn net_census(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::net::Census>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::net::census(
+        &state,
+        crate::engine::view::Clock::now(),
+    ))
 }
 
 /// Where the measurements come from: the same fields an export's header
@@ -456,6 +483,29 @@ mod tests {
             json["note"], "nothing has been decoded this session",
             "{json}"
         );
+    }
+
+    /// Outside the survey the band says where it is measured; the census
+    /// answers with the transmitters it holds, none yet.
+    #[tokio::test]
+    async fn the_band_and_the_census_answer() {
+        let (engine, _) = engine_on(Bench::new());
+        let app = router(Access::loopback(engine));
+        let (status, json) = ask(app.clone(), get("/v1/net/band")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json["absent"]
+                .as_str()
+                .is_some_and(|w| w.contains("Survey")),
+            "{json}"
+        );
+        let (status, json) = ask(app, get("/v1/net/census")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json["devices"].as_array().is_some_and(Vec::is_empty),
+            "{json}"
+        );
+        assert!(json["testimony"].is_object(), "{json}");
     }
 
     /// The provenance is the export header's fields, as JSON.

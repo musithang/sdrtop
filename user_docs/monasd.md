@@ -25,12 +25,13 @@ are two programs built on the same engine. Neither knows the other exists.
 **What it does today, honestly.** monasd opens the radio, computes the mode
 you ask for (the same receivers sdrtop would run for that view), takes
 commands, tells you how it is doing and streams events. Of the measurements
-it serves everything but the 2.4 GHz band: the radio with its gain chain and
-frequency reference, the signal's figures, the I/Q front end, the pipeline's
-vital signs, the recorder, the spectrum itself, the demodulator, and the
-pagers and FT8 decodes with their physics, each with the same right to say
-"I don't know" that the screen has. The 2.4 GHz band (Bluetooth, Wi-Fi) is
-next, and it is the biggest piece, which is why it is last.
+it serves nearly everything the screen has: the radio with its gain chain
+and frequency reference, the signal's figures, the I/Q front end, the
+pipeline's vital signs, the recorder, the spectrum itself, the demodulator,
+the pagers and FT8 decodes with their physics, and on 2.4 GHz the band's
+occupancy and the census of transmitters, each with the same right to say
+"I don't know" that the screen has. Still to come from 2.4 GHz: the packet
+lists, the frame error curve and Wi-Fi.
 
 ## Starting it
 
@@ -106,7 +107,7 @@ loopback), which is what I do.
 ## The API
 
 Everything lives under `/v1`, so a later change of shape is a new prefix
-rather than a surprise for every script written against this one. Ten
+rather than a surprise for every script written against this one. Twelve
 routes:
 
 | Route | What it gives |
@@ -114,15 +115,19 @@ routes:
 | `GET /v1/health` | The radio, whether it streams, whether its data is stale, the tuning, the mode, samples lost (the driver's and sdrtop's own, apart), each feed's refusals, the process's CPU and memory |
 | `GET /v1/radios` | Every radio found at start, which one is open, and whether its support was tested on a real one or written from the library's headers |
 | `GET /v1/config` | The engine's blocks of the config, as they would be saved now |
-| `GET /v1/snapshot` | What the engine reads, group by group: the radio and its gain chain, the signal's figures, the I/Q front end, the pipeline's vitals, the recorder, the demodulator, and the pager's and FT8's counts. Each figure a `value` or the reason it is `absent`, each group with its testimony: when it was read, whether it is stale |
+| `GET /v1/snapshot` | What the engine reads, group by group: the radio and its gain chain, the signal's figures, the I/Q front end, the pipeline's vitals, the recorder, the demodulator, the pager's and FT8's counts, and the 2.4 GHz receivers and their feed. Each figure a `value` or the reason it is `absent`, each group with its testimony: when it was read, whether it is stale |
 | `GET /v1/spectrum` | The latest spectrum frame: every bin in dBFS, the axis they lie on and the resolution bandwidth they were measured in. Its own route, so a script that wants five numbers isn't handed eight thousand |
 | `GET /v1/pager` | The pages, as the pager view shows them: with the text, or with the pager masked, only each page's kind and length; only its own address's when it answers to one. Each with the transmission's physics (rate, clock error, shift, SNR, level, repairs). `?since=N` sends only the ones after page `N` |
 | `GET /v1/ft8` | The FT8 decodes held, each with what it measured beside what it said: the same fields as the CSV export, `null` wherever the file is blank. `?since=N` the same way |
+| `GET /v1/net/band` | The 2.4 GHz band, one megahertz to a cell, measured on the survey: each cell's duty cycle with its uncertainty, how much of its time was watched, its levels. A cell nobody looked at says so instead of reading zero, a duty cycle too uncertain to state has no value but keeps its uncertainty, and a floor that failed its own checks takes the whole band with it. The occupancy export's figures, as JSON |
+| `GET /v1/net/census` | Every transmitter heard, in the order the census panel shows them, with what it said about itself and what was measured of it (SNR, crystal offset, modulation index, advertising timing), each with its uncertainty. Addresses are shown the way the panel's address mode shows them. The census export's figures, as JSON |
 
-The pager's mask and its own address are set from sdrtop's pager view, and
-monasd has no switch for either yet, so the pages it serves carry their text.
-If that is not what you want on a box other people can reach, don't run the
-pager mode there until the switch exists.
+The pager's mask and its own address, and the way the census shows
+addresses, are set from sdrtop's views, and monasd has no switch for any of
+them yet: its pages carry their text and its census the full addresses. If
+that is not what you want on a box other people can reach, don't run the
+pager or NET modes there until the switches exist. They are next on the list,
+right after the packet lists.
 | `GET /v1/provenance` | Which radio, tuned where, in which mode, against what frequency reference, for how long: the same fields an export's header carries |
 | `POST /v1/command` | One command, answered |
 | `GET /v1/events` | A WebSocket, one JSON message per event |

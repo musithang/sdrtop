@@ -19,7 +19,6 @@
 //! An empty CSV field is what a spreadsheet and `pandas.read_csv` both already
 //! read as "no value", so this needs no convention of its own.
 
-use crate::signal::net::occupancy;
 use crate::state::SdrMetrics;
 
 /// The columns, and the header row that names them.
@@ -29,58 +28,32 @@ use crate::state::SdrMetrics;
 pub const HEADER: &str =
     "mhz,observed,duty_pct,duty_sigma_pct,coverage_pct,mean_dbfs,peak_dbfs,windows";
 
-/// The band as CSV rows, or the reason there are none.
+/// The band as CSV rows, or the reason there are none: the engine's account
+/// of it ([`crate::engine::view::net::band_record`]) written as text, empty
+/// where the account has no figure. A spreadsheet and `pandas.read_csv` both
+/// read an empty field as "no value", so blank needs no convention.
 pub fn rows(state: &SdrMetrics) -> Result<Vec<String>, String> {
-    let band = &state.net.band;
-    if !state.mode.net.survey {
-        return Err(
-            "the band is measured on NET 2 Survey only; export from there for a current one"
-                .to_string(),
-        );
-    }
-    if band.cells.is_empty() {
-        return Err("no band measurement yet".to_string());
-    }
-    if !band.trusted {
-        return Err(format!(
-            "the noise floor failed its preconditions (lower tail {:.2}, decile spread {:.1}), \
-             so nothing here was measured against a floor",
-            band.tail, band.spread
-        ));
-    }
-
+    let band = crate::engine::view::net::band_record(state)?;
+    let opt =
+        |v: Option<f64>, places: usize| v.map(|x| format!("{x:.places$}")).unwrap_or_default();
     Ok(band
         .cells
         .iter()
-        .enumerate()
-        .map(|(cell, c)| {
-            let mhz = occupancy::cell_centre_hz(cell) as f64 / 1e6;
-            if !c.observed() {
+        .map(|c| {
+            let mhz = c.mhz;
+            if !c.observed {
                 // Every measured column empty, and the row still present: the
                 // band has this megahertz in it whether or not we looked.
                 return format!("{mhz:.1},no,,,,,,0");
             }
-            let duty = occupancy::duty_uncertain(c.duty, c.windows).scale(100.0);
-            // The same question the panel asks before it prints a number, asked
-            // of the same `Uncertain`, so the file and the screen cannot
-            // disagree about which values exist.
-            let shown = if duty.is_resolved(occupancy::DUTY_RESOLUTION * 100.0) {
-                format!("{:.2}", duty.value())
-            } else {
-                String::new()
-            };
-            let sigma = if duty.sigma().is_finite() {
-                format!("{:.2}", duty.sigma())
-            } else {
-                String::new()
-            };
-            let coverage = c
-                .coverage
-                .map(|f| format!("{:.1}", f * 100.0))
-                .unwrap_or_default();
             format!(
-                "{mhz:.1},yes,{shown},{sigma},{coverage},{:.1},{:.1},{}",
-                c.mean_dbfs, c.peak_dbfs, c.windows
+                "{mhz:.1},yes,{},{},{},{},{},{}",
+                opt(c.duty_pct, 2),
+                opt(c.duty_sigma_pct, 2),
+                opt(c.coverage_pct, 1),
+                opt(c.mean_dbfs, 1),
+                opt(c.peak_dbfs, 1),
+                c.windows
             )
         })
         .collect())
@@ -122,6 +95,7 @@ pub mod sample {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::net::occupancy;
     use crate::state::CellReading;
 
     /// The band is measured on the survey alone; exported from another view

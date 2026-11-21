@@ -551,19 +551,6 @@ fn seconds(s: f64) -> String {
     }
 }
 
-/// How long ago the oldest cell on screen was measured. `None` when no cell
-/// has been.
-fn oldest_reading_age(state: &SdrMetrics) -> Option<std::time::Duration> {
-    let oldest = state
-        .net
-        .band
-        .cells
-        .iter()
-        .filter_map(|c| c.measured)
-        .min()?;
-    Some(oldest.elapsed())
-}
-
 impl Panel for NetOccupancyPanel {
     fn name(&self) -> &'static str {
         "net_occupancy"
@@ -640,7 +627,7 @@ impl Panel for NetOccupancyPanel {
         // The bars are the latest reading of each cell, so what they span is
         // back to the oldest of those readings: a whole pass while surveying,
         // moments while locked. No measured cell, no numbers, nothing to caveat.
-        match oldest_reading_age(state) {
+        match crate::engine::view::net::oldest_reading_age(state) {
             Some(age) => chrome.counts_from_feed(FeedSpan::Window(age)),
             None => chrome,
         }
