@@ -36,6 +36,9 @@ pub struct Header {
     pub gain: String,
     pub reference: String,
     pub iq_correction: String,
+    /// The program that wrote the recording, and its version: what
+    /// `core:recorder` says.
+    pub recorder: String,
 }
 
 /// SigMF's name for one of sdrtop's sample formats (1.8).
@@ -130,6 +133,7 @@ impl Header {
             ),
             reference: crate::export::provenance::reference_line(state, std::time::Instant::now()),
             iq_correction,
+            recorder: format!("monas {}", env!("CARGO_PKG_VERSION")),
         })
     }
 }
@@ -154,10 +158,7 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
     put("core:version", json!(SIGMF_VERSION));
     put("core:sample_rate", json!(header.sample_rate));
     put("core:hw", json!(header.hw));
-    put(
-        "core:recorder",
-        json!(format!("sdrtop {}", env!("CARGO_PKG_VERSION"))),
-    );
+    put("core:recorder", json!(header.recorder));
     put("core:description", json!(header.description));
     put(
         "core:extensions",
@@ -283,6 +284,7 @@ mod tests {
             gain: "LNA=16,VGA=20, amp off".to_string(),
             reference: "unreferenced, no reference established".to_string(),
             iq_correction: "none".to_string(),
+            recorder: "sdrtop 0.0.0".into(),
         }
     }
 

@@ -67,6 +67,10 @@ dB here, a header that could not be read.
 | `GET /v1/net/wifi/survey` | The Wi-Fi survey: each channel's busy share over its visits, its airtime by family, and which channel is least busy or why none can be named yet. | group of [`Survey`](#survey) |
 | `GET /v1/net/wifi/frames` | The Wi-Fi frames heard on the radio's centre, newest first, worded as the Frames list words them. `?since=N` sends only frames after `N`. | group of [`Frames`](#frames) |
 | `GET /v1/net/wifi/airtime` | The locked channel's airtime: its share, who spent it, and the rhythm of the gaps. | group of [`Airtime`](#airtime) |
+| `POST /v1/recording` | Start a SigMF recording into the recordings folder, named by the time, with `{"seconds": .., "gigabytes": ..}` in place of the config's limits where given: answered as a command is. | [a reply](#commands) |
+| `POST /v1/recording/stop` | Stop the recording running, keeping every block already captured: answered as a command is. | [a reply](#commands) |
+| `GET /v1/recordings` | The recordings in the recordings folder, oldest first. Their data stays on this machine; their metadata is one route further. | `Listing` |
+| `GET /v1/recordings/{name}` | One recording's `.sigmf-meta`, by the name the listing gives it: what it holds, where its samples are missing and why, and how it ended. | the recording's `.sigmf-meta`, as JSON; 404 for a name the folder does not hold |
 | `POST /v1/command` | One command, answered: 200 when applied, 422 with the reason when not. | [a reply](#commands) |
 | `GET /v1/events` | The events, as they happen, one JSON message each. | [a WebSocket of events](#events) |
 

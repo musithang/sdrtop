@@ -44,6 +44,8 @@ pub struct Access {
     radios: Arc<Vec<Radio>>,
     /// The config as loaded, for the blocks the state does not hold.
     config: Arc<EngineConfig>,
+    /// The recorder and its folder, once the stream's tap exists.
+    recordings: Option<Arc<crate::record::Recordings>>,
 }
 
 /// One radio found, as the API lists it.
@@ -80,6 +82,7 @@ impl Access {
             token: None,
             radios: Arc::default(),
             config: Arc::default(),
+            recordings: None,
         }
     }
 
@@ -106,6 +109,14 @@ impl Access {
             ..self
         }
     }
+
+    /// The recorder, writing into its folder.
+    pub fn with_recordings(self, recordings: Arc<crate::record::Recordings>) -> Self {
+        Self {
+            recordings: Some(recordings),
+            ..self
+        }
+    }
 }
 
 /// Every route, behind the token check.
@@ -128,6 +139,10 @@ pub fn router(access: Access) -> Router {
         .route("/v1/net/wifi/survey", get(wifi_survey))
         .route("/v1/net/wifi/frames", get(wifi_frames))
         .route("/v1/net/wifi/airtime", get(wifi_airtime))
+        .route("/v1/recording", post(recording_start))
+        .route("/v1/recording/stop", post(recording_stop))
+        .route("/v1/recordings", get(recordings))
+        .route("/v1/recordings/{name}", get(recording_meta))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -424,6 +439,79 @@ async fn wifi_airtime(
     ))
 }
 
+/// The reply when there is no recorder to use.
+fn no_recorder() -> Response {
+    answered(Reply::Refused {
+        reason: "nothing to record from: the stream has no recorder".to_string(),
+    })
+}
+
+/// A reply as a command's is answered: 200 when done, 422 with the reason
+/// when not.
+fn answered(reply: Reply) -> Response {
+    let status = match reply {
+        Reply::Applied { .. } => StatusCode::OK,
+        Reply::Refused { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+    };
+    (status, Json(reply)).into_response()
+}
+
+/// Start a SigMF recording into the recordings folder, named by the time,
+/// with `{"seconds": .., "gigabytes": ..}` in place of the config's limits
+/// where given: answered as a command is.
+async fn recording_start(
+    State(access): State<Access>,
+    ask: Option<Json<crate::record::Ask>>,
+) -> Response {
+    let Some(r) = access.recordings.clone() else {
+        return no_recorder();
+    };
+    let ask = ask.map(|Json(a)| a).unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    // The recorder checks the disk and creates files.
+    match tokio::task::spawn_blocking(move || r.start(ask, now)).await {
+        Ok(reply) => answered(reply),
+        Err(e) => answered(Reply::Refused {
+            reason: format!("the recorder did not start: {e}"),
+        }),
+    }
+}
+
+/// Stop the recording running, keeping every block already captured:
+/// answered as a command is.
+async fn recording_stop(State(access): State<Access>) -> Response {
+    match &access.recordings {
+        Some(r) => answered(r.stop()),
+        None => no_recorder(),
+    }
+}
+
+/// The recordings in the recordings folder, oldest first. Their data stays
+/// on this machine; their metadata is one route further.
+async fn recordings(State(access): State<Access>) -> Json<crate::record::Listing> {
+    Json(match &access.recordings {
+        Some(r) => r.list(),
+        None => crate::record::Listing { recordings: vec![] },
+    })
+}
+
+/// One recording's `.sigmf-meta`, by the name the listing gives it: what it
+/// holds, where its samples are missing and why, and how it ended.
+async fn recording_meta(
+    State(access): State<Access>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Response {
+    let Some(r) = access.recordings.clone() else {
+        return no_recorder();
+    };
+    match r.meta(&name) {
+        Ok(meta) => Json(meta).into_response(),
+        Err(why) => (StatusCode::NOT_FOUND, Json(Reply::Refused { reason: why })).into_response(),
+    }
+}
+
 /// Where the measurements come from: the same fields an export's header
 /// carries, by the same names.
 async fn provenance(
@@ -698,6 +786,40 @@ mod tests {
                 .is_some_and(|n| n.contains("LE Coded")),
             "{coded}"
         );
+    }
+
+    /// A recording over the API: started, listed, its metadata served by
+    /// its name, stopped; a name the folder does not hold is a 404.
+    #[tokio::test]
+    async fn a_recording_runs_through_the_api() {
+        let dir = std::env::temp_dir().join(format!("monasd-api-rec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        m.radio.config_sample_rate = 1e6;
+        let state = Arc::new(std::sync::Mutex::new(m));
+        let engine = Engine::new(Arc::clone(&state), Arc::new(Bench::new()));
+        let rec = Arc::new(crate::record::Recordings::new(
+            Arc::clone(&state),
+            Arc::new(crate::hardware::RecordTap::default()),
+            dir.clone(),
+            crate::config::RecordSettings::default(),
+            "monasd test".into(),
+        ));
+        let app = router(Access::loopback(engine).with_recordings(Arc::clone(&rec)));
+        let (status, json) = ask(app.clone(), post("/v1/recording", r#"{"seconds": 2}"#)).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        let (_, list) = ask(app.clone(), get("/v1/recordings")).await;
+        let name = list["recordings"][0]["name"].as_str().unwrap().to_string();
+        assert_eq!(list["recordings"][0]["running"], true, "{list}");
+        let (status, meta) = ask(app.clone(), get(&format!("/v1/recordings/{name}"))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(meta["global"]["core:recorder"], "monasd test");
+        let (status, _) = ask(app.clone(), get("/v1/recordings/..%2Fsecret")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = ask(app.clone(), post("/v1/recording/stop", "{}")).await;
+        assert_eq!(status, StatusCode::OK);
+        rec.finish();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The provenance is the export header's fields, as JSON.

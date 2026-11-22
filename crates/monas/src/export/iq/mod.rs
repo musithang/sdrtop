@@ -50,12 +50,15 @@ pub struct Recorder {
 
 impl Recorder {
     /// Start recording what `tap` is fed into `dir`, or say why not.
+    /// `recorder` is the program writing it and its version, as the
+    /// metadata's `core:recorder` names it.
     pub fn start(
         state: &Arc<Mutex<SdrMetrics>>,
         tap: &Arc<RecordTap>,
         dir: &Path,
         limits: Limits,
         now_unix: f64,
+        recorder: &str,
     ) -> Result<Recorder, String> {
         if tap.armed() {
             return Err("a recording is running already".to_string());
@@ -65,7 +68,9 @@ impl Recorder {
             if !m.radio.rx_enabled {
                 return Err("not streaming: start the radio with Space first".to_string());
             }
-            (Header::from_state(&m)?, Arc::clone(&m.caps))
+            let mut header = Header::from_state(&m)?;
+            header.recorder = recorder.to_string();
+            (header, Arc::clone(&m.caps))
         };
         let needed = limits.bytes(header.sample_rate, header.bytes_per_pair) + DISK_MARGIN_BYTES;
         let free = crate::export::destination::free_bytes(dir)?;
@@ -335,6 +340,22 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
 
+    /// The metadata names the program that wrote it, whichever runs the
+    /// engine: the terminal and the headless server each say their own name.
+    #[test]
+    fn the_metadata_names_the_program_that_wrote_it() {
+        let dir = scratch("recorder-name");
+        let state = streaming();
+        let tap = Arc::new(RecordTap::default());
+        let rec =
+            Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW, "monasd 9.9.9").unwrap();
+        let meta = meta_of(&data_path_of(&state));
+        assert_eq!(meta["global"]["core:recorder"], "monasd 9.9.9", "{meta}");
+        rec.stop();
+        rec.finish();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Blocks in, a stop, and the pair on disk says exactly what went in:
     /// the bytes unchanged, the hole where the queue refused a block, and
     /// why it ended.
@@ -343,7 +364,7 @@ mod tests {
         let dir = scratch("roundtrip");
         let state = streaming();
         let tap = Arc::new(RecordTap::default());
-        let rec = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW).unwrap();
+        let rec = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW, "sdrtop test").unwrap();
         assert!(state
             .lock()
             .unwrap()
@@ -416,7 +437,7 @@ mod tests {
             max_secs: 0.00015,
             max_bytes: 4_000_000_000,
         };
-        let rec = Recorder::start(&state, &tap, &dir, limits, NOW).unwrap();
+        let rec = Recorder::start(&state, &tap, &dir, limits, NOW, "sdrtop test").unwrap();
         tap.offer(at(0, 100), &[1; 200], vec![], false);
         tap.offer(at(100, 100), &[2; 200], vec![], false);
         let path = data_path_of(&state);
@@ -459,7 +480,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs_f64();
-        let rec = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, now).unwrap();
+        let rec = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, now, "sdrtop test").unwrap();
         let block = vec![3u8; (BLOCK_PAIRS * 2) as usize];
         let every = Duration::from_secs_f64(BLOCK_PAIRS as f64 / RATE);
         let blocks = (seconds * RATE / BLOCK_PAIRS as f64) as u64;
@@ -495,7 +516,7 @@ mod tests {
         let tap = Arc::new(RecordTap::default());
 
         let idle = Arc::new(Mutex::new(SdrMetrics::fixture()));
-        let err = Recorder::start(&idle, &tap, &dir, Limits::DEFAULT, NOW)
+        let err = Recorder::start(&idle, &tap, &dir, Limits::DEFAULT, NOW, "sdrtop test")
             .err()
             .unwrap();
         assert!(err.contains("not streaming"), "{err}");
@@ -505,21 +526,28 @@ mod tests {
             max_secs: 1e12,
             max_bytes: u64::MAX / 4,
         };
-        let err = Recorder::start(&state, &tap, &dir, huge, NOW)
+        let err = Recorder::start(&state, &tap, &dir, huge, NOW, "sdrtop test")
             .err()
             .unwrap();
         assert!(err.contains("GB free"), "{err}");
 
-        let rec = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW).unwrap();
-        let err = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW + 5.0)
-            .err()
-            .unwrap();
+        let rec = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW, "sdrtop test").unwrap();
+        let err = Recorder::start(
+            &state,
+            &tap,
+            &dir,
+            Limits::DEFAULT,
+            NOW + 5.0,
+            "sdrtop test",
+        )
+        .err()
+        .unwrap();
         assert!(err.contains("running already"), "{err}");
         rec.stop();
         rec.finish();
 
         // One pair per second is the naming, and a name is never reused.
-        let err = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW)
+        let err = Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW, "sdrtop test")
             .err()
             .unwrap();
         assert!(err.contains("refusing to overwrite"), "{err}");

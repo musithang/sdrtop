@@ -29,6 +29,9 @@ pub struct HeadlessPlan {
     /// The display switches to set before anything is served: how addresses
     /// are shown, and the pager's mask and own address.
     pub display: Vec<Command>,
+    /// Where the API's recordings go: the config's `recordings_dir`, else
+    /// the folder the terminal records to.
+    pub recordings_dir: std::path::PathBuf,
 }
 
 /// Decide a headless run from the flags (`listen`, `mode`), which win, and
@@ -95,6 +98,10 @@ pub fn plan(
         spectrum: !mode.feeds.net,
         mode,
         display,
+        recordings_dir: settings
+            .recordings_dir
+            .clone()
+            .unwrap_or_else(crate::export::destination::default_dir),
     })
 }
 

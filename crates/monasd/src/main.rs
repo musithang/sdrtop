@@ -22,10 +22,16 @@ mod api_doc;
 mod cli;
 mod config;
 mod plan;
+mod record;
 mod server;
 
 /// The engine, under the names its parts have in Monas.
 pub(crate) use monas::{engine, export, hardware, state};
+
+/// What `core:recorder` names for the recordings this program writes.
+fn recorder_name() -> String {
+    format!("monasd {}", cli::VERSION)
+}
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -206,9 +212,19 @@ pub async fn run(
         .enumerate()
         .map(|(i, d)| server::Radio::new(&d.label, d.kind, d.serial.clone(), i == chosen))
         .collect();
-    let access = access.with_radios(radios).with_config(cfg.clone());
-
+    // The stream's feeds first: the recorder takes its blocks from them.
     let (rx_ctx, feeds) = start::feeds(&state, geometry);
+    let recordings = Arc::new(record::Recordings::new(
+        Arc::clone(&state),
+        Arc::clone(&rx_ctx.record),
+        plan.recordings_dir.clone(),
+        cfg.record.clone(),
+        recorder_name(),
+    ));
+    let access = access
+        .with_radios(radios)
+        .with_config(cfg.clone())
+        .with_recordings(Arc::clone(&recordings));
     start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
     engine.with_state(|m| {
         m.push_log(format!(
@@ -226,6 +242,8 @@ pub async fn run(
     if let Ok(Err(e)) = serving.await {
         eprintln!("the API stopped: {e}");
     }
+    // A recording still running is closed, its metadata saying why.
+    recordings.finish();
 
     engine.hand_back_the_tuner();
     engine.apply(Command::Stream { on: false });

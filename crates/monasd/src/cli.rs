@@ -114,6 +114,10 @@ Everything is under http://ADDR/v1, JSON in and out:
   GET  /v1/net/wifi/survey   Wi-Fi channels 1 to 13: busy, airtime, quietest
   GET  /v1/net/wifi/frames   Wi-Fi frames on this channel (?since=N: newer)
   GET  /v1/net/wifi/airtime  this channel's airtime: share, spenders, gaps
+  POST /v1/recording        start a SigMF recording (seconds, gigabytes)
+  POST /v1/recording/stop    stop it, keeping what was already captured
+  GET  /v1/recordings        the recordings in the recordings folder
+  GET  /v1/recordings/{name} one recording's .sigmf-meta; the data stays here
   GET  /v1/provenance  which radio, tuned where, against what reference
   POST /v1/command     one command, answered with what was done or why not
   GET  /v1/events      a WebSocket: commands applied, log lines, gaps, stalls
@@ -142,8 +146,9 @@ own are one block, and a flag wins over the line it matches:
 
 addresses (full, oui or masked) and pager_masked decide how much of what
 is heard is shown, on every route, from the first request; pager_mine
-shows one pager address alone. On exit monasd writes back the radio's
-settings and nothing else.",
+shows one pager address alone. recordings_dir is where recordings go (by
+default sdrtop's folder), and the [record] block sets their limits. On exit
+monasd writes back the radio's settings and nothing else.",
     ),
     (
         "Examples",

@@ -132,6 +132,10 @@ can't fall behind it. The routes, in short:
 | `GET /v1/net/wifi/survey` | Channels 1 to 13 as the survey visits them: each one's busy share with its uncertainty, its airtime by family, and which channel is quietest, or why that can't be said yet |
 | `GET /v1/net/wifi/frames` | The Wi-Fi frames heard on the channel the radio sits on, newest first, worded as the Frames list words them (format, rate, length), with their airtime, gap, offset and SNR. Another channel's frame is only how far off it was, because nothing it said was read. `?since=N` the same way |
 | `GET /v1/net/wifi/airtime` | The locked channel's airtime: its share of the time, who spent it at which rate, and the rhythm of the gaps between frames |
+| `POST /v1/recording` | Start a SigMF recording, answered like a command; `{"seconds": 30, "gigabytes": 2}` in place of the config's limits if you like |
+| `POST /v1/recording/stop` | Stop it, keeping every block already captured |
+| `GET /v1/recordings` | The recordings in the recordings folder, and which one is being written |
+| `GET /v1/recordings/{name}` | One recording's `.sigmf-meta`: what it holds, where samples are missing and why, how it ended |
 
 How much of what is heard gets shown is yours to say, the same switches the
 terminal has: addresses in full, by registrant or masked, and pager text or
@@ -181,6 +185,31 @@ client that falls behind loses events rather than slowing the radio down, and
 ```sh
 websocat ws://127.0.0.1:7373/v1/events
 ```
+
+## Recording
+
+The same SigMF recorder sdrtop has, started and stopped over the API:
+
+```sh
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"seconds": 30}' http://127.0.0.1:7373/v1/recording
+curl -s http://127.0.0.1:7373/v1/recordings
+curl -s http://127.0.0.1:7373/v1/recordings/iq-20261121-153000
+```
+
+It writes a `.sigmf-data` and a `.sigmf-meta` into the recordings folder,
+`recordings_dir` in the `[monasd]` block, or without it the folder sdrtop
+records to (`~/.local/share/sdrtop`, [the recording page](recording.md) has
+the rest). The limits are the `[record]` block's, unless a request names its
+own. The metadata says `monasd` as its recorder, every loss and why it
+ended, and it is rewritten every second, so a box that loses power still
+leaves a pair that opens.
+
+Two things it won't do, on purpose. It won't take a file name or a path
+from the network: a recording is named by the time it started, and the
+metadata route only reads a name the folder's own listing holds, so
+`../../etc` finds nothing. And it won't send the samples: IQ over the
+network is what rtl_tcp is for, and fetching a recording is what scp is for.
 
 ## Running it as a service
 

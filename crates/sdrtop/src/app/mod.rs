@@ -297,7 +297,15 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
-        match crate::export::iq::Recorder::start(&self.state, &ctx.record, &dir, limits, now) {
+        let recorder = format!("sdrtop {}", crate::cli::VERSION);
+        match crate::export::iq::Recorder::start(
+            &self.state,
+            &ctx.record,
+            &dir,
+            limits,
+            now,
+            &recorder,
+        ) {
             Ok(recorder) => self.recorder = Some(recorder),
             Err(why) => log(format!("IQ: not recording: {why}")),
         }

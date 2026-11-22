@@ -25,8 +25,8 @@ pub struct MonasdSettings {
     /// The view to compute for, by its layout name, e.g. `net_survey`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
-    /// Where the API's SigMF recordings are to go, once it records. Read
-    /// today and used by nothing yet: no route records.
+    /// Where the API's SigMF recordings go; without it, the folder the
+    /// terminal records to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recordings_dir: Option<PathBuf>,
     /// How addresses are shown from the start: `full`, `oui` or `masked`.
