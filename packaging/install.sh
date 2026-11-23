@@ -820,6 +820,10 @@ if [ -n "$SRC_DIR" ]; then
         for f in "$SRC_DIR"/user_docs/*.md; do
             if [ -f "$f" ]; then put 644 "$f" "$DOC_DIR/user_docs/$(basename "$f")"; fi
         done
+        if [ -d "$SRC_DIR/user_docs/pics" ]; then
+            as_root mkdir -p "$DOC_DIR/user_docs"
+            as_root cp -R "$SRC_DIR/user_docs/pics" "$DOC_DIR/user_docs/"
+        fi
     fi
 fi
 

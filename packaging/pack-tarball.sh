@@ -69,10 +69,10 @@ cp "$REPO/target/man/sdrtop.1" "$REPO/target/man/monasd.1" "$OUT/"
 # install.sh travels with the tarball as well as being the one-liner on the
 # release page, so an unpacked tarball can install itself offline.
 cp "$REPO/packaging/install.sh" "$OUT/"
-# Only the markdown, not user_docs/pics: that carries screenshots and a
-# 16 MB screen recording, which turned a 1.5 MB tarball into an 18 MB one.
+# Keep the images beside the Markdown so relative links work offline.
 mkdir -p "$OUT/user_docs"
 cp "$REPO"/user_docs/*.md "$OUT/user_docs/"
+cp -R "$REPO/user_docs/pics" "$OUT/user_docs/"
 
 # Cleared, not just created. release.yaml collects the release assets with
 # `target/dist/*.tar.gz`, so anything left here from an earlier build ships

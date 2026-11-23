@@ -120,6 +120,7 @@ jobs:
           # works while it actually carries the installer.
           cmp -s "$out"/*/install.sh packaging/install.sh || {
             echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
+          diff -r user_docs/pics "$out"/*/user_docs/pics
 
       - uses: actions/upload-artifact@v4
         with:
@@ -233,6 +234,7 @@ jobs:
               "$prefix/bin/$program" --version
               test -f "$prefix/share/man/man1/$program.1"
           done
+          diff -r user_docs/pics "$prefix/share/doc/sdrtop/user_docs/pics"
           sh "$out"/*/install.sh --prefix "$prefix" --uninstall
           test ! -e "$prefix/bin/sdrtop"
           test ! -e "$prefix/bin/monasd"
