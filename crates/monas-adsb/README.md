@@ -14,6 +14,12 @@ The streaming receiver scans a sequence of envelope blocks with absolute
 sample positions. It retains the working window across block boundaries
 and reports CRC-checked frames and other candidate outcomes.
 
+To replay a Monas 1090 MHz `ci16_le` recording, pass its SigMF metadata
+path to `cargo run -p monas-adsb --example replay_sigmf -- <capture.sigmf-meta>`.
+The `--mean-dc` flag subtracts the capture's complex mean for offline
+comparison. Accepted frames go to stdout as TSV, and receiver counters
+go to stderr.
+
 Airborne altitude follows the DO-260C Q-bit encoding. It distinguishes
 barometric and geometric sources and exposes 100-foot Gillham codes as
 raw values. Airborne velocity distinguishes ground components, IAS or
