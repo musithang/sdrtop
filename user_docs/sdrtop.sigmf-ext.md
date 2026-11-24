@@ -55,7 +55,9 @@ No `sdrtop` fields. How sdrtop uses the `core` ones:
 
 ## 3 Annotations
 
-No `sdrtop` fields. `core:generator` is `sdrtop`. Every annotation marks a
+No `sdrtop` fields. `core:generator` names the program that wrote the
+recording, `sdrtop` or `monasd`, the way `core:recorder` does with its
+version beside it. Every annotation marks a
 moment, with `core:sample_count` 0, except `radio dropped N`, which marks the
 stretch a drop inside the radio is known to lie in: such a drop leaves no mark
 in the stream, so it is placed between two readings of the radio's count, and

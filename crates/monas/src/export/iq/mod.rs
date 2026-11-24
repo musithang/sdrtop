@@ -353,6 +353,14 @@ mod tests {
         assert_eq!(meta["global"]["core:recorder"], "monasd 9.9.9", "{meta}");
         rec.stop();
         rec.finish();
+        // And every annotation names it too, without the version.
+        let meta = meta_of(&data_path_of(&state));
+        let notes = meta["annotations"].as_array().expect("annotations");
+        assert!(!notes.is_empty(), "{meta}");
+        assert!(
+            notes.iter().all(|a| a["core:generator"] == "monasd"),
+            "{meta}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

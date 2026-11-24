@@ -213,6 +213,9 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
             })
         })
         .collect();
+    // The program that wrote them, without its version, which
+    // `core:recorder` carries.
+    let generator = header.recorder.split_whitespace().next().unwrap_or("monas");
     let annotations: Vec<Value> = rec
         .all_annotations()
         .iter()
@@ -222,7 +225,7 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
                 "core:sample_count": a.sample_count,
                 "core:label": a.label,
                 "core:comment": a.comment,
-                "core:generator": "sdrtop",
+                "core:generator": generator,
             })
         })
         .collect();
