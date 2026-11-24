@@ -3,6 +3,13 @@
 
 //! Protocol primitives for 1090 MHz Extended Squitter.
 
+mod message;
+pub use message::{
+    AirbornePosition, AirborneVelocity, AirspeedKind, Altitude, AltitudeSource, CallsignError,
+    CprFormat, HorizontalVelocity, Identification, Message, VelocityValue, VerticalRate,
+    VerticalRateSource,
+};
+
 /// A complete DF17 squitter whose Mode S CRC has a zero remainder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Df17Frame([u8; 14]);
@@ -54,6 +61,11 @@ impl Df17Frame {
     /// The five-bit type code at the start of the ME field.
     pub fn type_code(&self) -> u8 {
         self.0[4] >> 3
+    }
+
+    /// Decode the ME field of this CRC-checked frame.
+    pub fn message(&self) -> Message {
+        message::decode(self)
     }
 }
 
