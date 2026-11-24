@@ -23,6 +23,7 @@ mod cli;
 mod config;
 mod plan;
 mod record;
+mod revive;
 mod server;
 
 /// The engine, under the names its parts have in Monas.
@@ -225,7 +226,38 @@ pub async fn run(
         .with_radios(radios)
         .with_config(cfg.clone())
         .with_recordings(Arc::clone(&recordings));
-    let _running = start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
+    let running = start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
+    // The radio, should it go: the same kind and serial, looked for again.
+    let wanted = listing.clone();
+    let open_cfg = cfg.clone();
+    let reopen: Arc<revive::Reopen> = Arc::new(move || {
+        let found = hardware::list_all_devices(Some(wanted.kind), None);
+        let same = found.iter().find(|d| {
+            d.kind == wanted.kind
+                && match (&wanted.serial, &d.serial) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => d.label == wanted.label,
+                }
+        });
+        let Some(listing) = same else {
+            return Err(format!("no {} found", wanted.label));
+        };
+        hardware::open_device(listing, &open_cfg).map_err(|e| format!("{e:#}"))
+    });
+    let (stop_watch, watch_stopped) = tokio::sync::watch::channel(false);
+    let watcher = tokio::spawn(revive::watch(
+        engine.clone(),
+        Arc::clone(&state),
+        Arc::clone(&recordings),
+        revive::Run {
+            running,
+            rx_ctx,
+            bt_channels: cfg.net.bt_channels,
+        },
+        reopen,
+        revive::backoff,
+        watch_stopped,
+    ));
     engine.with_state(|m| {
         m.push_log(format!(
             "monasd: computing for {}; the API is on http://{}/v1",
@@ -238,6 +270,9 @@ pub async fn run(
         let _ = stopped.await;
     }));
     until_asked_to_stop().await;
+    // No radio is brought back while the program is on its way out.
+    let _ = stop_watch.send(true);
+    let _ = watcher.await;
     let _ = stop.send(());
     if let Ok(Err(e)) = serving.await {
         eprintln!("the API stopped: {e}");

@@ -16,6 +16,9 @@ pub struct Bench {
     pub refuse_gain: bool,
     /// Every option set, in order; `options` answers as if each was taken.
     pub options_set: Mutex<Vec<(String, String)>>,
+    /// Streaming from `start_rx` to `stop_rx`, as a radio is: a stream that
+    /// never says it runs reads as one that stopped by itself.
+    pub streaming: std::sync::atomic::AtomicBool,
 }
 
 impl Bench {
@@ -29,6 +32,7 @@ impl Bench {
             tuned: Mutex::new(Vec::new()),
             refuse_gain: false,
             options_set: Mutex::new(Vec::new()),
+            streaming: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -41,13 +45,17 @@ impl SdrDevice for Bench {
         DeviceInfo::default()
     }
     fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        self.streaming
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
     fn stop_rx(&self) -> anyhow::Result<()> {
+        self.streaming
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
     fn is_streaming(&self) -> bool {
-        false
+        self.streaming.load(std::sync::atomic::Ordering::SeqCst)
     }
     fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         self.tuned.lock().unwrap().push(hz);

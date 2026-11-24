@@ -86,6 +86,9 @@ pub struct App {
     /// The IQ recording `Ctrl+R` started, while its writer may still be at
     /// work. See `export::iq`.
     pub(super) recorder: Option<crate::export::iq::Recorder>,
+    /// Whether the stream's own end, if it has one, was already answered
+    /// with the key that starts it again: said once per end.
+    pub(super) end_answered: bool,
     /// What could not be saved when the session ended, and why: said once
     /// the terminal is restored, as a warning, since the session itself
     /// ended as asked.
@@ -401,6 +404,16 @@ impl App {
             let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
             guard.sweep.active = sweep_active;
             guard.demod.enabled = demod_preset && guard.demod.user_on;
+            // The engine says the stream stopped by itself and why; how to
+            // start it again is the terminal's to say, with its own key.
+            match (guard.radio.stream_ended.is_some(), self.end_answered) {
+                (true, false) => {
+                    guard.push_log("Press [Space] to start receiving again");
+                    self.end_answered = true;
+                }
+                (false, true) => self.end_answered = false,
+                _ => {}
+            }
             // The FFT worker is fed only while a panel on screen reads what it
             // makes: on a NET view nothing does, and at 20 Msps it is a core.
             guard.spectrum.wanted = spectrum_wanted;

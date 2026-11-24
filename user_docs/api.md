@@ -118,6 +118,7 @@ The event, named by its `event` field:
 | `"event": "log"` | `at_epoch_secs`: integer<br>`level`: [`LogLevel`](#loglevel)<br>`text`: string | A line was added to the log. |
 | `"event": "gap"` | `at_unix_ms`: integer<br>`samples`: integer<br>`driver`: integer<br>`monas`: integer | Samples went missing from the stream, split by whose loss it was: the driver's, before the engine saw them, or the engine's own intake. |
 | `"event": "stale"` | `stale`: boolean | The radio stopped delivering (`stale: true`) or started again. |
+| `"event": "outage"` | `from_unix_ms`: integer<br>`to_unix_ms`: integer<br>`reason`: string | The radio was gone, from when its stream stopped by itself to when it streamed again: one gap with its length and its cause, so an hour without the radio is never read as a quiet hour. |
 
 ## Types
 

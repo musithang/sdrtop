@@ -38,12 +38,18 @@ use crate::state::SdrMetrics;
 #[derive(Clone)]
 pub struct Engine {
     state: Arc<Mutex<SdrMetrics>>,
-    device: Arc<dyn SdrDevice>,
+    /// Shared by every clone, so a radio opened again is the one every
+    /// client's commands reach. Read for the length of one call, never held
+    /// across one.
+    device: Arc<std::sync::RwLock<Arc<dyn SdrDevice>>>,
 }
 
 impl Engine {
     pub fn new(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) -> Self {
-        Self { state, device }
+        Self {
+            state,
+            device: Arc::new(std::sync::RwLock::new(device)),
+        }
     }
 
     /// Everything the engine knows, as of now: the copy a frame is drawn from.
@@ -65,8 +71,66 @@ impl Engine {
     /// The radio itself. Only for what measures the radio's own calls (the
     /// retune timing bench), never to change a setting: settings are
     /// [`command::Command`]s.
-    pub fn device(&self) -> &Arc<dyn SdrDevice> {
-        &self.device
+    pub fn device(&self) -> Arc<dyn SdrDevice> {
+        Arc::clone(&self.device.read().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Tell the radio what the one before it was set to, as `was` holds
+    /// it: its rate, its frequency, its gains, its boost and its own options,
+    /// by the commands a client would send, so each is answered as one is.
+    /// For a radio opened again after it went away. The refusals, each with
+    /// what was refused, are returned; nothing else is said.
+    pub fn restore(&self, was: &SdrMetrics) -> Vec<String> {
+        let mut commands = vec![
+            (
+                "rate",
+                command::Command::SampleRate {
+                    hz: was.radio.config_sample_rate,
+                },
+            ),
+            (
+                "frequency",
+                command::Command::Tune {
+                    hz: was.radio.frequency,
+                },
+            ),
+            (
+                "gains",
+                command::Command::Gains {
+                    values: was.radio.gains.clone(),
+                },
+            ),
+        ];
+        if was.caps.gain.boost().is_some() {
+            commands.push((
+                "boost",
+                command::Command::Boost {
+                    on: was.radio.amp_enabled,
+                },
+            ));
+        }
+        for option in was.device_options.iter() {
+            commands.push((
+                "option",
+                command::Command::DeviceOption {
+                    id: option.id.clone(),
+                    choice: option.selected_choice.clone(),
+                },
+            ));
+        }
+        commands
+            .into_iter()
+            .filter_map(|(what, c)| match self.apply(c) {
+                command::Reply::Refused { reason } => Some(format!("{what}: {reason}")),
+                command::Reply::Applied { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Put `device` in the place of the radio this engine drove, for every
+    /// clone at once: the same radio opened again after it went away.
+    pub fn replace_device(&self, device: Arc<dyn SdrDevice>) {
+        *self.device.write().unwrap_or_else(|e| e.into_inner()) = device;
     }
 
     /// Put the tuner back where a scanner found it, before the session ends.
@@ -97,7 +161,7 @@ impl Engine {
         // already is would be one more device call during teardown for
         // nothing. With no lock held, as everywhere else.
         if let Some(hz) = moved {
-            let _ = self.device.set_frequency(hz);
+            let _ = self.device().set_frequency(hz);
         }
     }
 
@@ -110,6 +174,33 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    /// **A radio opened again is told what the one before was set to**, by
+    /// the commands a client sends: the new radio is tuned where the old one
+    /// was, and swapping it in reaches every clone of the engine.
+    #[test]
+    fn a_radio_opened_again_gets_the_old_ones_settings() {
+        use super::testing::{engine_on, Bench};
+        use std::sync::Arc;
+        let (engine, old) = engine_on(Bench::new());
+        let clone = engine.clone();
+        engine.apply(super::command::Command::Tune { hz: 433_920_000 });
+        assert_eq!(old.tuned.lock().unwrap().last(), Some(&433_920_000));
+        let was = engine.snapshot();
+
+        let fresh = Arc::new(Bench::new());
+        engine.replace_device(Arc::clone(&fresh) as Arc<dyn crate::hardware::SdrDevice>);
+        let refused = clone.restore(&was);
+        assert!(refused.is_empty(), "{refused:?}");
+        assert_eq!(fresh.tuned.lock().unwrap().last(), Some(&433_920_000));
+        assert!(
+            Arc::ptr_eq(
+                &(clone.device() as Arc<dyn crate::hardware::SdrDevice>),
+                &(fresh as Arc<dyn crate::hardware::SdrDevice>)
+            ),
+            "the clone drives the new radio"
+        );
+    }
+
     /// **Every scanner that parks the radio gives the tuner back on quit.**
     ///
     /// Two now do: the frequency sweep and the NET survey. Both write their

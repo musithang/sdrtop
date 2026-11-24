@@ -66,6 +66,7 @@ impl SdrMetrics {
                 upstream_correction: None,
                 filter_in: None,
                 other_tx: None,
+                stream_ended: None,
             },
             signal: SignalState::default(),
             iq: IqState {

@@ -44,6 +44,14 @@ pub enum Event {
     },
     /// The radio stopped delivering (`stale: true`) or started again.
     Stale { stale: bool },
+    /// The radio was gone, from when its stream stopped by itself to when it
+    /// streamed again: one gap with its length and its cause, so an hour
+    /// without the radio is never read as a quiet hour.
+    Outage {
+        from_unix_ms: u64,
+        to_unix_ms: u64,
+        reason: String,
+    },
 }
 
 /// One event as one client receives it.

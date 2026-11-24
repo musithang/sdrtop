@@ -257,7 +257,7 @@ impl Engine {
             Some(note) => format!("{detail} ({note})"),
             None => detail,
         };
-        let device = &self.device;
+        let device = &self.device();
         match planned.command.clone() {
             Command::Tune { hz } => match device.set_frequency(hz) {
                 Ok(tuned) => {
@@ -433,7 +433,7 @@ impl Engine {
     /// radio that is not in that state.
     fn reset(&self) -> Reply {
         let caps = std::sync::Arc::clone(&self.lock().caps);
-        let device = &self.device;
+        let device = &self.device();
         let def_freq = caps.default_frequency_hz;
         let def_sr = caps.default_sample_rate_hz;
         // Every stage the radio has, where a first run would put it: one

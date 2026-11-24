@@ -78,6 +78,11 @@ pub struct RadioState {
     /// device found it (`hardware::OutsideChange::Transmitting`): the header
     /// says so, since its signal leaks into what is received.
     pub other_tx: Option<String>,
+    /// Why the stream stopped by itself, when it did: a radio unplugged, a
+    /// driver that gave up. Cleared when a stream starts again; a stream
+    /// stopped on request never sets it. What a front end that keeps a radio
+    /// running watches for.
+    pub stream_ended: Option<String>,
 }
 
 /// The radio's overload flag in the state: its last report, and when it was

@@ -51,7 +51,9 @@ pub struct Listing {
 /// The server's recorder and the folder it writes to.
 pub struct Recordings {
     state: Arc<Mutex<SdrMetrics>>,
-    tap: Arc<RecordTap>,
+    /// The stream's tap: a new one with every run, when the radio is opened
+    /// again.
+    tap: Mutex<Arc<RecordTap>>,
     dir: PathBuf,
     limits: RecordSettings,
     /// Who writes the files, as `core:recorder` names it.
@@ -69,12 +71,17 @@ impl Recordings {
     ) -> Self {
         Self {
             state,
-            tap,
+            tap: Mutex::new(tap),
             dir,
             limits,
             program,
             recorder: Mutex::new(None),
         }
+    }
+
+    /// The new run's tap, when the radio was opened again.
+    pub fn set_tap(&self, tap: Arc<RecordTap>) {
+        *self.tap.lock().unwrap_or_else(|e| e.into_inner()) = tap;
     }
 
     fn running(&self) -> bool {
@@ -113,9 +120,10 @@ impl Recordings {
         if let Some(old) = held.take() {
             old.finish();
         }
+        let tap = Arc::clone(&self.tap.lock().unwrap_or_else(|e| e.into_inner()));
         match Recorder::start(
             &self.state,
-            &self.tap,
+            &tap,
             &self.dir,
             limits,
             now_unix,

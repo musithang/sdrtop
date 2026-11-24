@@ -211,6 +211,21 @@ metadata route only reads a name the folder's own listing holds, so
 `../../etc` finds nothing. And it won't send the samples: IQ over the
 network is what rtl_tcp is for, and fetching a recording is what scp is for.
 
+## When the radio goes away
+
+Cables get knocked, hubs lose power, a driver gives up. When the stream stops
+by itself, monasd lets the radio go and looks for the same one again, the same
+kind with the same serial: after 1, 2, 4, 8 and 16 seconds, then every half
+minute, for as long as it takes. When it's back, it's told what it was set to
+(rate, frequency, gains, boost, its own options), streams again, and the log
+says how long it was gone and why.
+
+The time it was gone is also one `outage` event, with when it started, when
+it ended and the reason, so a script logging the band reads an hour without
+the radio as exactly that, not as a quiet hour. A recording that was running
+when the radio went ends there, and its metadata says so; it is not started
+again by itself.
+
 ## Running it as a service
 
 monasd is happy under systemd. A unit along these lines, for a user that is

@@ -207,7 +207,8 @@ stops the radio and saves the radio's settings.
 
 It reads the same config file as sdrtop, so a radio set up in the terminal
 is set up here too. The log goes to stderr, a line per line, for a terminal,
-a pipe or the journal.",
+a pipe or the journal. A radio that goes away is looked for again until it
+is back, and the time it was gone is said.",
     after_help = "The modes, the API, the config block and examples: monasd --help, or man monasd.",
     after_long_help = after_long_help(),
 )]

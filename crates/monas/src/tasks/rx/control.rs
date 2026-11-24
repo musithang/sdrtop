@@ -75,12 +75,13 @@ pub(super) fn note_unexpected_stop(
     m.radio.rx_enabled = false;
     m.radio.hw_streaming = false;
     m.radio.rx_start_time = None;
-    match device.stream_end_reason() {
-        Some(why) => m.push_log(format!("WARNING: Streaming stopped: {why}")),
-        None => {
-            m.push_log("WARNING: Streaming stopped unexpectedly \u{2014} press [Space] to restart")
-        }
-    }
+    let why = device
+        .stream_end_reason()
+        .unwrap_or_else(|| "it stopped unexpectedly".to_string());
+    // Said without a key to press: whichever program runs the engine says
+    // how to start it again.
+    m.push_log(format!("WARNING: Streaming stopped: {why}"));
+    m.radio.stream_ended = Some(why);
     false
 }
 
@@ -114,6 +115,7 @@ pub(super) fn apply_rx_request(
             // A new session measures its own rate; the last one's is not it.
             m.radio.actual_sample_rate = 0;
             m.radio.rx_start_time = Some(Instant::now());
+            m.radio.stream_ended = None;
             m.timing.jitter_session_max_us = 0;
             m.push_log("RX streaming started");
             true

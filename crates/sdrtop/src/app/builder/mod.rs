@@ -215,6 +215,7 @@ impl App {
             net_config: cfg.engine.net.clone(),
             record_config: cfg.engine.record.clone(),
             recorder: None,
+            end_answered: false,
             user_presets: cfg.tui.presets,
         })
     }

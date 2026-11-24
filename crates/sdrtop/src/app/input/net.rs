@@ -38,7 +38,7 @@ pub(super) fn net_capability(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
         }
         m.radio.frequency
     };
-    let Some(device) = ctx.core.map(|core| std::sync::Arc::clone(core.device())) else {
+    let Some(device) = ctx.core.map(|core| core.device()) else {
         metrics(ctx.state)
             .push_log("Retune timing: no radio to retune in observer mode".to_string());
         return KeyAction::Continue;
