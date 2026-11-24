@@ -85,7 +85,7 @@ https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 - **A demodulator that reads radios instead of playing them**: FM deviation, pilot, stereo, CTCSS, AM depth, RDS. No audio, on purpose. [Details](user_docs/demodulator.md)
 - **NET: the 2.4 GHz band, measured.** Bluetooth (BLE, LE Coded, classic) and Wi-Fi, decoded and held against the specification. Never transmits, never joins. [Details](user_docs/net.md)
 - **IQ correction, band sweeps, SigMF recording, observer mode** for a radio another app holds, and every lab panel marked **[STALE]** the moment its data stops being live.
-- **monasd, the same engine with no screen**: the radio in the attic, an HTTP API and a WebSocket to drive and watch it from somewhere warmer, honest about what it serves so far. [Details](user_docs/monasd.md)
+- **monasd, the same engine with no screen**: the radio in the attic, an HTTP API and a WebSocket to drive it and read every measurement the screen has, each with when it was taken and why it's missing when it is. It records SigMF, exports CSV, and when the radio goes away it waits for it to come back and writes down how long it was gone. [Details](user_docs/monasd.md) · [The API](user_docs/api.md)
 
 Under the hood there are three names: **Monas** is the engine (the radio, the receivers, the measurements), **sdrtop** is the terminal on top of it, and **monasd** is Monas with no screen. You mostly only need the second one.
 

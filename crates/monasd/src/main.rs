@@ -648,6 +648,35 @@ mod cli_tests {
         );
     }
 
+    /// The service unit runs monasd with flags monasd has: a flag renamed
+    /// in the code must not leave the example unit starting a program that
+    /// refuses its own command line.
+    #[test]
+    fn the_service_unit_uses_flags_monasd_has() {
+        let unit = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packaging/monasd.service"
+        ))
+        .expect("packaging/monasd.service");
+        let exec = unit
+            .lines()
+            .find_map(|l| l.strip_prefix("ExecStart="))
+            .expect("an ExecStart line");
+        let mut words = exec.split_whitespace();
+        assert!(
+            words.next().is_some_and(|b| b.ends_with("/monasd")),
+            "{exec}"
+        );
+        let args: Vec<&str> = words.collect();
+        let parsed = <Cli as clap::Parser>::try_parse_from(
+            std::iter::once("monasd").chain(args.iter().copied()),
+        );
+        assert!(
+            parsed.is_ok(),
+            "the unit's command line does not parse: {exec}"
+        );
+    }
+
     /// `--listen` and `--mode` stand alone: there is no screen to switch off.
     #[test]
     fn the_run_flags_need_nothing_else() {

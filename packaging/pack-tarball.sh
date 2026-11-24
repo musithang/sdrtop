@@ -69,6 +69,8 @@ cp "$REPO/target/man/sdrtop.1" "$REPO/target/man/monasd.1" "$OUT/"
 # install.sh travels with the tarball as well as being the one-liner on the
 # release page, so an unpacked tarball can install itself offline.
 cp "$REPO/packaging/install.sh" "$OUT/"
+# The service unit, an example to adapt (user_docs/monasd.md says how).
+cp "$REPO/packaging/monasd.service" "$OUT/"
 # Keep the images beside the Markdown so relative links work offline.
 mkdir -p "$OUT/user_docs"
 cp "$REPO"/user_docs/*.md "$OUT/user_docs/"

@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+#
+# monasd as a system service: one radio, its measurements over HTTP, on a
+# box nobody sits at. An example to adapt, not something the installer puts
+# in place:
+#
+#   sudo useradd --system --home-dir /var/lib/monasd --groups plugdev monasd
+#   sudo cp monasd.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now monasd
+#   journalctl -u monasd -f
+#
+# Three things to check before enabling it:
+#
+# - The group. The radio's udev rules hand its USB device to a group;
+#   plugdev is the common one, but yours may say otherwise (uucp, dialout,
+#   or a rule of its own). Put that group in SupplementaryGroups.
+# - Where monasd is. The installer puts it in /usr/local/bin when run as
+#   root and in ~/.local/bin otherwise; ExecStart must name the one you have.
+# - The address. monasd listens on 127.0.0.1:7373 unless the config says
+#   otherwise, and anywhere else it wants a token in the config's [monasd]
+#   block. Set both in /var/lib/monasd/config.toml before opening it up.
+
+[Unit]
+Description=monasd, Monas with no screen: one radio and its measurements over HTTP
+Documentation=man:monasd(1) https://github.com/musithang/sdrtop/blob/main/user_docs/monasd.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=monasd
+Group=monasd
+SupplementaryGroups=plugdev
+
+# Everything monasd keeps lives here: the config (rewritten with the radio's
+# settings when it stops, so it must be writable), the recordings and the
+# exports (into $XDG_DATA_HOME/sdrtop, unless the config's recordings_dir
+# says otherwise).
+StateDirectory=monasd
+WorkingDirectory=/var/lib/monasd
+Environment=HOME=/var/lib/monasd
+Environment=XDG_DATA_HOME=/var/lib/monasd
+ExecStart=/usr/local/bin/monasd --config /var/lib/monasd/config.toml
+
+# SIGTERM is how systemd stops it, and monasd handles it: the recording is
+# closed, the stream stopped, the settings saved. A radio that goes away is
+# looked for again by monasd itself; this restart is for monasd going away.
+Restart=on-failure
+RestartSec=5
+
+# Nothing it needs is outside its state directory and the radio, so the rest
+# is read-only or out of sight. The devices stay: the radio is one.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

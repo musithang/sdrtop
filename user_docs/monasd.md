@@ -22,10 +22,11 @@ engine (the radio, the receivers, the measurements), **sdrtop** is the terminal
 you already know, and **monasd** is Monas with no screen. sdrtop and monasd
 are two programs built on the same engine. Neither knows the other exists.
 
-**What it does today, honestly.** monasd opens the radio, computes the mode
-you ask for (the same receivers sdrtop would run for that view), takes
-commands, tells you how it is doing and streams events. Of the measurements
-it serves nearly everything the screen has: the radio with its gain chain
+**What it does, honestly.** monasd opens the radio, computes the mode you
+ask for (the same receivers sdrtop would run for that view), takes commands,
+tells you how it is doing and streams events. It records SigMF and writes the
+CSV exports, and when the radio goes away it brings it back and says how long
+it was gone. Of the measurements it serves nearly everything the screen has: the radio with its gain chain
 and frequency reference, the signal's figures, the I/Q front end, the
 pipeline's vital signs, the recorder, the spectrum itself, the demodulator,
 the pagers and FT8 decodes with their physics, and on 2.4 GHz the band's
@@ -246,28 +247,22 @@ again by itself.
 
 ## Running it as a service
 
-monasd is happy under systemd. A unit along these lines, for a user that is
-in `plugdev` (or whatever group your udev rules hand the radio to):
-
-```ini
-[Unit]
-Description=monasd, sdrtop's engine with no screen
-After=network-online.target
-
-[Service]
-User=radio
-SupplementaryGroups=plugdev
-ExecStart=/usr/local/bin/monasd --config /etc/sdrtop/config.toml
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
+monasd is happy under systemd, and there's a unit for it,
+[`packaging/monasd.service`](../packaging/monasd.service), also in every
+release tarball. It's an example to adapt rather than something the installer
+puts in place, and the comment at its top says how: a `monasd` user in the
+group your radio's udev rules use, the unit copied to `/etc/systemd/system/`,
+`systemctl enable --now monasd`. Everything monasd keeps goes under
+`/var/lib/monasd`: the config, the recordings and the exports. The rest of the
+system is read-only to it, except the radio.
 
 Two things to know. It writes the radio's settings back to that config when
-it stops, so the user needs write access to the file. And `SIGTERM`, which is
-how systemd stops things, is handled: the stream is stopped and the settings
-are saved before it exits. The log lands in the journal (`journalctl -u
+it stops, so the config has to stay writable, which is why it lives in the
+state directory and not in `/etc`. And `SIGTERM`, which is how systemd stops
+things, is handled: a recording is closed, the stream is stopped and the
+settings are saved before it exits. A radio that goes away is monasd's own
+business ([above](#when-the-radio-goes-away)); systemd's restart is only for
+monasd itself going away. The log lands in the journal (`journalctl -u
 monasd`).
 
 The config is the same file sdrtop uses, and the two share it politely:
