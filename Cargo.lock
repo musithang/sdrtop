@@ -1052,6 +1052,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "monas-adsb"
+version = "0.8.1-dev"
+
+[[package]]
 name = "monas-ble"
 version = "0.8.1-dev"
 dependencies = [

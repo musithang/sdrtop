@@ -79,6 +79,9 @@ overflow-checks = false
 [profile.dev.package.monas]
 opt-level = 3
 
+[profile.dev.package.monas-adsb]
+opt-level = 3
+
 [profile.dev.package.monas-dsp]
 opt-level = 3
 
