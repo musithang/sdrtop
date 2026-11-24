@@ -10,6 +10,9 @@ receptions. The frame retains the original bytes for inspection.
 The preamble detector proposes ranked fractional timings in an IQ power
 envelope. The PPM slicer uses a timing to recover the payload by fractional
 window overlap and can return the two measured half-cell energies per bit.
+The streaming receiver scans a sequence of envelope blocks with absolute
+sample positions. It retains the working window across block boundaries
+and reports CRC-checked frames and other candidate outcomes.
 
 Airborne altitude follows the DO-260C Q-bit encoding. It distinguishes
 barometric and geometric sources and exposes 100-foot Gillham codes as

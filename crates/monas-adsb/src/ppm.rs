@@ -62,8 +62,7 @@ impl PpmSlicer {
         if !preamble_start.is_finite() || preamble_start < 0.0 {
             return Err(PpmError::InvalidStart);
         }
-        let boundary = |half_cell| preamble_start + half_cell as f64 * self.half_cell_samples;
-        let payload_end = boundary(PREAMBLE_HALF_CELLS + 2 * FRAME_BITS);
+        let payload_end = self.boundary(preamble_start, PREAMBLE_HALF_CELLS + 2 * FRAME_BITS);
         if payload_end > power.len() as f64 {
             return Err(PpmError::IncompleteFrame);
         }
@@ -72,26 +71,49 @@ impl PpmSlicer {
             .is_some()
             .then(|| [BitEvidence::default(); FRAME_BITS]);
         for bit in 0..FRAME_BITS {
-            let first_half = PREAMBLE_HALF_CELLS + 2 * bit;
-            let start = boundary(first_half);
-            let middle = boundary(first_half + 1);
-            let end = boundary(first_half + 2);
-            let early_energy = integrate(power, start, middle)?;
-            let late_energy = integrate(power, middle, end)?;
-            if early_energy > late_energy {
+            let measured = self.bit(power, preamble_start, bit)?;
+            if measured.early_energy > measured.late_energy {
                 bytes[bit / 8] |= 0x80 >> (bit % 8);
             }
             if let Some(evidence) = &mut evidence {
-                evidence[bit] = BitEvidence {
-                    early_energy,
-                    late_energy,
-                };
+                evidence[bit] = measured;
             }
         }
         if let (Some(trace), Some(evidence)) = (trace, evidence) {
             *trace = evidence;
         }
         Ok(bytes)
+    }
+
+    pub(crate) fn frame_lookahead(&self) -> usize {
+        // Cover any fractional preamble edge within the first cell.
+        self.boundary(1.0, PREAMBLE_HALF_CELLS + 2 * FRAME_BITS)
+            .ceil() as usize
+    }
+
+    pub(crate) fn downlink_format(&self, power: &[f32], start: f64) -> Result<u8, PpmError> {
+        if self.boundary(start, PREAMBLE_HALF_CELLS + 10) > power.len() as f64 {
+            return Err(PpmError::IncompleteFrame);
+        }
+        let mut format = 0;
+        for bit in 0..5 {
+            let measured = self.bit(power, start, bit)?;
+            format = (format << 1) | u8::from(measured.early_energy > measured.late_energy);
+        }
+        Ok(format)
+    }
+
+    fn boundary(&self, start: f64, half_cell: usize) -> f64 {
+        start + half_cell as f64 * self.half_cell_samples
+    }
+
+    fn bit(&self, power: &[f32], start: f64, bit: usize) -> Result<BitEvidence, PpmError> {
+        let first_half = PREAMBLE_HALF_CELLS + 2 * bit;
+        let middle = self.boundary(start, first_half + 1);
+        Ok(BitEvidence {
+            early_energy: integrate(power, self.boundary(start, first_half), middle)?,
+            late_energy: integrate(power, middle, self.boundary(start, first_half + 2))?,
+        })
     }
 }
 
