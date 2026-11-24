@@ -32,7 +32,7 @@ use std::ffi::CStr;
 
 use libc::{c_char, c_int, c_void};
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
@@ -383,8 +383,7 @@ extern "C" fn rx_callback(transfer: *mut ffi::Transfer) -> c_int {
     // No Rust panic may cross into C.
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: libairspy hands a transfer that is valid for this call,
-        // whose `ctx` is the `RxContext` the device keeps alive (see
-        // `Stream`).
+        // whose `ctx` is the `Handoff` the device keeps alive (see `Stream`).
         unsafe { rx_block(transfer) }
     }));
     // Never asks libairspy to stop: 1.0.10 answers a non-zero return by
@@ -395,7 +394,7 @@ extern "C" fn rx_callback(transfer: *mut ffi::Transfer) -> c_int {
 
 /// # Safety
 /// `transfer` is null or a transfer libairspy passed to the callback, with
-/// `ctx` null or a live `RxContext`.
+/// `ctx` null or a live `Handoff`.
 unsafe fn rx_block(transfer: *mut ffi::Transfer) {
     // Stamped first, so the timing bench measures the interval between
     // deliveries and not entry plus our own work.
@@ -413,24 +412,40 @@ unsafe fn rx_block(transfer: *mut ffi::Transfer) {
         return;
     };
     // SAFETY: the caller's contract.
-    let ctx = unsafe { &*(t.ctx as *const RxContext) };
+    let handoff = unsafe { &*(t.ctx as *const Handoff) };
+    // A stream let go of: its blocks have nowhere to go.
+    let Some(ctx) = handoff.rx.upgrade() else {
+        return;
+    };
     let len = pairs * ctx.geometry.bytes_per_pair();
     // SAFETY: an INT16_IQ transfer holds `sample_count` pairs of two int16.
     let buf = unsafe { std::slice::from_raw_parts(t.samples as *const u8, len) };
-    crate::hardware::intake::deliver(ctx, buf, t.dropped_samples, now);
+    crate::hardware::intake::deliver(&ctx, buf, t.dropped_samples, now);
+}
+
+/// What libairspy's thread is handed in place of the context: a weak hold
+/// on it. A stream libairspy ended by itself keeps its `Handoff` for as long
+/// as that thread might still call back with it (see `Stream`), but not the
+/// context, so the intake thread, the workers and every queue between them
+/// can end when the run does instead of waiting on a stream that is gone.
+struct Handoff {
+    rx: Weak<RxContext>,
 }
 
 /// What the device keeps while libairspy's threads may call back into it.
 #[derive(Default)]
 struct Stream {
-    /// The context handed to the running stream, kept alive until
-    /// libairspy has joined the threads that use it.
+    /// The context of the running stream, held while it runs.
     ctx: Option<Arc<RxContext>>,
-    /// Contexts of streams libairspy ended by itself (a USB transfer that came
-    /// back short, or the radio leaving the bus). 1.0.10 then joins nothing
-    /// on stop, and its consumer thread can be left waiting with the pointer,
-    /// so they are never let go; nor is the handle closed (see `Drop`).
-    stranded: Vec<Arc<RxContext>>,
+    /// What the running stream's thread was handed, kept alive until
+    /// libairspy has joined the threads that use it.
+    handoff: Option<Arc<Handoff>>,
+    /// What streams libairspy ended by itself (a USB transfer that came back
+    /// short, or the radio leaving the bus) were handed. 1.0.10 then joins
+    /// nothing on stop, and its consumer thread can be left waiting with the
+    /// pointer, so they are never let go, not even when the device is; nor is
+    /// the handle closed (see `Drop`). Each holds its context only weakly.
+    stranded: Vec<Arc<Handoff>>,
     /// The rate last set, Hz: libairspy has no getter, and a change while
     /// streaming costs a restart, which the same rate does not need.
     rate: Option<u32>,
@@ -594,12 +609,18 @@ impl AirspyDevice {
 
     /// Starts libairspy's threads on `ctx`, which `stream` keeps.
     fn start_locked(&self, stream: &mut Stream, ctx: Arc<RxContext>) -> anyhow::Result<()> {
-        let user = Arc::as_ptr(&ctx) as *mut c_void;
+        let handoff = Arc::new(Handoff {
+            rx: Arc::downgrade(&ctx),
+        });
+        let user = Arc::as_ptr(&handoff) as *mut c_void;
         stream.ctx = Some(ctx);
-        // SAFETY: the handle is open; `user` stays valid while `stream` holds it.
+        stream.handoff = Some(handoff);
+        // SAFETY: the handle is open; `user` stays valid while `stream` holds
+        // the handoff, which does not move when its `Arc` does.
         let code = unsafe { (self.api.airspy_start_rx)(self.ptr, rx_callback, user) };
         if code != 0 {
             stream.ctx = None;
+            stream.handoff = None;
         }
         self.check(code, "start streaming")
     }
@@ -635,9 +656,10 @@ impl AirspyDevice {
         let joined = self.library_streaming();
         // SAFETY: the handle is open.
         let code = unsafe { (self.api.airspy_stop_rx)(self.ptr) };
-        if let Some(ctx) = stream.ctx.take() {
+        stream.ctx = None;
+        if let Some(handoff) = stream.handoff.take() {
             if !joined {
-                stream.stranded.push(ctx);
+                stream.stranded.push(handoff);
             }
         }
         self.check(code, "stop streaming")
@@ -862,7 +884,10 @@ impl Drop for AirspyDevice {
         // they belong to: on an R2 that fell off the bus, that crashed. Such
         // a handle is held, with its context, until the process exits and the
         // system releases both.
+        // The handoffs too: they are fields, and would be freed with the
+        // device under a thread that may still call back with them.
         if !stream.stranded.is_empty() {
+            std::mem::forget(std::mem::take(&mut stream.stranded));
             return;
         }
         drop(stream);
@@ -1406,11 +1431,14 @@ mod tests {
         device.stop_rx().unwrap();
     }
 
-    /// **A stream libairspy ended by itself keeps its context**: the
-    /// library's consumer thread may still hold it. The RX task sees the
-    /// stream stopped, and a new start begins cleanly.
+    /// **A stream libairspy ended by itself keeps what its thread was
+    /// handed, and lets the context go**: the library's consumer thread may
+    /// still call back with the pointer, so that stays valid; but the
+    /// context, and every queue and worker behind it, is free to end with
+    /// the run. The RX task sees the stream stopped, and a new start begins
+    /// cleanly.
     #[test]
-    fn a_stream_that_ended_by_itself_keeps_its_context() {
+    fn a_stream_that_ended_by_itself_keeps_its_handoff_not_its_context() {
         let (fixture, device) = opened();
         let (ctx, net) = streaming_ctx();
         fixture.mode(24);
@@ -1427,7 +1455,16 @@ mod tests {
             std::thread::yield_now();
         }
         device.stop_rx().unwrap();
-        assert_eq!(Arc::strong_count(&ctx), 2, "kept, not let go");
+        assert_eq!(Arc::strong_count(&ctx), 1, "the context let go");
+        {
+            let stream = device.stream();
+            assert_eq!(stream.stranded.len(), 1, "the handoff kept");
+            let held = stream.stranded[0].rx.upgrade();
+            assert!(
+                held.is_some_and(|h| Arc::ptr_eq(&h, &ctx)),
+                "and still ours"
+            );
+        }
         fixture.mode(0);
         device.start_rx(Arc::clone(&ctx)).unwrap();
         assert!(device.is_streaming());

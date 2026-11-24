@@ -29,7 +29,9 @@ pub struct Header {
     pub sample_rate: f64,
     pub bytes_per_pair: u64,
     pub hw: String,
-    pub description: String,
+    /// The view it was recorded from; `core:description` says it beside
+    /// the program's name, which is only known once the recording starts.
+    pub view: String,
     pub full_scale: f32,
     pub bits: u8,
     pub stack: Option<String>,
@@ -116,7 +118,7 @@ impl Header {
                 "{}, serial {}",
                 state.system.board_name, state.system.serial
             ),
-            description: format!("recorded by sdrtop from the {} layout", state.mode.view),
+            view: state.mode.view.to_string(),
             full_scale: geometry.full_scale,
             // The depth at the rate it records at, where that changes it.
             bits: state.converter_bits(),
@@ -147,6 +149,14 @@ pub fn datetime(unix: f64) -> String {
     format!("{}.{micros:06}Z", whole.trim_end_matches('Z'))
 }
 
+impl Header {
+    /// The program writing the recording, without its version, which
+    /// `core:recorder` carries.
+    fn program(&self) -> &str {
+        self.recorder.split_whitespace().next().unwrap_or("monas")
+    }
+}
+
 /// The whole `.sigmf-meta` document. `stop` is `None` while recording, so a
 /// file read mid-way says it is still growing.
 pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
@@ -159,7 +169,14 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
     put("core:sample_rate", json!(header.sample_rate));
     put("core:hw", json!(header.hw));
     put("core:recorder", json!(header.recorder));
-    put("core:description", json!(header.description));
+    put(
+        "core:description",
+        json!(format!(
+            "recorded by {} from the {} layout",
+            header.program(),
+            header.view
+        )),
+    );
     put(
         "core:extensions",
         json!([{ "name": "sdrtop", "version": EXTENSION_VERSION, "optional": true }]),
@@ -215,7 +232,7 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
         .collect();
     // The program that wrote them, without its version, which
     // `core:recorder` carries.
-    let generator = header.recorder.split_whitespace().next().unwrap_or("monas");
+    let generator = header.program();
     let annotations: Vec<Value> = rec
         .all_annotations()
         .iter()
@@ -280,7 +297,7 @@ mod tests {
             sample_rate: 1e6,
             bytes_per_pair: 2,
             hw: "HackRF One, serial 0000".to_string(),
-            description: "recorded by sdrtop from the lab_iq layout".to_string(),
+            view: "lab_iq".to_string(),
             full_scale: 128.0,
             bits: 8,
             stack: Some("libhackrf 2024.02.1".to_string()),

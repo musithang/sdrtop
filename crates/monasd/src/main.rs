@@ -227,6 +227,10 @@ pub async fn run(
         .with_config(cfg.clone())
         .with_recordings(Arc::clone(&recordings));
     let running = start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
+    // From here the engine holds the radio, and only the engine: a radio that
+    // goes is replaced there, and a hold kept here would keep the old one,
+    // and what its stream was handed, alive for as long as monasd runs.
+    drop(device);
     // The radio, should it go: the same kind and serial, looked for again.
     let wanted = listing.clone();
     let open_cfg = cfg.clone();

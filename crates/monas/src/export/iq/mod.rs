@@ -279,10 +279,21 @@ impl Writer {
 
 /// Write `bytes` beside `path`, then rename over it, so a reader never sees
 /// half a document.
+///
+/// A write that fails (a full disk, most likely) leaves no half-written
+/// temporary file behind: the document already in place stays as it was, still
+/// saying the recording is running, which is the truth about a file that was
+/// never closed.
 fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("sigmf-meta.tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
+    if let Err(e) = std::fs::write(&tmp, bytes) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("cannot write {}: {e}", tmp.display()));
+    }
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("cannot replace {}: {e}", path.display())
+    })
 }
 
 #[cfg(test)]
@@ -340,6 +351,18 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
 
+    /// A metadata write that fails leaves no temporary file behind: here
+    /// the rename fails, because a directory with something in it stands
+    /// where the document goes, the way a full disk fails the write.
+    #[test]
+    fn a_failed_metadata_write_leaves_no_temporary_file() {
+        let dir = scratch("meta-fails");
+        let path = dir.join("x.sigmf-meta");
+        std::fs::create_dir_all(path.join("occupied")).unwrap();
+        assert!(write_atomically(&path, b"{}").is_err());
+        assert!(!path.with_extension("sigmf-meta.tmp").exists());
+    }
+
     /// The metadata names the program that wrote it, whichever runs the
     /// engine: the terminal and the headless server each say their own name.
     #[test]
@@ -351,6 +374,8 @@ mod tests {
             Recorder::start(&state, &tap, &dir, Limits::DEFAULT, NOW, "monasd 9.9.9").unwrap();
         let meta = meta_of(&data_path_of(&state));
         assert_eq!(meta["global"]["core:recorder"], "monasd 9.9.9", "{meta}");
+        let said = meta["global"]["core:description"].as_str().unwrap_or("");
+        assert!(said.starts_with("recorded by monasd from the "), "{meta}");
         rec.stop();
         rec.finish();
         // And every annotation names it too, without the version.

@@ -35,7 +35,7 @@
 pub mod ffi;
 
 use std::ffi::CStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use libc::{c_char, c_int, c_void};
 
@@ -435,9 +435,12 @@ fn scale_for(g: u8) -> f64 {
 /// What a stream carries from one block to the next. Only libairspyhf's
 /// consumer thread converts, so `conversion` is never contended; `tuning` is
 /// the device's own, locked once a stream to put the frequency back after the
-/// measurement.
+/// measurement. The context is held weakly: a stream libairspyhf ended by
+/// itself keeps its `StreamCtx` for as long as that thread might still call
+/// back with it (see `Stream`), but not the context, so the intake thread,
+/// the workers and every queue between them can end when the run does.
 struct StreamCtx {
-    rx: Arc<RxContext>,
+    rx: Weak<RxContext>,
     api: &'static ffi::AirspyHfApi,
     ptr: *mut c_void,
     rate: u32,
@@ -510,9 +513,13 @@ unsafe fn rx_block(transfer: *mut ffi::Transfer) {
             .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32;
         conv.words.extend_from_slice(&word.to_le_bytes());
     }
-    crate::hardware::intake::deliver(&ctx.rx, &conv.words, t.dropped_samples, now);
+    // A stream let go of: its blocks have nowhere to go.
+    let Some(rx) = ctx.rx.upgrade() else {
+        return;
+    };
+    crate::hardware::intake::deliver(&rx, &conv.words, t.dropped_samples, now);
     if !conv.said {
-        conv.said = say_measured(ctx, &conv);
+        conv.said = say_measured(&rx, ctx, &conv);
     }
 }
 
@@ -546,8 +553,8 @@ fn measure(ctx: &StreamCtx, conv: &mut Conversion, floats: &[f32]) {
 
 /// Tell the log what the stream measured, without ever waiting for the lock:
 /// `false` when it is busy, and the next block tries again.
-fn say_measured(ctx: &StreamCtx, conv: &Conversion) -> bool {
-    let Ok(mut m) = ctx.rx.metrics.try_lock() else {
+fn say_measured(rx: &RxContext, ctx: &StreamCtx, conv: &Conversion) -> bool {
+    let Ok(mut m) = rx.metrics.try_lock() else {
         return false;
     };
     m.push_log(format!(
@@ -562,13 +569,15 @@ fn say_measured(ctx: &StreamCtx, conv: &Conversion) -> bool {
 /// What the device keeps while libairspyhf's threads may call back into it.
 #[derive(Default)]
 struct Stream {
-    /// The context handed to the running stream, kept alive until
+    /// What the running stream's thread was handed, kept alive until
     /// libairspyhf has joined the threads that use it.
     ctx: Option<Arc<StreamCtx>>,
-    /// Contexts of streams libairspyhf ended by itself (a USB transfer that
-    /// came back short, the radio leaving the bus). 1.6.8 then joins nothing
-    /// on stop and leaves its transfers live, so they are never let go; nor is
-    /// the handle closed (see `Drop`).
+    /// The engine's context for the running stream, held while it runs.
+    rx: Option<Arc<RxContext>>,
+    /// What streams libairspyhf ended by itself (a USB transfer that came
+    /// back short, the radio leaving the bus) were handed. 1.6.8 then joins
+    /// nothing on stop and leaves its transfers live, so they are never let
+    /// go, not even when the device is; nor is the handle closed (see `Drop`).
     stranded: Vec<Arc<StreamCtx>>,
 }
 
@@ -755,7 +764,7 @@ impl AirspyHfDevice {
     /// this rate (see [`filter_gain_db`]).
     fn start_locked(&self, stream: &mut Stream, rx: Arc<RxContext>) -> anyhow::Result<()> {
         let ctx = Arc::new(StreamCtx {
-            rx,
+            rx: Arc::downgrade(&rx),
             api: self.api,
             ptr: self.ptr,
             rate: self.tuning().rate,
@@ -769,10 +778,12 @@ impl AirspyHfDevice {
         )?;
         let user = Arc::as_ptr(&ctx) as *mut c_void;
         stream.ctx = Some(ctx);
+        stream.rx = Some(rx);
         // SAFETY: the handle is open; `user` stays valid while `stream` holds it.
         let code = unsafe { (self.api.airspyhf_start)(self.ptr, rx_callback, user) };
         if code != 0 {
             stream.ctx = None;
+            stream.rx = None;
             let dsp = u8::from(self.tuning().dsp);
             // SAFETY: as above.
             unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, dsp) };
@@ -788,6 +799,7 @@ impl AirspyHfDevice {
         let joined = self.library_streaming();
         // SAFETY: the handle is open.
         let code = unsafe { (self.api.airspyhf_stop)(self.ptr) };
+        stream.rx = None;
         if let Some(ctx) = stream.ctx.take() {
             if !joined {
                 stream.stranded.push(ctx);
@@ -904,7 +916,7 @@ impl SdrDevice for AirspyHfDevice {
             );
         };
         let mut stream = self.stream();
-        let running = stream.ctx.clone().filter(|_| self.library_streaming());
+        let running = stream.rx.clone().filter(|_| self.library_streaming());
         if running.is_some() {
             self.stop_locked(&mut stream)?;
         }
@@ -919,9 +931,9 @@ impl SdrDevice for AirspyHfDevice {
             tuning.low_if = unsafe { (self.api.airspyhf_is_low_if)(self.ptr) } != 0;
             tuning.rate = rate;
         }
-        if let Some(ctx) = running {
-            ctx.rx.begin_stream();
-            self.start_locked(&mut stream, Arc::clone(&ctx.rx))
+        if let Some(rx) = running {
+            rx.begin_stream();
+            self.start_locked(&mut stream, rx)
                 .map_err(|e| e.context("the stream stopped for the rate change"))?;
         }
         Ok(RateSet::new(f64::from(rate), None, 0))
@@ -1052,7 +1064,10 @@ impl Drop for AirspyHfDevice {
         // reaped, and its close frees them after tearing down the USB context
         // they belong to. Such a handle is held, with its context, until the
         // process exits and the system releases both.
+        // The contexts too: they are fields, and would be freed with the
+        // device under a thread that may still call back with them.
         if !stream.stranded.is_empty() {
+            std::mem::forget(std::mem::take(&mut stream.stranded));
             return;
         }
         drop(stream);
@@ -1671,10 +1686,11 @@ mod tests {
         assert_eq!(device.capabilities().sample_geometry.bytes_per_pair(), 8);
     }
 
-    /// A stream that ended by itself keeps its context, and the handle is
-    /// not closed under it; a new start works.
+    /// A stream that ended by itself keeps what its thread was handed, and
+    /// the handle is not closed under it, but the engine's context is let go,
+    /// so the run's workers can end; a new start works.
     #[test]
-    fn a_stream_that_ended_by_itself_keeps_its_context() {
+    fn a_stream_that_ended_by_itself_keeps_its_handoff_not_its_context() {
         let (fixture, device) = opened();
         let (ctx, net) = streaming_ctx();
         fixture.mode(35);
@@ -1691,7 +1707,16 @@ mod tests {
             std::thread::yield_now();
         }
         device.stop_rx().unwrap();
-        assert_eq!(Arc::strong_count(&ctx), 2, "kept, not let go");
+        assert_eq!(Arc::strong_count(&ctx), 1, "the context let go");
+        {
+            let stream = device.stream();
+            assert_eq!(stream.stranded.len(), 1, "the handoff kept");
+            let held = stream.stranded[0].rx.upgrade();
+            assert!(
+                held.is_some_and(|h| Arc::ptr_eq(&h, &ctx)),
+                "and still ours"
+            );
+        }
         fixture.mode(0);
         device.start_rx(Arc::clone(&ctx)).unwrap();
         assert!(device.is_streaming());
