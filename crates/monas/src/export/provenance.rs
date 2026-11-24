@@ -78,8 +78,12 @@ pub fn clock(secs: u64) -> String {
 ///
 /// `unix_secs` is passed in rather than read here so the block is a pure
 /// function of the state and the clock, and can be asserted whole.
-pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
-    std::iter::once(format!("{COMMENT} sdrtop {}", env!("CARGO_PKG_VERSION")))
+///
+/// `writer` is the program writing the file and its version, which the
+/// first line names: the terminal and the headless server each say their
+/// own.
+pub fn block(state: &SdrMetrics, unix_secs: i64, writer: &str) -> Vec<String> {
+    std::iter::once(format!("{COMMENT} {writer}"))
         .chain(
             fields(state, unix_secs)
                 .into_iter()
@@ -259,7 +263,7 @@ mod tests {
     fn the_block_carries_every_field_the_design_lists() {
         let mut m = SdrMetrics::fixture().streaming();
         m.show_section(crate::signal::net::SECTION);
-        let lines = block(&m, 1_788_632_561);
+        let lines = block(&m, 1_788_632_561, "sdrtop 0.0.0");
         let joined = lines.join("\n");
 
         for line in &lines {
@@ -277,7 +281,8 @@ mod tests {
         ] {
             assert!(joined.contains(field), "no {field} line:\n{joined}");
         }
-        assert!(joined.contains(env!("CARGO_PKG_VERSION")), "{joined}");
+        // The first line names the program that wrote the file, as given.
+        assert_eq!(lines[0], format!("{COMMENT} sdrtop 0.0.0"), "{joined}");
         assert!(joined.contains("2026-09-05T18:22:41Z"), "{joined}");
         assert!(joined.contains("HackRF"), "{joined}");
     }
@@ -288,7 +293,7 @@ mod tests {
     #[test]
     fn outside_net_and_ft8_the_header_names_the_view() {
         let mut m = SdrMetrics::fixture().streaming();
-        let joined = block(&m, 1_788_632_561).join("\n");
+        let joined = block(&m, 1_788_632_561, "sdrtop 0.0.0").join("\n");
         assert!(joined.contains("# mode         spectrum"), "{joined}");
         m.mode = crate::engine::mode::Mode::named("wifi_survey").unwrap();
         assert!(fields(&m, 0).iter().any(|(n, _)| *n == "addresses"));
@@ -310,7 +315,7 @@ mod tests {
         m.home.latitude = Some(46.2917);
         m.home.longitude = Some(18.5254);
         m.home.callsign = Some("HA5ZZT".into());
-        let joined = block(&m, 1_788_632_561).join("\n");
+        let joined = block(&m, 1_788_632_561, "sdrtop 0.0.0").join("\n");
         assert!(joined.contains("FT8 / 40 m, dial 7.074 MHz"), "{joined}");
         assert!(joined.contains("JN96gh   HA5ZZT"), "{joined}");
         assert!(
@@ -318,7 +323,7 @@ mod tests {
             "{joined}"
         );
         m.home.latitude = None;
-        let joined = block(&m, 1_788_632_561).join("\n");
+        let joined = block(&m, 1_788_632_561, "sdrtop 0.0.0").join("\n");
         assert!(joined.contains("no position, so no distances"), "{joined}");
     }
 

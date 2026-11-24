@@ -118,6 +118,7 @@ Everything is under http://ADDR/v1, JSON in and out:
   POST /v1/recording/stop    stop it, keeping what was already captured
   GET  /v1/recordings        the recordings in the recordings folder
   GET  /v1/recordings/{name} one recording's .sigmf-meta; the data stays here
+  POST /v1/export            write this mode's CSV files into the data folder
   GET  /v1/provenance  which radio, tuned where, against what reference
   POST /v1/command     one command, answered with what was done or why not
   GET  /v1/events      a WebSocket: commands applied, log lines, gaps, stalls
@@ -146,9 +147,10 @@ own are one block, and a flag wins over the line it matches:
 
 addresses (full, oui or masked) and pager_masked decide how much of what
 is heard is shown, on every route, from the first request; pager_mine
-shows one pager address alone. recordings_dir is where recordings go (by
-default sdrtop's folder), and the [record] block sets their limits. On exit
-monasd writes back the radio's settings and nothing else.",
+shows one pager address alone. recordings_dir is where recordings and
+exports go (by default sdrtop's folder), and the [record] block sets the
+recordings' limits. On exit monasd writes back the radio's settings and
+nothing else.",
     ),
     (
         "Examples",

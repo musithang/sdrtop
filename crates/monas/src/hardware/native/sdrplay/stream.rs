@@ -106,21 +106,23 @@ struct Position {
 }
 
 impl Position {
-    /// Hands what was gathered to the intake, stamped `now`.
-    fn deliver(&mut self, rx: &RxContext, now: std::time::Instant) -> usize {
+    /// Hands what was gathered to the intake, stamped `now`, its size in
+    /// `block` first: whoever takes the block from a queue must find its size
+    /// already there, not the one before it.
+    fn deliver(&mut self, rx: &RxContext, block: &AtomicU32, now: std::time::Instant) {
         if self.gathered.is_empty() {
-            return 0;
+            return;
         }
+        let pairs = self.gathered.len() / 2;
+        block.store(pairs as u32, Ordering::Relaxed);
         // SAFETY: an i16 slice viewed as its bytes, in the native order the
         // geometry (int16) reads.
         let bytes = unsafe {
             std::slice::from_raw_parts(self.gathered.as_ptr().cast::<u8>(), self.gathered.len() * 2)
         };
         crate::hardware::intake::deliver(rx, bytes, self.gathered_lost, now);
-        let pairs = self.gathered.len() / 2;
         self.gathered.clear();
         self.gathered_lost = 0;
-        pairs
     }
 }
 
@@ -277,19 +279,13 @@ unsafe extern "C" fn stream_callback(
         let Placed::Deliver { lost, new_run } = placed else {
             // What was gathered before it was samples: delivered, since
             // nothing may come after a block like this one.
-            let pairs = pos.deliver(&ctx.rx, now);
-            if pairs > 0 {
-                ctx.block.store(pairs as u32, Ordering::Relaxed);
-            }
+            pos.deliver(&ctx.rx, &ctx.block, now);
             ctx.junk.fetch_add(1, Ordering::Relaxed);
             return;
         };
         // What was gathered belongs before a new run, and before a loss.
         if new_run || lost > 0 {
-            let pairs = pos.deliver(&ctx.rx, now);
-            if pairs > 0 {
-                ctx.block.store(pairs as u32, Ordering::Relaxed);
-            }
+            pos.deliver(&ctx.rx, &ctx.block, now);
         }
         if new_run {
             ctx.rx.begin_stream();
@@ -301,8 +297,7 @@ unsafe extern "C" fn stream_callback(
         pos.gathered
             .extend(i.iter().zip(q).flat_map(|(&i, &q)| [i, q]));
         if pos.gathered.len() / 2 >= ctx.gather {
-            let pairs = pos.deliver(&ctx.rx, now);
-            ctx.block.store(pairs as u32, Ordering::Relaxed);
+            pos.deliver(&ctx.rx, &ctx.block, now);
         }
     }));
 }

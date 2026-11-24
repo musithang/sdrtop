@@ -71,6 +71,7 @@ dB here, a header that could not be read.
 | `POST /v1/recording/stop` | Stop the recording running, keeping every block already captured: answered as a command is. | [a reply](#commands) |
 | `GET /v1/recordings` | The recordings in the recordings folder, oldest first. Their data stays on this machine; their metadata is one route further. | `Listing` |
 | `GET /v1/recordings/{name}` | One recording's `.sigmf-meta`, by the name the listing gives it: what it holds, where its samples are missing and why, and how it ended. | the recording's `.sigmf-meta`, as JSON; 404 for a name the folder does not hold |
+| `POST /v1/export` | Write the CSV export of what the engine computes, as the terminal's export key does: NET's six files in a NET mode, the FT8 decodes in an FT8 mode, into the folder the recordings go to. Answered as a command is, each file named with its rows. | [a reply](#commands) |
 | `POST /v1/command` | One command, answered: 200 when applied, 422 with the reason when not. | [a reply](#commands) |
 | `GET /v1/events` | The events, as they happen, one JSON message each. | [a WebSocket of events](#events) |
 

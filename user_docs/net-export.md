@@ -35,7 +35,7 @@ header of `#` lines, which a spreadsheet, gnuplot and `pandas.read_csv` all
 skip by default. One, written from a test's radio:
 
 ```
-# sdrtop 0.6.5
+# sdrtop 0.8.1 (49b9e65)
 # exported     2026-10-10T20:41:07Z
 # device       HackRF One  serial 0000000000000000
 # tuning       2426.000 MHz   20.000 Msps   8 bit  fs=128
@@ -47,7 +47,7 @@ skip by default. One, written from a test's radio:
 
 | Line | What it records |
 |------|-----------------|
-| `sdrtop` | The version that wrote it |
+| first line | The program that wrote it and its version, with the commit: `sdrtop`, or `monasd` when the file came [over the API](monasd.md#exports) |
 | `exported` | When, in UTC |
 | `device` | The radio and its serial |
 | `tuning` | Frequency, sample rate, sample width and full scale |

@@ -189,7 +189,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let m = evening();
-        let w = crate::export::ft8_section(&m, &dir, 1_793_366_130).unwrap();
+        let w = crate::export::ft8_section(&m, &dir, 1_793_366_130, "sdrtop 0.0.0").unwrap();
         assert!(w.path.ends_with("ft8-20261030-131530.csv"), "{:?}", w.path);
         assert_eq!(w.rows, m.ft8.decodes.len());
         let text = std::fs::read_to_string(&w.path).unwrap();

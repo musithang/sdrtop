@@ -50,6 +50,7 @@ pub fn net_section(
     state: &SdrMetrics,
     dir: &std::path::Path,
     unix_secs: i64,
+    writer: &str,
 ) -> Vec<Result<Written, String>> {
     let occupancy = match occupancy::rows(state) {
         Ok(rows) => (rows, None),
@@ -85,6 +86,7 @@ pub fn net_section(
             state,
             dir,
             unix_secs,
+            writer,
             "net-band",
             occupancy::HEADER,
             occupancy.0,
@@ -94,12 +96,22 @@ pub fn net_section(
             state,
             dir,
             unix_secs,
+            writer,
             "net-census",
             census::HEADER,
             census,
             census_note,
         ),
-        one(state, dir, unix_secs, "net-ble", ble::HEADER, ble, ble_note),
+        one(
+            state,
+            dir,
+            unix_secs,
+            writer,
+            "net-ble",
+            ble::HEADER,
+            ble,
+            ble_note,
+        ),
         {
             let fer = fer::rows(state);
             let note = if fer.is_empty() {
@@ -111,6 +123,7 @@ pub fn net_section(
                 state,
                 dir,
                 unix_secs,
+                writer,
                 "net-fer",
                 fer::HEADER,
                 fer,
@@ -131,7 +144,16 @@ pub fn net_section(
             } else {
                 bt::note(state)
             };
-            one(state, dir, unix_secs, "net-bt", bt::HEADER, bt, Some(note))
+            one(
+                state,
+                dir,
+                unix_secs,
+                writer,
+                "net-bt",
+                bt::HEADER,
+                bt,
+                Some(note),
+            )
         },
         {
             let coded = ble::coded_rows(state);
@@ -153,6 +175,7 @@ pub fn net_section(
                 state,
                 dir,
                 unix_secs,
+                writer,
                 "net-coded",
                 ble::HEADER,
                 coded,
@@ -167,11 +190,13 @@ pub fn ft8_section(
     state: &SdrMetrics,
     dir: &std::path::Path,
     unix_secs: i64,
+    writer: &str,
 ) -> Result<Written, String> {
     one(
         state,
         dir,
         unix_secs,
+        writer,
         "ft8",
         ft8::HEADER,
         ft8::rows(state),
@@ -179,17 +204,19 @@ pub fn ft8_section(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn one(
     state: &SdrMetrics,
     dir: &std::path::Path,
     unix_secs: i64,
+    writer: &str,
     stem: &str,
     header: &str,
     rows: Vec<String>,
     note: Option<String>,
 ) -> Result<Written, String> {
     let path = dir.join(destination::file_name(stem, unix_secs));
-    let mut lines = provenance::block(state, unix_secs);
+    let mut lines = provenance::block(state, unix_secs, writer);
     if let Some(note) = &note {
         lines.push(format!("{} note         {note}", provenance::COMMENT));
     }
@@ -247,7 +274,7 @@ mod tests {
     fn every_body_shares_one_header_and_one_naming() {
         let dir = scratch();
         let m = SdrMetrics::fixture().streaming();
-        let out = net_section(&m, &dir, 1_788_632_561);
+        let out = net_section(&m, &dir, 1_788_632_561, "sdrtop 0.0.0");
         assert_eq!(out.len(), 6);
 
         let paths: Vec<_> = out
@@ -316,7 +343,7 @@ mod tests {
     fn a_body_with_no_rows_still_writes_a_file_that_explains_itself() {
         let dir = scratch();
         let m = SdrMetrics::fixture().streaming();
-        let out = net_section(&m, &dir, 1_788_632_561);
+        let out = net_section(&m, &dir, 1_788_632_561, "sdrtop 0.0.0");
 
         for written in &out {
             let w = written.as_ref().unwrap();
@@ -340,10 +367,10 @@ mod tests {
     fn a_second_export_in_the_same_second_is_refused() {
         let dir = scratch();
         let m = SdrMetrics::fixture().streaming();
-        assert!(net_section(&m, &dir, 1_788_632_561)
+        assert!(net_section(&m, &dir, 1_788_632_561, "sdrtop 0.0.0")
             .iter()
             .all(|w| w.is_ok()));
-        let again = net_section(&m, &dir, 1_788_632_561);
+        let again = net_section(&m, &dir, 1_788_632_561, "sdrtop 0.0.0");
         for result in &again {
             let err = result.as_ref().err().expect("refused");
             assert!(err.contains("exists already"), "{err}");

@@ -79,6 +79,16 @@ impl Recordings {
         }
     }
 
+    /// The folder recordings and exports go into.
+    pub fn folder(&self) -> &Path {
+        &self.dir
+    }
+
+    /// The program writing the files, as their headers name it.
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
     /// The new run's tap, when the radio was opened again.
     pub fn set_tap(&self, tap: Arc<RecordTap>) {
         *self.tap.lock().unwrap_or_else(|e| e.into_inner()) = tap;

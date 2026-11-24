@@ -613,7 +613,7 @@ fn reference() -> String {
     out.push_str("\n## Routes\n\n| Route | What it serves | Returns |\n|---|---|---|\n");
     for r in routes(&server) {
         let returns = match r.path.as_str() {
-            "/v1/command" | "/v1/recording" | "/v1/recording/stop" => {
+            "/v1/command" | "/v1/recording" | "/v1/recording/stop" | "/v1/export" => {
                 "[a reply](#commands)".to_string()
             }
             "/v1/recordings/{name}" => {

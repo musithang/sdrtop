@@ -35,10 +35,11 @@ pub(super) fn export_section(ctx: &mut InputCtx<'_>) -> bool {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
+    let writer = format!("sdrtop {}", crate::cli::VERSION);
     let results = if ft8 {
-        vec![crate::export::ft8_section(&m, &dir, unix_secs)]
+        vec![crate::export::ft8_section(&m, &dir, unix_secs, &writer)]
     } else {
-        crate::export::net_section(&m, &dir, unix_secs)
+        crate::export::net_section(&m, &dir, unix_secs, &writer)
     };
     for result in results {
         m.push_log(match result {

@@ -143,6 +143,7 @@ pub fn router(access: Access) -> Router {
         .route("/v1/recording/stop", post(recording_stop))
         .route("/v1/recordings", get(recordings))
         .route("/v1/recordings/{name}", get(recording_meta))
+        .route("/v1/export", post(export))
         .route("/v1/command", post(command))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(
@@ -512,6 +513,80 @@ async fn recording_meta(
     }
 }
 
+/// Write the CSV export of what the engine computes, as the terminal's
+/// export key does: NET's six files in a NET mode, the FT8 decodes in an FT8
+/// mode, into the folder the recordings go to. Answered as a command is,
+/// each file named with its rows.
+async fn export(State(access): State<Access>) -> Response {
+    let Some(r) = access.recordings.clone() else {
+        return no_recorder();
+    };
+    let state = access.engine.snapshot();
+    let written = tokio::task::spawn_blocking(move || exported(&state, &r)).await;
+    answered(written.unwrap_or_else(|e| Reply::Refused {
+        reason: format!("the export did not finish: {e}"),
+    }))
+}
+
+/// The export of `state` into `r`'s folder, as a reply.
+fn exported(state: &crate::state::SdrMetrics, r: &crate::record::Recordings) -> Reply {
+    let feeds = state.mode.feeds;
+    if !feeds.net && !feeds.ft8 {
+        return Reply::Refused {
+            reason: format!(
+                "nothing to export in the {} mode: the exports are the 2.4 GHz views' and FT8's",
+                state.mode.view
+            ),
+        };
+    }
+    if let Err(e) = std::fs::create_dir_all(r.folder()) {
+        return Reply::Refused {
+            reason: format!("cannot use the data folder: {e}"),
+        };
+    }
+    let unix_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let results = if feeds.ft8 {
+        vec![crate::export::ft8_section(
+            state,
+            r.folder(),
+            unix_secs,
+            r.program(),
+        )]
+    } else {
+        crate::export::net_section(state, r.folder(), unix_secs, r.program())
+    };
+    let mut done = Vec::new();
+    let mut failed = Vec::new();
+    for result in results {
+        match result {
+            Ok(w) => {
+                let name = w
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                done.push(match (w.rows, &w.note) {
+                    (0, Some(note)) => format!("{name} (nothing to write: {note})"),
+                    (n, _) => format!("{name} ({n} rows)"),
+                });
+            }
+            Err(why) => failed.push(why),
+        }
+    }
+    if done.is_empty() {
+        return Reply::Refused {
+            reason: failed.join("; "),
+        };
+    }
+    let mut detail = format!("wrote {}", done.join(", "));
+    if !failed.is_empty() {
+        detail.push_str(&format!("; not written: {}", failed.join("; ")));
+    }
+    Reply::Applied { detail }
+}
+
 /// Where the measurements come from: the same fields an export's header
 /// carries, by the same names.
 async fn provenance(
@@ -819,6 +894,55 @@ mod tests {
         let (status, _) = ask(app.clone(), post("/v1/recording/stop", "{}")).await;
         assert_eq!(status, StatusCode::OK);
         rec.finish();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An export writes the mode's files into the data folder, each named
+    /// with its rows and headed by monasd's name; a mode with nothing to
+    /// export is refused with why.
+    #[tokio::test]
+    async fn an_export_writes_the_modes_files() {
+        let dir = std::env::temp_dir().join(format!("monasd-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = Arc::new(std::sync::Mutex::new(crate::state::SdrMetrics::fixture()));
+        let engine = Engine::new(Arc::clone(&state), Arc::new(Bench::new()));
+        let rec = Arc::new(crate::record::Recordings::new(
+            Arc::clone(&state),
+            Arc::new(crate::hardware::RecordTap::default()),
+            dir.clone(),
+            crate::config::RecordSettings::default(),
+            "monasd test".into(),
+        ));
+        let app = router(Access::loopback(engine.clone()).with_recordings(rec));
+        let (status, json) = ask(app.clone(), post("/v1/export", "{}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+        assert!(
+            json["reason"]
+                .as_str()
+                .unwrap()
+                .contains("nothing to export"),
+            "{json}"
+        );
+
+        let net = crate::engine::mode::Mode::named("net_survey").unwrap();
+        engine.apply(crate::engine::command::Command::SetMode {
+            section: net.section,
+            view: net.view,
+        });
+        let (status, json) = ask(app, post("/v1/export", "{}")).await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        let detail = json["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("net-band") && detail.contains("net-census"),
+            "{detail}"
+        );
+        let band = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("net-band"))
+            .expect("the band's file");
+        let text = std::fs::read_to_string(band.path()).unwrap();
+        assert!(text.starts_with("# monasd test\n"), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

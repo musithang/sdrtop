@@ -136,6 +136,7 @@ can't fall behind it. The routes, in short:
 | `POST /v1/recording/stop` | Stop it, keeping every block already captured |
 | `GET /v1/recordings` | The recordings in the recordings folder, and which one is being written |
 | `GET /v1/recordings/{name}` | One recording's `.sigmf-meta`: what it holds, where samples are missing and why, how it ended |
+| `POST /v1/export` | Write the CSV export of what the current mode computes into the same folder: the six 2.4 GHz files in a NET mode, the FT8 decodes in `radio_ft8`. Answered with each file's name and its rows |
 
 How much of what is heard gets shown is yours to say, the same switches the
 terminal has: addresses in full, by registrant or masked, and pager text or
@@ -210,6 +211,23 @@ from the network: a recording is named by the time it started, and the
 metadata route only reads a name the folder's own listing holds, so
 `../../etc` finds nothing. And it won't send the samples: IQ over the
 network is what rtl_tcp is for, and fetching a recording is what scp is for.
+
+## Exports
+
+The same CSV files sdrtop writes with `o`, written over the API into the
+folder the recordings go to:
+
+```sh
+curl -X POST http://127.0.0.1:7373/v1/export
+```
+
+In a 2.4 GHz mode that's the band, the census, the BLE and LE Coded packets,
+the classic hits and the frame error curve; in `radio_ft8`, the decodes. In
+any other mode there's nothing to export, and the answer says so. Every file
+opens with [the same header](net-export.md#what-every-file-says-about-itself),
+whose first line says `monasd` wrote it. The figures in them are the same
+records the `/v1/net/...` and `/v1/ft8` routes serve as JSON, so a script that
+wants them now can just ask; the files are for keeping.
 
 ## When the radio goes away
 
