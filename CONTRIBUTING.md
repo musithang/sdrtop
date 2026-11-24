@@ -7,12 +7,8 @@ would not open.
 
 This page is the short version of getting a change in: a few rules, and a
 checklist. The rules sdrtop is built on are
-[the ten in POLICY.md](POLICY.md#part-two-the-rules), one sentence each, and
-where a rule here leans on one of them, it links to it.
-
-(The rest of POLICY.md is the story of how those ten came about. It is set on
-another planet. You don't need it to contribute, but it's there if you enjoy that
-sort of thing.)
+[the ten in POLICY.md](POLICY.md), one sentence each, and where a rule here
+leans on one of them, it links to it.
 
 Everyone here follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -107,8 +103,8 @@ They belong to [the release](RELEASING.md).
 
 ### 6. What sdrtop does not do
 
-No audio, no transmit, no mouse input. These are decisions, not missing
-features, and pull requests adding them will be declined.
+No audio, no transmit, no mouse input in the terminal. These are decisions,
+not missing features, and pull requests adding them will be declined.
 ([Rule Eight](POLICY.md#eight))
 
 ### 7. AI help is fine, if you say so
