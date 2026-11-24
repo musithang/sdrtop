@@ -128,7 +128,7 @@ mod host {
 }
 
 /// Measures the app's own CPU usage and RAM every 1 s, writes to `state`.
-pub fn spawn_sys_resource_task(state: Arc<Mutex<SdrMetrics>>) {
+pub fn spawn_sys_resource_task(state: Arc<Mutex<SdrMetrics>>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         // Normalise by core count so the result is a system-wide 0–100% figure.
         // Without this, a multi-threaded process (FFT worker + rx task + UI) can
@@ -158,7 +158,7 @@ pub fn spawn_sys_resource_task(state: Arc<Mutex<SdrMetrics>>) {
                 m.system.cpu_history.push_back((cpu_pct * 10.0) as u64);
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]

@@ -65,7 +65,10 @@ fn locked_line(tune_hz: u64, why: Option<&str>) -> String {
     }
 }
 
-pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) {
+pub fn spawn_net_survey_task(
+    state: Arc<Mutex<SdrMetrics>>,
+    device: Arc<dyn SdrDevice>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut surveying = false;
         // Alternate passes walk one cell along, so no megahertz stays in a
@@ -299,7 +302,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
             }
             pass = pass.wrapping_add(1);
         }
-    });
+    })
 }
 
 /// Put the decision on the state, and say it in the log the first time.

@@ -16,7 +16,10 @@ use crate::state::SdrMetrics;
 /// `profile` carries the scan, so this task never asks which backend it is
 /// watching. A backend with no profile cannot get here: observer mode is
 /// refused for it before the task is spawned.
-pub fn spawn_observer_task(state: Arc<Mutex<SdrMetrics>>, profile: ObserverProfile) {
+pub fn spawn_observer_task(
+    state: Arc<Mutex<SdrMetrics>>,
+    profile: ObserverProfile,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         // The holder's share is on the same scale as our own, every core
         // together, so the two CPU figures on one screen can be compared.
@@ -74,5 +77,5 @@ pub fn spawn_observer_task(state: Arc<Mutex<SdrMetrics>>, profile: ObserverProfi
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-    });
+    })
 }

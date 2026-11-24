@@ -64,7 +64,8 @@ impl App {
             None,
         )?;
 
-        crate::engine::start::run(&state, &device, &rx_ctx, feeds, bt_channels);
+        // The terminal keeps its run for the life of the process.
+        let _run = crate::engine::start::run(&state, &device, &rx_ctx, feeds, bt_channels);
 
         Ok(app)
     }

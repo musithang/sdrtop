@@ -213,6 +213,49 @@ pub fn feeds(
     )
 }
 
+/// What a run started: its tasks and its threads, so it can be stopped.
+///
+/// Dropping it stops nothing: the terminal runs one for the life of the
+/// process. [`Running::stop`] is for a front end that must let a radio go
+/// and take it again (one unplugged, then plugged back in).
+#[must_use = "a run that is never stopped needs no handle; say so with `let _run`"]
+pub struct Running {
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Running {
+    /// Stop the run: the tasks at once, then wait up to `within` for the
+    /// threads, which end when their queues close. Their queues close when
+    /// the stream context is gone, so the caller lets its own context go
+    /// first and has stopped the radio's stream, which holds one too.
+    /// The names of threads still running at the deadline are the error.
+    pub fn stop(self, within: std::time::Duration) -> Result<(), Vec<String>> {
+        for task in &self.tasks {
+            task.abort();
+        }
+        let deadline = std::time::Instant::now() + within;
+        while self.threads.iter().any(|t| !t.is_finished()) && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let left: Vec<String> = self
+            .threads
+            .iter()
+            .filter(|t| !t.is_finished())
+            .map(|t| t.thread().name().unwrap_or("unnamed").to_string())
+            .collect();
+        if left.is_empty() {
+            for t in self.threads {
+                let _ = t.join();
+            }
+            Ok(())
+        } else {
+            Err(left)
+        }
+    }
+}
+
 /// Start the workers and the tasks on an open radio.
 pub fn run(
     state: &Arc<Mutex<SdrMetrics>>,
@@ -220,72 +263,90 @@ pub fn run(
     rx_ctx: &Arc<hardware::RxContext>,
     feeds: Feeds,
     bt_channels: usize,
-) {
+) -> Running {
     let geometry = rx_ctx.geometry;
+    let mut tasks = Vec::new();
+    let mut threads = Vec::new();
     match device.capabilities().acquisition {
         hardware::AcquisitionKind::IqSamples => {
             // Before any stream can start: from the first block, the
             // driver's thread only stamps and hands over.
-            hardware::intake::spawn(rx_ctx);
+            threads.extend(hardware::intake::spawn(rx_ctx));
             let fft_state = Arc::clone(state);
-            spawn_worker("fft-worker", move || {
+            threads.push(spawn_worker("fft-worker", move || {
                 FftWorker::new(feeds.sample_rx, fft_state, geometry).run()
-            });
+            }));
 
             let demod_state = Arc::clone(state);
-            spawn_worker("demod-worker", move || {
+            threads.push(spawn_worker("demod-worker", move || {
                 DemodWorker::new(feeds.demod_rx, demod_state, geometry).run()
-            });
+            }));
 
             // Spawned whether or not the gate admitted the band: while the mode
             // asks for no NET view nothing is forwarded, so the thread costs one
             // blocked `recv`. Deciding here would mean two places that know what admits the
             // feature, and the one that already knows is `net::gate`.
             let net_state = Arc::clone(state);
-            spawn_worker("net-worker", move || {
+            threads.push(spawn_worker("net-worker", move || {
                 NetWorker::new(feeds.net_rx, net_state, geometry, bt_channels).run()
-            });
+            }));
 
             // Spawned always, as the NET worker is: while the mode asks for no
             // pager view nothing is forwarded, and the thread waits on `recv`.
             let pager_state = Arc::clone(state);
-            spawn_worker("pager-worker", move || {
+            threads.push(spawn_worker("pager-worker", move || {
                 crate::signal::pocsag::worker::PagerWorker::new(
                     feeds.pager_rx,
                     pager_state,
                     geometry,
                 )
                 .run()
-            });
+            }));
 
             // Spawned always, as the pager's: while the mode asks for no FT8
             // view nothing is forwarded, and the thread waits on `recv`.
             let ft8_state = Arc::clone(state);
-            spawn_worker("ft8-worker", move || {
+            threads.push(spawn_worker("ft8-worker", move || {
                 crate::signal::ft8::worker::Ft8Worker::new(feeds.ft8_rx, ft8_state, geometry).run()
-            });
+            }));
 
-            tasks::spawn_rx_task(Arc::clone(state), Arc::clone(device), Arc::clone(rx_ctx));
-            tasks::spawn_net_survey_task(Arc::clone(state), Arc::clone(device));
+            tasks.push(tasks::spawn_rx_task(
+                Arc::clone(state),
+                Arc::clone(device),
+                Arc::clone(rx_ctx),
+            ));
+            tasks.push(tasks::spawn_net_survey_task(
+                Arc::clone(state),
+                Arc::clone(device),
+            ));
         }
         hardware::AcquisitionKind::PowerTrace => {
             let power_state = Arc::clone(state);
-            spawn_worker("power-worker", move || {
+            threads.push(spawn_worker("power-worker", move || {
                 PowerWorker::new(feeds.power_rx, power_state).run()
-            });
-            tasks::spawn_power_rx_task(Arc::clone(state), Arc::clone(device), Arc::clone(rx_ctx));
+            }));
+            tasks.push(tasks::spawn_power_rx_task(
+                Arc::clone(state),
+                Arc::clone(device),
+                Arc::clone(rx_ctx),
+            ));
         }
     }
 
-    tasks::spawn_sweep_task(Arc::clone(state), Arc::clone(device));
-    tasks::spawn_sys_resource_task(Arc::clone(state));
+    tasks.push(tasks::spawn_sweep_task(
+        Arc::clone(state),
+        Arc::clone(device),
+    ));
+    tasks.push(tasks::spawn_sys_resource_task(Arc::clone(state)));
+    Running { tasks, threads }
 }
 
 /// Start what watches a radio another process holds: the USB scan, and the
 /// machine's own load. Nothing is fed, because nothing streams.
 pub fn observe(state: &Arc<Mutex<SdrMetrics>>, profile: hardware::discovery::ObserverProfile) {
-    tasks::spawn_observer_task(Arc::clone(state), profile);
-    tasks::spawn_sys_resource_task(Arc::clone(state));
+    // For the life of the process: dropping a handle leaves its task running.
+    drop(tasks::spawn_observer_task(Arc::clone(state), profile));
+    drop(tasks::spawn_sys_resource_task(Arc::clone(state)));
 }
 
 /// Spawns one of the long-lived DSP workers under a name, so `top -H` and btop
@@ -293,17 +354,45 @@ pub fn observe(state: &Arc<Mutex<SdrMetrics>>, profile: hardware::discovery::Obs
 /// An unnamed thread shows only the process name, and then the NET, FFT and
 /// demod workers cannot be told apart from each other or from the driver's own
 /// USB thread. Failing to spawn is as fatal here as in `std::thread::spawn`.
-fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) {
+fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name(name.to_string())
         .spawn(run)
-        .unwrap_or_else(|e| panic!("cannot start the {name} thread: {e}"));
+        .unwrap_or_else(|e| panic!("cannot start the {name} thread: {e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::testing::Bench;
+
+    /// **A run stops, and starts again.** Every thread it started ends once
+    /// its tasks are stopped and the stream context is let go, and a second
+    /// run on the same state does the same: what a front end needs to let a
+    /// radio go and take it back. The intake thread is the one that would
+    /// not, were it to hold the context that holds its own queue.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_run_stops_and_starts_again() {
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        for round in 0..2 {
+            let device: Arc<dyn SdrDevice> = Arc::new(Bench::new());
+            let geometry = device.capabilities().sample_geometry;
+            let (ctx, queues) = feeds(&state, geometry);
+            let running = run(&state, &device, &ctx, queues, 0);
+            assert!(
+                running.threads.len() >= 6,
+                "round {round}: the threads were not kept"
+            );
+            assert!(running.threads.iter().all(|t| !t.is_finished()));
+            drop(ctx);
+            let stopped = tokio::task::spawn_blocking(move || {
+                running.stop(std::time::Duration::from_secs(5))
+            })
+            .await
+            .unwrap();
+            assert_eq!(stopped, Ok(()), "round {round}");
+        }
+    }
 
     /// **A setting the radio refused is named as itself** in the log, once:
     /// a refused gain says "gains", and no other setting is blamed for it.

@@ -21,10 +21,12 @@ const DWELL_POLL_MS: u64 = 10;
 const FRAME_FRESH_MS: u128 = 200;
 const DIRECT_SWEEP_RETRY: Duration = Duration::from_secs(1);
 
-pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) {
+pub fn spawn_sweep_task(
+    state: Arc<Mutex<SdrMetrics>>,
+    device: Arc<dyn SdrDevice>,
+) -> tokio::task::JoinHandle<()> {
     if device.capabilities().acquisition == crate::hardware::AcquisitionKind::PowerTrace {
-        spawn_direct_sweep_task(state, device);
-        return;
+        return spawn_direct_sweep_task(state, device);
     }
     tokio::spawn(async move {
         let mut was_active = false;
@@ -170,7 +172,7 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                 }
             }
         }
-    });
+    })
 }
 
 trait DirectSweepControl {
@@ -417,14 +419,17 @@ fn record_exit_error(
     pending.retry_at = now + DIRECT_SWEEP_RETRY;
 }
 
-fn spawn_direct_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) {
+fn spawn_direct_sweep_task(
+    state: Arc<Mutex<SdrMetrics>>,
+    device: Arc<dyn SdrDevice>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut controller = DirectSweepController::default();
         loop {
             controller.update(&state, device.as_ref(), Instant::now());
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-    });
+    })
 }
 
 #[cfg(test)]

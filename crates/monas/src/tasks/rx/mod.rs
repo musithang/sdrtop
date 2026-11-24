@@ -50,7 +50,7 @@ pub fn spawn_rx_task(
     state: Arc<Mutex<SdrMetrics>>,
     device: Arc<dyn SdrDevice>,
     rx_ctx: Arc<RxContext>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut hw_rx_active = false;
         // Throttles SNR history sampling to ~500 ms regardless of the 200 ms poll.
@@ -223,7 +223,7 @@ pub fn spawn_rx_task(
 
             tokio::time::sleep(POLL_INTERVAL).await;
         }
-    });
+    })
 }
 
 /// Control a backend that publishes complete power-spectrum traces.
@@ -231,14 +231,14 @@ pub fn spawn_power_rx_task(
     state: Arc<Mutex<SdrMetrics>>,
     device: Arc<dyn SdrDevice>,
     rx_ctx: Arc<RxContext>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut active = false;
         loop {
             active = power_control_step(&state, &device, &rx_ctx, active);
             tokio::time::sleep(POLL_INTERVAL).await;
         }
-    });
+    })
 }
 
 fn power_control_step(

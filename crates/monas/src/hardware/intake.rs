@@ -66,22 +66,31 @@ impl Default for Intake {
     }
 }
 
-/// Start the intake thread for `ctx`. Once per context; a second call does
-/// nothing.
-pub fn spawn(ctx: &Arc<RxContext>) {
+/// Start the intake thread for `ctx`, and hand back its handle. Once per
+/// context; a second call does nothing and gives none.
+///
+/// **The thread holds the context weakly.** Its queue's sender lives in the
+/// context, so a thread that held it strongly would keep its own queue open
+/// for ever, and a run could never be stopped. Held weakly, the context goes
+/// when its last owner lets it go, the sender with it, and the thread ends.
+pub fn spawn(ctx: &Arc<RxContext>) -> Option<std::thread::JoinHandle<()>> {
     let (tx, rx) = crossbeam_channel::bounded::<Raw>(INTAKE_DEPTH);
     if ctx.intake.tx.set(tx).is_err() {
-        return;
+        return None;
     }
-    let worker = Arc::clone(ctx);
+    let worker = Arc::downgrade(ctx);
     let started = std::thread::Builder::new()
         .name("rx-intake".to_string())
         .spawn(move || run(&worker, &rx));
-    if let Err(e) = started {
-        // Without the thread nothing drains the queue, and every block from
-        // here on is lost: that is worth a line in the log.
-        let mut m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
-        m.push_log(format!("ERROR: cannot start the rx intake thread: {e}"));
+    match started {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            // Without the thread nothing drains the queue, and every block
+            // from here on is lost: that is worth a line in the log.
+            let mut m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
+            m.push_log(format!("ERROR: cannot start the rx intake thread: {e}"));
+            None
+        }
     }
 }
 
@@ -117,12 +126,16 @@ fn lost_before(expected: Option<u64>, arrival: &Arrival) -> u64 {
     }
 }
 
-fn run(ctx: &RxContext, rx: &Receiver<Raw>) {
-    let bytes_per_pair = ctx.geometry.bytes_per_pair() as u64;
+fn run(weak: &std::sync::Weak<RxContext>, rx: &Receiver<Raw>) {
     let mut expected: Option<u64> = None;
     for raw in rx.iter() {
+        // Gone: the run was stopped while a block was on its way.
+        let Some(ctx) = weak.upgrade() else {
+            break;
+        };
+        let bytes_per_pair = ctx.geometry.bytes_per_pair() as u64;
         let lost = lost_before(expected, &raw.arrival);
-        digest(&raw.bytes, ctx.geometry, &raw.arrival, lost, ctx);
+        digest(&raw.bytes, ctx.geometry, &raw.arrival, lost, &ctx);
         expected = Some(raw.arrival.first_pair + raw.bytes.len() as u64 / bytes_per_pair);
         let _ = ctx.intake.pool_tx.try_send(raw.bytes);
     }

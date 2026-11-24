@@ -225,7 +225,7 @@ pub async fn run(
         .with_radios(radios)
         .with_config(cfg.clone())
         .with_recordings(Arc::clone(&recordings));
-    start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
+    let _running = start::run(&state, &device, &rx_ctx, feeds, cfg.net.bt_channels);
     engine.with_state(|m| {
         m.push_log(format!(
             "monasd: computing for {}; the API is on http://{}/v1",
