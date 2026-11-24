@@ -5,12 +5,14 @@
 
 mod cpr;
 mod message;
+mod ppm;
 pub use cpr::{resolve_airborne_cpr, AirborneFix, CprObservation, CprPairError, CprTimestamp};
 pub use message::{
     AirbornePosition, AirborneVelocity, AirspeedKind, Altitude, AltitudeSource, CallsignError,
     CprFormat, HorizontalVelocity, Identification, Message, VelocityValue, VerticalRate,
     VerticalRateSource,
 };
+pub use ppm::{BitEvidence, PpmError, PpmSlicer};
 
 /// A complete DF17 squitter whose Mode S CRC has a zero remainder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

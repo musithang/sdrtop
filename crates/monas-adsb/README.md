@@ -7,6 +7,10 @@ airborne velocity. It resolves global airborne CPR positions from a
 compatible even and odd pair and returns the sample provenance of both
 receptions. The frame retains the original bytes for inspection.
 
+The PPM slicer takes an IQ power envelope and a supplied preamble edge.
+It uses fractional window overlap to recover the payload and can return
+the two measured half-cell energies per bit.
+
 Airborne altitude follows the DO-260C Q-bit encoding. It distinguishes
 barometric and geometric sources and exposes 100-foot Gillham codes as
 raw values. Airborne velocity distinguishes ground components, IAS or
