@@ -3,7 +3,9 @@
 
 //! Protocol primitives for 1090 MHz Extended Squitter.
 
+mod cpr;
 mod message;
+pub use cpr::{resolve_airborne_cpr, AirborneFix, CprObservation, CprPairError, CprTimestamp};
 pub use message::{
     AirbornePosition, AirborneVelocity, AirspeedKind, Altitude, AltitudeSource, CallsignError,
     CprFormat, HorizontalVelocity, Identification, Message, VelocityValue, VerticalRate,
