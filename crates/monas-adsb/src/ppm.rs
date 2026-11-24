@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-const PREAMBLE_HALF_CELLS: usize = 16;
+pub(crate) const PREAMBLE_HALF_CELLS: usize = 16;
 const FRAME_BITS: usize = 112;
 
 /// Half-cell integrals in input-power times sample periods.
@@ -27,6 +27,7 @@ impl BitEvidence {
 pub enum PpmError {
     InvalidSampleRate,
     InvalidStart,
+    IncompletePreamble,
     IncompleteFrame,
     InvalidPower { index: usize },
 }
@@ -41,11 +42,8 @@ impl PpmSlicer {
     /// Initialize from the actual IQ pair rate, in pairs per second.
     /// This integrator requires at least one sample period per half-cell.
     pub fn new(sample_rate_hz: f64) -> Result<Self, PpmError> {
-        if !sample_rate_hz.is_finite() || sample_rate_hz < 2_000_000.0 {
-            return Err(PpmError::InvalidSampleRate);
-        }
         Ok(Self {
-            half_cell_samples: sample_rate_hz / 2_000_000.0,
+            half_cell_samples: half_cell_samples(sample_rate_hz)?,
         })
     }
 
@@ -97,39 +95,55 @@ impl PpmSlicer {
     }
 }
 
-fn integrate(power: &[f32], start: f64, end: f64) -> Result<f64, PpmError> {
+pub(crate) fn half_cell_samples(rate_hz: f64) -> Result<f64, PpmError> {
+    if !rate_hz.is_finite() || rate_hz < 2_000_000.0 {
+        return Err(PpmError::InvalidSampleRate);
+    }
+    Ok(rate_hz / 2_000_000.0)
+}
+
+pub(crate) fn sample_power(sample: f32, index: usize) -> Result<f64, PpmError> {
+    if !sample.is_finite() || sample < 0.0 {
+        return Err(PpmError::InvalidPower { index });
+    }
+    Ok(f64::from(sample))
+}
+
+pub(crate) fn integrate(power: &[f32], start: f64, end: f64) -> Result<f64, PpmError> {
     let first = start.floor() as usize;
     let last = end.ceil() as usize;
     let mut energy = 0.0;
     for (offset, &sample) in power[first..last].iter().enumerate() {
         let index = first + offset;
-        if !sample.is_finite() || sample < 0.0 {
-            return Err(PpmError::InvalidPower { index });
-        }
         let left = index as f64;
         let overlap = end.min(left + 1.0) - start.max(left);
-        energy += f64::from(sample) * overlap;
+        energy += sample_power(sample, index)? * overlap;
     }
     Ok(energy)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::Df17Frame;
 
     // PR #22, src/signal/adsb.rs, REFERENCE_FRAME and modulate_reference_frame.
-    const ARCHIVED_FRAME: [u8; 14] = [
+    pub(crate) const ARCHIVED_FRAME: [u8; 14] = [
         0x8D, 0x4B, 0xB4, 0x63, 0x00, 0x3D, 0x10, 0x00, 0x00, 0x00, 0x00, 0x1B, 0x5B, 0xEC,
     ];
     // https://mode-s.org/1090mhz/content/ads-b/8-error-control.html
-    const PUBLISHED_FRAME: [u8; 14] = [
+    pub(crate) const PUBLISHED_FRAME: [u8; 14] = [
         0x8D, 0x40, 0x6B, 0x90, 0x20, 0x15, 0xA6, 0x78, 0xD4, 0xD2, 0x20, 0xAA, 0x4B, 0xDA,
     ];
 
     /// Point-sample the rectangular pulses or average the complex voltage
     /// over a cell with 16 sub-samples. Convert those IQ values into power.
-    fn sampled_power(bytes: &[u8; 14], rate: f64, start: f64, subsamples: usize) -> Vec<f32> {
+    pub(crate) fn sampled_power(
+        bytes: &[u8; 14],
+        rate: f64,
+        start: f64,
+        subsamples: usize,
+    ) -> Vec<f32> {
         let samples_per_us = rate / 1_000_000.0;
         let len = (start + 120.0 * samples_per_us).ceil() as usize;
         (0..len)
