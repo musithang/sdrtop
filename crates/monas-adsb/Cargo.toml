@@ -11,3 +11,7 @@ rust-version.workspace = true
 authors.workspace = true
 description = "The Monas 1090 MHz ADS-B decoder. Internal with no stability promise."
 readme = "README.md"
+
+[dev-dependencies]
+monas-dsp = { workspace = true, features = ["testing"] }
+num-complex.workspace = true

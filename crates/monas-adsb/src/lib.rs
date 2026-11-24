@@ -7,6 +7,8 @@ mod cpr;
 mod message;
 mod ppm;
 mod preamble;
+#[cfg(test)]
+mod rf_tests;
 mod stream;
 pub use cpr::{resolve_airborne_cpr, AirborneFix, CprObservation, CprPairError, CprTimestamp};
 pub use message::{

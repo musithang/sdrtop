@@ -184,7 +184,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    fn pulse_at(bytes: &[u8; 14], time_us: f64) -> bool {
+    pub(crate) fn pulse_at(bytes: &[u8; 14], time_us: f64) -> bool {
         if time_us < 8.0 {
             return [0.0, 1.0, 3.5, 4.5]
                 .iter()
