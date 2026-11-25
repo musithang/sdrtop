@@ -32,6 +32,27 @@ pub struct HeadlessPlan {
     /// Where the API's recordings go: the config's `recordings_dir`, else
     /// the folder the terminal records to.
     pub recordings_dir: std::path::PathBuf,
+    /// The job run beside the API, if one is named.
+    pub job: Option<Job>,
+}
+
+/// What monasd can run unattended beside the API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Job {
+    /// The 2.4 GHz band, logged a period at a time (`occupancy.rs`).
+    Occupancy,
+}
+
+impl Job {
+    /// Every job, by the name `[monasd] job` takes.
+    pub const ALL: [(&'static str, Job); 1] = [("occupancy", Job::Occupancy)];
+
+    /// The mode a job is measured in.
+    pub fn mode(self) -> &'static str {
+        match self {
+            Job::Occupancy => "net_survey",
+        }
+    }
 }
 
 /// Decide a headless run from the flags (`listen`, `mode`), which win, and
@@ -58,10 +79,36 @@ pub fn plan(
         ));
     }
 
+    let job = match &settings.job {
+        None => None,
+        Some(named) => match Job::ALL.iter().find(|(n, _)| n == named) {
+            Some(&(_, job)) => Some(job),
+            None => {
+                let names: Vec<&str> = Job::ALL.iter().map(|(n, _)| *n).collect();
+                return Err(format!(
+                    "job = \"{named}\" in [monasd] is no job; the jobs are {}",
+                    names.join(", ")
+                ));
+            }
+        },
+    };
     let name = mode
         .map(str::to_string)
         .or_else(|| settings.mode.clone())
+        .or_else(|| job.map(|j| j.mode().to_string()))
         .unwrap_or_else(|| "spectrum".to_string());
+    if let Some(job) = job.filter(|j| j.mode() != name) {
+        return Err(format!(
+            "the {} job measures in {}, and the mode asked for is {name}; \
+             name {} or no mode",
+            Job::ALL
+                .iter()
+                .find(|(_, j)| *j == job)
+                .map_or("", |(n, _)| *n),
+            job.mode(),
+            job.mode()
+        ));
+    }
     let Some(mode) = Mode::named(&name) else {
         let names: Vec<&str> = MODES.iter().map(|(n, _)| *n).collect();
         return Err(format!(
@@ -102,6 +149,7 @@ pub fn plan(
             .recordings_dir
             .clone()
             .unwrap_or_else(crate::export::destination::default_dir),
+        job,
     })
 }
 
@@ -226,6 +274,38 @@ mod tests {
         let plan = plan(None, None, &MonasdSettings::default()).unwrap();
         assert_eq!(plan.mode.view, "spectrum");
         assert!(plan.spectrum);
+    }
+
+    /// **The occupancy log is the survey's band, so it runs on the survey**:
+    /// named alone it brings the survey with it, with another mode it is
+    /// refused, and a job nobody knows is refused with the ones there are.
+    #[test]
+    fn the_occupancy_job_runs_on_the_survey_or_is_refused() {
+        let job = MonasdSettings {
+            job: Some("occupancy".into()),
+            ..MonasdSettings::default()
+        };
+        let planned = plan(None, None, &job).unwrap();
+        assert_eq!(planned.job, Some(Job::Occupancy));
+        assert_eq!(planned.mode.view, "net_survey");
+
+        let why = plan(None, Some("spectrum"), &job).unwrap_err();
+        assert!(
+            why.contains("net_survey") && why.contains("spectrum"),
+            "{why}"
+        );
+
+        let unknown = MonasdSettings {
+            job: Some("occupy".into()),
+            ..MonasdSettings::default()
+        };
+        let why = plan(None, None, &unknown).unwrap_err();
+        assert!(why.contains("occupy") && why.contains("occupancy"), "{why}");
+
+        assert_eq!(
+            plan(None, None, &MonasdSettings::default()).unwrap().job,
+            None
+        );
     }
 
     /// With no one at a terminal to ask, one radio is the one; several are

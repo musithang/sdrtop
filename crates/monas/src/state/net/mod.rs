@@ -33,7 +33,7 @@ mod wifi;
 
 pub use address::{who_with, AddressBook, AddressDisplay, FULL_ADDRESS_WIDTH};
 pub use airtime::{AirColumn, Rhythm, Spender, READING_COLUMNS, RHYTHM_BINS};
-pub use band::{BandOccupancy, CellReading, COLUMN_INTERVAL, HISTORY_COLUMNS};
+pub use band::{BandOccupancy, CellReading, CellTally, Tally, COLUMN_INTERVAL, HISTORY_COLUMNS};
 pub use census::CensusState;
 #[cfg(any(test, feature = "testing"))]
 pub use classic::ROSTER_SORT_KEYS;

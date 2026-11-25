@@ -36,9 +36,9 @@ pub use micro::MicroView;
 // to be returned and destructured, and no call site has to name it.
 pub use net::{
     who_with, AddressBook, AddressDisplay, BandOccupancy, BlePacket, BlePacketView, BtHop,
-    CellReading, CodedFacts, ConnectionView, ExtInfo, ExtRole, FollowedConnection, LockTarget,
-    NetMode, NetState, PacketsView, PduKind, ReceiverNow, RetuneRun, BLE_PACKET_LIMIT,
-    BT_HOP_LIMIT, COLUMN_INTERVAL, FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
+    CellReading, CellTally, CodedFacts, ConnectionView, ExtInfo, ExtRole, FollowedConnection,
+    LockTarget, NetMode, NetState, PacketsView, PduKind, ReceiverNow, RetuneRun, Tally,
+    BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
 };
 // The roster's sort keys, which the roster's columns are held to.
 #[cfg(any(test, feature = "testing"))]

@@ -25,7 +25,8 @@ are two programs built on the same engine. Neither knows the other exists.
 **What it does, honestly.** monasd opens the radio, computes the mode you
 ask for (the same receivers sdrtop would run for that view), takes commands,
 tells you how it is doing and streams events. It records SigMF and writes the
-CSV exports, and when the radio goes away it brings it back and says how long
+CSV exports, can log the 2.4 GHz band unattended for as long as you like,
+and when the radio goes away it brings it back and says how long
 it was gone. Of the measurements it serves nearly everything the screen has: the radio with its gain chain
 and frequency reference, the signal's figures, the I/Q front end, the
 pipeline's vital signs, the recorder, the spectrum itself, the demodulator,
@@ -229,6 +230,51 @@ opens with [the same header](net-export.md#what-every-file-says-about-itself),
 whose first line says `monasd` wrote it. The figures in them are the same
 records the `/v1/net/...` and `/v1/ft8` routes serve as JSON, so a script that
 wants them now can just ask; the files are for keeping.
+
+## Logging the band
+
+Left alone for a week, monasd can keep a diary of the 2.4 GHz band. One line
+in the `[monasd]` block:
+
+```toml
+[monasd]
+job = "occupancy"
+```
+
+and it surveys the band (a job with no `mode` brings `net_survey` with it; a
+different mode is refused at start, since it couldn't measure anything) and
+writes one JSON line per megahertz per minute into the folder the recordings
+go to, `occupancy-2026-11-25.jsonl`, a new file every UTC day. About twelve
+megabytes a day, so the disk will outlive my patience for reading it.
+
+Three kinds of line:
+
+```json
+{"provenance": {"writer": "monasd 0.8.2", "exported": "...", "device": "...", ...}}
+{"cell": {"from_unix_ms": 1795608000000, "to_unix_ms": 1795608060000, "mhz": 2412.5,
+          "observed": true, "duty_pct": 31.42, "duty_sigma_pct": 0.21,
+          "coverage_pct": 16.7, "mean_dbfs": -61.3, "peak_dbfs": -28.0, "windows": 1563000}}
+{"gap": {"from_unix_ms": 1795608012000, "to_unix_ms": 1795608020000,
+         "why": "the radio stopped delivering"}}
+```
+
+The `provenance` line is [the export header](net-export.md#what-every-file-says-about-itself)
+as JSON, first in every file and again each time monasd starts. A `cell` is
+one megahertz over one minute, the band CSV's columns as fields, made of
+every dwell the survey spent there in that minute. `coverage_pct` is how much
+of the minute anybody was looking: the survey visits each part of the band in
+turn, so about a sixth is normal, and the duty cycle isn't scaled by it (a
+channel busy all the time is busy all the time, however rarely I check).
+
+Two rules make the file worth keeping. A megahertz nobody looked at in a
+minute is `null` in every figure, never `0`, because zero is a quiet channel
+and null is me not looking. And every stretch when monasd was blind, or half
+blind, is a `gap` with its reason: the stream losing samples, the 2.4 GHz
+feed dropping blocks, the radio stopping or gone, the survey not running,
+dwells measured against a noise floor that failed its own checks. A duty
+cycle the screen would dash is `null` here too, with its spread kept. If the
+disk fills, the log stops, says so once in monasd's log, and the rest of
+monasd carries on.
 
 ## When the radio goes away
 

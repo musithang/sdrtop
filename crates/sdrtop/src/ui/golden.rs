@@ -70,6 +70,7 @@ mod tests {
             history: Default::default(),
             last_column: None,
             columns_taken: 0,
+            tally: Default::default(),
         };
         m
     }

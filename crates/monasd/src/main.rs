@@ -21,6 +21,7 @@ mod api_doc;
 #[allow(rustdoc::broken_intra_doc_links)]
 mod cli;
 mod config;
+mod occupancy;
 mod plan;
 mod record;
 mod revive;
@@ -249,6 +250,25 @@ pub async fn run(
         hardware::open_device(listing, &open_cfg).map_err(|e| format!("{e:#}"))
     });
     let (stop_watch, watch_stopped) = tokio::sync::watch::channel(false);
+    // The job beside the API, stopped with the watcher and after it, so an
+    // outage the watcher reports on the way out still reaches the log.
+    let job = plan.job.map(|job| match job {
+        plan::Job::Occupancy => {
+            engine.with_state(|m| {
+                m.push_log(format!(
+                    "monasd: logging the band a minute at a time into {}",
+                    plan.recordings_dir.display()
+                ))
+            });
+            tokio::spawn(occupancy::run(
+                Arc::clone(&state),
+                occupancy::Folder(plan.recordings_dir.clone()),
+                recorder_name(),
+                occupancy::PERIOD,
+                watch_stopped.clone(),
+            ))
+        }
+    });
     let watcher = tokio::spawn(revive::watch(
         engine.clone(),
         Arc::clone(&state),
@@ -277,6 +297,9 @@ pub async fn run(
     // No radio is brought back while the program is on its way out.
     let _ = stop_watch.send(true);
     let _ = watcher.await;
+    if let Some(job) = job {
+        let _ = job.await;
+    }
     let _ = stop.send(());
     if let Ok(Err(e)) = serving.await {
         eprintln!("the API stopped: {e}");

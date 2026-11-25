@@ -116,6 +116,65 @@ pub struct BandOccupancy {
     /// How long one transform window was. The resolution every duty cycle here
     /// was measured at, and what turns a window count back into seconds.
     pub window_s: f64,
+    /// Every dwell since the tally was last taken, cell by cell: what an
+    /// unattended log writes a period from. See [`Tally`].
+    pub tally: Tally,
+}
+
+/// The dwells since the tally was last taken, summed per cell.
+///
+/// **The band shows each cell's last dwell; a period needs all of them.**
+/// Reading the band once a period would take whichever dwell happened to be
+/// there, and the same one again for a cell the survey had not come back to.
+/// Summing here, as each dwell is absorbed, misses none and repeats none.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Tally {
+    /// One per cell, as long as the band once a dwell has landed.
+    pub cells: Vec<CellTally>,
+    /// Dwells left out because their floor failed its preconditions: their
+    /// duty cycles were decided by a threshold that meant nothing.
+    pub untrusted_dwells: u64,
+}
+
+/// One cell's dwells, summed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CellTally {
+    /// Transform windows, over every dwell that saw this cell.
+    pub windows: u64,
+    /// Windows with something in them, the false-alarm floor removed as each
+    /// dwell's duty cycle already has it removed.
+    pub busy: f64,
+    /// Mean power, linear, weighted by windows: a mean of decibels would
+    /// be the geometric mean of the powers, which no meter reads.
+    pub power: f64,
+    /// The loudest window any of the dwells saw.
+    pub peak_dbfs: Option<f64>,
+    /// Seconds under observation.
+    pub observed_s: f64,
+}
+
+impl CellTally {
+    /// The fraction of windows busy, or `None` where nobody looked.
+    pub fn duty(&self) -> Option<f64> {
+        (self.windows > 0).then(|| self.busy / self.windows as f64)
+    }
+
+    /// The mean power in dBFS, or `None` where nobody looked.
+    pub fn mean_dbfs(&self) -> Option<f64> {
+        (self.windows > 0).then(|| 10.0 * (self.power / self.windows as f64).log10())
+    }
+
+    fn add(&mut self, cell: &CellReading, window_s: f64) {
+        let w = cell.windows as f64;
+        self.windows += cell.windows;
+        self.busy += cell.duty * w;
+        self.power += 10f64.powf(cell.mean_dbfs / 10.0) * w;
+        self.peak_dbfs = Some(
+            self.peak_dbfs
+                .map_or(cell.peak_dbfs, |p| p.max(cell.peak_dbfs)),
+        );
+        self.observed_s += w * window_s;
+    }
 }
 
 impl BandOccupancy {
@@ -160,12 +219,33 @@ impl BandOccupancy {
                 ..*new
             };
         }
+        self.tally_dwell(&dwell);
         self.noise_dbfs = dwell.noise_dbfs;
         self.trusted = dwell.trusted;
         self.tail = dwell.tail;
         self.spread = dwell.spread;
         self.window_s = dwell.window_s;
         self.record_column(now);
+    }
+
+    /// The dwells since the last take, and a fresh tally in their place.
+    pub fn take_tally(&mut self) -> Tally {
+        std::mem::take(&mut self.tally)
+    }
+
+    fn tally_dwell(&mut self, dwell: &BandOccupancy) {
+        if !dwell.trusted {
+            self.tally.untrusted_dwells += 1;
+            return;
+        }
+        if self.tally.cells.len() != dwell.cells.len() {
+            self.tally.cells = vec![CellTally::default(); dwell.cells.len()];
+        }
+        for (sum, cell) in self.tally.cells.iter_mut().zip(&dwell.cells) {
+            if cell.windows > 0 {
+                sum.add(cell, dwell.window_s);
+            }
+        }
     }
 
     /// While the band is not being measured, keep its time axis moving: a
@@ -302,6 +382,7 @@ mod tests {
             history: Default::default(),
             last_column: None,
             columns_taken: 0,
+            tally: Default::default(),
         };
         for &(c, duty, windows) in cells {
             out.cells[c] = CellReading {
@@ -315,6 +396,60 @@ mod tests {
             };
         }
         out
+    }
+
+    /// **Every dwell lands in the tally until somebody takes it**, so a
+    /// period's figures are made of every dwell inside it, not of whichever
+    /// one was on the band when it was looked at. Two dwells on one cell
+    /// add their windows, busy windows and power; the peak is the louder.
+    #[test]
+    fn every_dwell_is_tallied_until_taken() {
+        let t0 = Instant::now();
+        let mut band = BandOccupancy::default();
+        band.absorb(dwell(&[(10, 0.5, 8_000)]), t0);
+        let mut louder = dwell(&[(10, 0.25, 8_000), (40, 0.1, 2_000)]);
+        louder.cells[10].mean_dbfs = -50.0;
+        louder.cells[10].peak_dbfs = -20.0;
+        band.absorb(louder, t0 + Duration::from_millis(50));
+
+        let tally = band.take_tally();
+        assert_eq!(tally.cells.len(), 83);
+        let c = tally.cells[10];
+        assert_eq!(c.windows, 16_000);
+        assert!((c.duty().unwrap() - 0.375).abs() < 1e-12);
+        // -60 and -50 dBFS over equal windows: the mean of the powers.
+        let expected = 10.0 * ((1e-6 + 1e-5) / 2.0_f64).log10();
+        assert!((c.mean_dbfs().unwrap() - expected).abs() < 1e-9);
+        assert_eq!(c.peak_dbfs, Some(-20.0));
+        assert!((c.observed_s - 16_000.0 * 6.4e-6).abs() < 1e-12);
+        assert_eq!(tally.cells[40].windows, 2_000);
+        // A cell no dwell saw has no figures, not zero ones.
+        assert_eq!(tally.cells[0].windows, 0);
+        assert_eq!(tally.cells[0].duty(), None);
+        assert_eq!(tally.cells[0].mean_dbfs(), None);
+
+        // Taken is gone: the next period starts from nothing.
+        let next = band.take_tally();
+        assert!(next.cells.iter().all(|c| c.windows == 0));
+        // And the band itself is untouched by the taking.
+        assert_eq!(band.cells[10].duty, 0.25);
+    }
+
+    /// **A dwell measured against a floor that failed is counted, never
+    /// tallied**: its duty cycles were decided by a threshold that meant
+    /// nothing, and a period built on them would hide that.
+    #[test]
+    fn a_dwell_on_a_failed_floor_is_counted_not_tallied() {
+        let t0 = Instant::now();
+        let mut band = BandOccupancy::default();
+        let mut bad = dwell(&[(10, 0.9, 8_000)]);
+        bad.trusted = false;
+        band.absorb(bad, t0);
+        band.absorb(dwell(&[(20, 0.1, 8_000)]), t0 + Duration::from_millis(50));
+        let tally = band.take_tally();
+        assert_eq!(tally.untrusted_dwells, 1);
+        assert_eq!(tally.cells[10].windows, 0);
+        assert_eq!(tally.cells[20].windows, 8_000);
     }
 
     /// While the band is not being measured, the time axis still moves: a

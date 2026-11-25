@@ -313,7 +313,8 @@ monasd starts there next time, and the other way round.
 
 The `[monasd]` block holds `listen` (the address it serves on, `host:port`),
 `token` (what a client off this machine has to present; required for anything
-but loopback) and `mode` (what it computes, by a view's name). A flag on
+but loopback), `mode` (what it computes, by a view's name) and `job`
+(`occupancy` logs the 2.4 GHz band a minute at a time). A flag on
 monasd's command line wins over the file. The [monasd page](monasd.md) has the
 rest.
 

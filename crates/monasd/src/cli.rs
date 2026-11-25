@@ -149,8 +149,10 @@ addresses (full, oui or masked) and pager_masked decide how much of what
 is heard is shown, on every route, from the first request; pager_mine
 shows one pager address alone. recordings_dir is where recordings and
 exports go (by default sdrtop's folder), and the [record] block sets the
-recordings' limits. On exit monasd writes back the radio's settings and
-nothing else.",
+recordings' limits. job = \"occupancy\" logs the 2.4 GHz band there, one
+JSON line per megahertz per minute, a file per UTC day, every blind stretch
+a gap line; it runs on net_survey. On exit monasd writes back the radio's
+settings and nothing else.",
     ),
     (
         "Examples",

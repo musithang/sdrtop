@@ -40,6 +40,10 @@ pub struct MonasdSettings {
     /// The one pager address shown from the start; every address without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pager_mine: Option<u32>,
+    /// A job to run unattended beside the API: `occupancy`, the 2.4 GHz
+    /// band logged a minute at a time into the data folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
 }
 
 impl MonasdSettings {
@@ -99,6 +103,7 @@ mod tests {
                 addresses: Some("masked".into()),
                 pager_masked: Some(true),
                 pager_mine: Some(1234),
+                job: Some("occupancy".into()),
             }
         );
         assert_eq!(cfg.engine.tinysa.points, 900);

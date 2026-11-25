@@ -29,6 +29,7 @@ window = "15 min"
 
 [monasd]
 addresses = "masked"
+job = "occupancy"
 listen = "0.0.0.0:7373"
 mode = "net_survey"
 pager_masked = true

@@ -286,6 +286,8 @@ impl Scan {
             history: Default::default(),
             last_column: None,
             columns_taken: 0,
+            // Nor a tally: summing dwells is the band's, as it absorbs them.
+            tally: Default::default(),
         };
         self.reset();
         out
