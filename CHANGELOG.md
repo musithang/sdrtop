@@ -12,6 +12,41 @@ field falls back to a default rather than refusing to start.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-24
+
+**monasd serves the measurements.**
+
+In 0.8.0 monasd could drive a radio and say how it was doing; now it serves nearly everything the screen shows, each reading with when it was taken and why it's missing when it is, records SigMF, writes the CSV exports, and when the radio goes away it waits for it to come back and writes down how long it was gone. Every route, field, command and event is described in [`user_docs/api.md`](https://github.com/musithang/sdrtop/blob/main/user_docs/api.md), which a test writes from the code. Your config file carries over unchanged; monasd's `[monasd]` block gains a few optional keys. One thing in the API is renamed, and *Changed* says which, so no script finds out by itself.
+
+### Added
+
+- **The readings over the API.** `/v1/snapshot` holds the radio and its gain chain, the signal's figures, the I/Q front end, the pipeline's vitals, the recorder, the demodulator, the pager's and FT8's counts and the 2.4 GHz receivers. Lists and large readings have routes of their own: `/v1/spectrum`, `/v1/pager`, `/v1/ft8`, `/v1/net/band`, `/v1/net/census`, `/v1/net/ble`, `/v1/net/coded`, `/v1/net/bt`, `/v1/net/fer`, `/v1/net/wifi/survey`, `/v1/net/wifi/frames`, `/v1/net/wifi/airtime`, the lists taking `?since=N`. Every reading is a value or the reason it has none, never a bare zero, and every group says when it was read and whether it is stale. `/v1/provenance` gives the export header's fields.
+- **SigMF recording over the API**: `POST /v1/recording` and `/v1/recording/stop`, `GET /v1/recordings` and each recording's metadata. No file name or path is ever taken from the network, and the samples stay on the machine.
+- **Exports over the API**: `POST /v1/export` writes the current mode's CSV files, as the terminal's `o` does.
+- **The radio comes back.** When the stream stops by itself, monasd looks for the same radio again (after 1, 2, 4, 8 and 16 seconds, then every 30), restores its settings, streams again, and sends the time it was gone as one `outage` event.
+- **What is shown, as a setting.** The `addresses` and `pager` commands, and `addresses`, `pager_masked` and `pager_mine` in the config's `[monasd]` block, decide how much of what is heard monasd shows, from the first request.
+- **`lab_signal`**, a mode that runs the demodulator headless.
+- **The API reference**, `user_docs/api.md`, written from the source by a test and held to what is actually serialised.
+- **A systemd unit**, `packaging/monasd.service`, in every tarball.
+- **`--help` that helps**, for both programs: `-h` a screen, `--help` every flag in full with sdrtop's first keys and files and monasd's modes, routes, token, config block, examples and exit codes; the man pages carry the same sections. Every list in them is checked against the code.
+
+### Changed
+
+- **The engine's own sample loss is `monas` in the API**, not `sdrtop`, in `/v1/health`'s `lost_samples` and in the `gap` event. sdrtop is the terminal, which may not even be running. A script written against 0.8.0 reads the new key.
+- Every file monasd or sdrtop writes names the program that wrote it: the CSV header's first line, a recording's `core:recorder`, and its annotations' `core:generator`.
+- The README wears a "powered by Monas" badge, and no longer says early development.
+- `POLICY.md` is the ten rules alone; the story they came out of is gone. The rules now say they bind every place a number leaves the engine, the API included, and that it is the terminal that takes no mouse input.
+
+### Fixed
+
+- The Hardware Vitals bench printed its dash as `--` on a stopped radio.
+- The Lab's signal figures printed `NaN` where they now show a dash.
+- An export header written outside NET and FT8 named a NET mode it was not in.
+- On an SDRplay radio, the timing bench could show the size of the delivery before for a moment.
+- An Airspy R2 or HF+ that fell off the USB bus kept its stream's whole context alive, on purpose, because the library's thread may still call back with it; that kept the intake thread and every worker of the run waiting for ever, six threads per outage in monasd. The library's thread is now handed a small go-between that holds the context weakly: the go-between stays, the context and the threads go.
+- A recording's `core:description` said "recorded by sdrtop" whoever wrote it; it names the program now, as `core:recorder` does.
+- A recording whose disk filled up left an empty `.sigmf-meta.tmp` beside it.
+
 ## [0.8.0] - 2026-11-20
 
 **The PlutoSky R2 opens natively, and sdrtop's engine gets an identity of its own.**
@@ -1572,7 +1607,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/musithang/sdrtop/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/musithang/sdrtop/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/musithang/sdrtop/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/musithang/sdrtop/compare/v0.7.2...v0.7.3
