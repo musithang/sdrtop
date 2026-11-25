@@ -244,8 +244,8 @@ job = "occupancy"
 and it surveys the band (a job with no `mode` brings `net_survey` with it; a
 different mode is refused at start, since it couldn't measure anything) and
 writes one JSON line per megahertz per minute into the folder the recordings
-go to, `occupancy-2026-11-25.jsonl`, a new file every UTC day. About twelve
-megabytes a day, so the disk will outlive my patience for reading it.
+go to, `occupancy-2026-11-25.jsonl`, a new file every UTC day. About 25
+megabytes a day (I measured an hour: 1.05 MB), so the disk will outlive my patience for reading it.
 
 Three kinds of line:
 

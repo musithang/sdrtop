@@ -36,8 +36,9 @@ use crate::state::{SdrMetrics, Tally};
 
 /// One line per megahertz per this long.
 ///
-/// A minute: 83 lines, about eight kilobytes, so a day is about twelve
-/// megabytes and a week fits anywhere. Fine enough to see a microwave oven
+/// A minute: 83 lines, about seventeen kilobytes (an hour on the desk wrote
+/// 1.05 MB), so a day is about twenty-five megabytes and a week fits
+/// anywhere. Fine enough to see a microwave oven
 /// come and go, coarse enough that each cell has thousands of windows behind
 /// it even while the survey is elsewhere most of the time.
 pub const PERIOD: Duration = Duration::from_secs(60);
