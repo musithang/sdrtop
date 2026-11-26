@@ -62,10 +62,11 @@ pub const DC_GUARD_HZ: f64 = 1_000.0;
 pub struct CarrierSetting {
     /// The carrier's nominal frequency, Hz.
     pub hz: u64,
-    /// The half-width watched around it, Hz.
+    /// The half-width watched around it, Hz: 25 when left out.
     #[serde(default = "default_span")]
     pub span_hz: f64,
-    /// The finest separation between two lines that is wanted, Hz.
+    /// The finest separation between two lines that is wanted, Hz: 0.1
+    /// when left out.
     #[serde(default = "default_resolution")]
     pub resolution_hz: f64,
 }

@@ -636,6 +636,7 @@ impl App {
             display,
             station,
             ft8,
+            doppler,
         ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let loaded = RadioConfig {
@@ -658,6 +659,9 @@ impl App {
                 m.pager.view.display.clone(),
                 m.home.settings(),
                 m.ft8.view.settings(),
+                // The terminal chooses no carriers; what the config held, or
+                // monasd wrote, goes back as it was.
+                crate::engine::boot::doppler_block(&m),
             )
         };
         let engine = EngineConfig {
@@ -677,6 +681,7 @@ impl App {
             pager: crate::config::PagerSettings { night, display },
             station,
             ft8,
+            doppler,
         };
         let tui = TuiConfig {
             display: DisplayConfig {

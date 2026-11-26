@@ -512,7 +512,11 @@ pub fn initial_metrics(cfg: &EngineConfig, boot: Boot) -> anyhow::Result<SdrMetr
             view: ft8_view,
             ..Default::default()
         },
-        doppler: crate::state::DopplerState::default(),
+        doppler: {
+            let mut d = crate::state::DopplerState::default();
+            d.set_carriers(cfg.doppler.carriers.clone());
+            d
+        },
         home,
         record: crate::state::RecordState::default(),
         caps,
@@ -555,6 +559,14 @@ pub fn radio_block(m: &SdrMetrics, loaded: &RadioConfig) -> RadioConfig {
         }),
         boost,
         recall_hz: loaded.recall_hz,
+    }
+}
+
+/// `[doppler]` as the state now has it, for the save: the carriers a command
+/// chose outlive the run, as the radio's tuning does.
+pub fn doppler_block(m: &SdrMetrics) -> crate::config::DopplerSettings {
+    crate::config::DopplerSettings {
+        carriers: m.doppler.carriers.clone(),
     }
 }
 

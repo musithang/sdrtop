@@ -336,6 +336,11 @@ impl Types {
             format!("{root}/monas/src/engine/events.rs"),
         ));
         files.push(("log".into(), format!("{root}/monas/src/state/log.rs")));
+        // A carrier, as the doppler command and `[doppler]` take it.
+        files.push((
+            "doppler_settings".into(),
+            format!("{root}/monas/src/signal/doppler/settings.rs"),
+        ));
         files.push(("server".into(), format!("{root}/monasd/src/server.rs")));
         let mut items = Vec::new();
         let mut uses = Vec::new();

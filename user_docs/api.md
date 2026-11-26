@@ -94,6 +94,7 @@ dB here, a header that could not be read.
 | `"command": "device_option"` | `id`: string<br>`choice`: string | Set one of the radio's own options, by its id, to one of its choices. |
 | `"command": "addresses"` | `show`: string | Show addresses `full`, by registrant (`oui`) or `masked`, on every screen and in every export and API answer alike. |
 | `"command": "pager"` | `masked`: boolean<br>`mine`: integer or null | The pager's view: text `masked` to its kind and length, and the one address it answers to (`mine`, none for every address). |
+| `"command": "doppler"` | `carriers`: list of [`CarrierSetting`](#carriersetting) | The carriers the doppler lab watches, one to four, each with its span and resolution (the ionosphere's when left out); the first is the one the others are differenced against. |
 
 The reply:
 
@@ -279,6 +280,16 @@ The airtime views, for their route.
 | `share` | [`Share`](#share) or absent |  |
 | `ledger` | list of [`Spent`](#spent) or absent |  |
 | `rhythm` | [`RhythmView`](#rhythmview) or absent |  |
+
+### CarrierSetting
+
+One carrier to watch: its absolute frequency and its two settings.
+
+| Field | Type | |
+|---|---|---|
+| `hz` | integer | The carrier's nominal frequency, Hz. |
+| `span_hz` | number | The half-width watched around it, Hz: 25 when left out. |
+| `resolution_hz` | number | The finest separation between two lines that is wanted, Hz: 0.1 when left out. |
 
 ### LogLevel
 

@@ -149,6 +149,21 @@ impl Default for NetSettings {
     }
 }
 
+/// `[doppler]`: the carriers the doppler lab watches, as the `doppler`
+/// command takes them: the first is the one the others are differenced
+/// against.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct DopplerSettings {
+    #[serde(default)]
+    pub carriers: Vec<crate::signal::doppler::CarrierSetting>,
+}
+
+impl DopplerSettings {
+    pub fn is_default(&self) -> bool {
+        self.carriers.is_empty()
+    }
+}
+
 /// `[pager]`: what the pager view keeps between runs. Only how its display
 /// looks: which page was on it, or whose pager it was, is a session's.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -458,6 +473,9 @@ pub struct EngineConfig {
     /// Written only once the FT8 map differs from its default.
     #[serde(default, skip_serializing_if = "Ft8Settings::is_default")]
     pub ft8: Ft8Settings,
+    /// Written only once a carrier is chosen.
+    #[serde(default, skip_serializing_if = "DopplerSettings::is_default")]
+    pub doppler: DopplerSettings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
     /// Written only once it differs from the default, so a file from a radio
@@ -546,12 +564,29 @@ pub fn save_blocks<T: Serialize>(value: &T, path: &Path, owned: &[&str]) -> anyh
 /// The blocks of the config file the engine writes: the radio and
 /// everything it measures with. See [`save_blocks`].
 pub const ENGINE_BLOCKS: &[&str] = &[
-    "radio", "sweep", "net", "record", "pager", "station", "ft8", "tinysa", "airspy", "airspyhf",
-    "sdrplay", "plutosky",
+    "radio", "sweep", "net", "record", "pager", "station", "ft8", "doppler", "tinysa", "airspy",
+    "airspyhf", "sdrplay", "plutosky",
 ];
 
 #[cfg(test)]
 mod tests {
+
+    /// `[doppler]` holds the carriers as the command takes them, span and
+    /// resolution filled in where a line leaves them out.
+    #[test]
+    fn the_doppler_block_takes_carriers_as_the_command_does() {
+        let cfg: EngineConfig = toml::from_str(
+            "[doppler]\n[[doppler.carriers]]\nhz = 9996000\n[[doppler.carriers]]\nhz = 10000000\nspan_hz = 50.0\n",
+        )
+        .unwrap();
+        let c = &cfg.doppler.carriers;
+        assert_eq!(
+            (c[0].hz, c[0].span_hz, c[0].resolution_hz),
+            (9_996_000, 25.0, 0.1)
+        );
+        assert_eq!((c[1].hz, c[1].span_hz), (10_000_000, 50.0));
+        assert!(EngineConfig::default().doppler.carriers.is_empty());
+    }
     use super::*;
 
     /// `[sdrplay]` is written only once a switch differs from its default,

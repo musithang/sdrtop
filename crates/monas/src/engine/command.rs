@@ -57,6 +57,12 @@ pub enum Command {
     /// The pager's view: text `masked` to its kind and length, and the one
     /// address it answers to (`mine`, none for every address).
     Pager { masked: bool, mine: Option<u32> },
+    /// The carriers the doppler lab watches, one to four, each with its span
+    /// and resolution (the ionosphere's when left out); the first is the one
+    /// the others are differenced against.
+    Doppler {
+        carriers: Vec<crate::signal::doppler::CarrierSetting>,
+    },
 }
 
 /// The highest pager address: an address is 21 bits.
@@ -216,6 +222,27 @@ pub fn plan(m: &SdrMetrics, command: &Command) -> Result<Planned, String> {
             "{ric} is not a pager address: an address is 21 bits, at most {PAGER_ADDRESS_MAX}"
         )),
         Command::Pager { .. } => Ok(Planned::as_asked(command)),
+        Command::Doppler { carriers } => {
+            use crate::signal::doppler::{derive, placement, MAX_CARRIERS};
+            if carriers.is_empty() {
+                return Err("choose at least one carrier".to_string());
+            }
+            if carriers.len() > MAX_CARRIERS {
+                return Err(format!(
+                    "{} carriers asked for, at most {MAX_CARRIERS} are watched at once",
+                    carriers.len()
+                ));
+            }
+            let rate = m.radio.config_sample_rate;
+            for (i, c) in carriers.iter().enumerate() {
+                derive(c, rate)
+                    .and_then(|_| placement(c, m.radio.frequency, rate))
+                    .map_err(|why| {
+                        format!("carrier {} ({:.6} MHz): {why}", i + 1, c.hz as f64 / 1e6)
+                    })?;
+            }
+            Ok(Planned::as_asked(command))
+        }
         Command::Agc { .. }
         | Command::Boost { .. }
         | Command::Reset
@@ -402,6 +429,26 @@ impl Engine {
                 }
                 Reply::Applied {
                     detail: format!("addresses shown {show}"),
+                }
+            }
+            Command::Doppler { carriers } => {
+                // Planned: every carrier fits the tuning and its limits.
+                let words: Vec<String> = carriers
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "{:.6} MHz, ±{} Hz at {} Hz ({} s windows every {} s)",
+                            c.hz as f64 / 1e6,
+                            c.span_hz,
+                            c.resolution_hz,
+                            1.0 / c.resolution_hz,
+                            0.5 / c.resolution_hz
+                        )
+                    })
+                    .collect();
+                self.lock().doppler.set_carriers(carriers);
+                Reply::Applied {
+                    detail: format!("watching {}", words.join("; ")),
                 }
             }
             Command::Pager { masked, mine } => {
@@ -603,6 +650,87 @@ mod tests {
                 mine: None
             }
         );
+    }
+
+    /// Carriers a few kilohertz either side of where the bench is tuned.
+    fn near(m: &SdrMetrics, khz: &[i64]) -> Vec<crate::signal::doppler::CarrierSetting> {
+        khz.iter()
+            .map(|k| crate::signal::doppler::CarrierSetting {
+                hz: (m.radio.frequency as i64 + k * 1000) as u64,
+                span_hz: 25.0,
+                resolution_hz: 0.1,
+            })
+            .collect()
+    }
+
+    /// A carrier the tuning cannot hold is refused with its reason, and
+    /// nothing changes.
+    #[test]
+    fn the_doppler_command_is_refused_with_the_carriers_reason() {
+        let (engine, _) = engine_on(Bench::new());
+        let m = engine.snapshot();
+        let mut carriers = near(&m, &[20]);
+        carriers.push(crate::signal::doppler::CarrierSetting {
+            hz: m.radio.frequency + 200,
+            ..carriers[0]
+        });
+        let Reply::Refused { reason } = engine.apply(Command::Doppler { carriers }) else {
+            panic!("a carrier on the DC was applied");
+        };
+        assert!(reason.contains("DC"), "{reason}");
+        assert!(
+            engine.snapshot().doppler.carriers.is_empty(),
+            "a refusal changed nothing"
+        );
+    }
+
+    #[test]
+    fn more_than_four_carriers_are_refused() {
+        let (engine, _) = engine_on(Bench::new());
+        let carriers = near(&engine.snapshot(), &[20, 24, 28, 32, 36]);
+        let Reply::Refused { reason } = engine.apply(Command::Doppler { carriers }) else {
+            panic!("five carriers were applied");
+        };
+        assert!(reason.contains("at most 4"), "{reason}");
+        let Reply::Refused { reason } = engine.apply(Command::Doppler { carriers: vec![] }) else {
+            panic!("no carrier was applied");
+        };
+        assert!(reason.contains("at least one"), "{reason}");
+    }
+
+    /// On the wire a carrier needs only its frequency.
+    #[test]
+    fn defaults_fill_span_and_resolution() {
+        let c: Command = serde_json::from_str(
+            r#"{"command":"doppler","carriers":[{"hz":9996000},{"hz":10000000}]}"#,
+        )
+        .unwrap();
+        let Command::Doppler { carriers } = c else {
+            panic!("{c:?}")
+        };
+        assert_eq!(
+            (
+                carriers[1].hz,
+                carriers[1].span_hz,
+                carriers[1].resolution_hz
+            ),
+            (10_000_000, 25.0, 0.1)
+        );
+    }
+
+    #[test]
+    fn an_applied_command_sets_the_carriers_and_says_their_windows() {
+        let (engine, _) = engine_on(Bench::new());
+        let carriers = near(&engine.snapshot(), &[20, 24]);
+        let Reply::Applied { detail } = engine.apply(Command::Doppler {
+            carriers: carriers.clone(),
+        }) else {
+            panic!("refused");
+        };
+        assert!(detail.contains("10 s windows"), "{detail}");
+        let m = engine.snapshot();
+        assert_eq!(m.doppler.carriers, carriers);
+        assert_eq!(m.doppler.tracks.len(), 2);
     }
 
     #[test]

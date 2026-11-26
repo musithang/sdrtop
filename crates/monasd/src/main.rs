@@ -319,6 +319,7 @@ pub async fn run(
     }
     if let Some(path) = config_path {
         cfg.radio = crate::engine::boot::radio_block(&engine.snapshot(), &cfg.radio);
+        cfg.doppler = crate::engine::boot::doppler_block(&engine.snapshot());
         cfg.save(&path)?;
     }
     Ok(())

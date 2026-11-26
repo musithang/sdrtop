@@ -19,6 +19,16 @@ channel_bw_hz = 25000
 freq_hz = 156800000
 label = "Marine ch16"
 
+[[doppler.carriers]]
+hz = 9996000
+resolution_hz = 0.1
+span_hz = 25.0
+
+[[doppler.carriers]]
+hz = 10000000
+resolution_hz = 0.1
+span_hz = 25.0
+
 [ft8]
 long_path = true
 names = "this cycle"
