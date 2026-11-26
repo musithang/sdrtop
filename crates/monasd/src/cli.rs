@@ -107,6 +107,8 @@ Everything is under http://ADDR/v1, JSON in and out:
   GET  /v1/spectrum    the latest spectrum frame, its bins and their RBW
   GET  /v1/pager       the pages, as the pager shows them (?since=N: newer)
   GET  /v1/ft8         the FT8 decodes and their physics (?since=N: newer)
+  GET  /v1/doppler     each carrier's spectrogram rows, its line and the
+                       differential our oscillator cancels from (?since=N)
   GET  /v1/net/band    2.4 GHz occupancy by MHz, duty with its uncertainty
   GET  /v1/net/census  the transmitters heard, each with its readings
   GET  /v1/net/ble     BLE packets and their physics (?since=N: newer)

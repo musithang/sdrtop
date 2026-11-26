@@ -58,6 +58,7 @@ dB here, a header that could not be read.
 | `GET /v1/spectrum` | The latest spectrum frame with its testimony, or why there is none. Its own route, so a client that wants the figures is not sent thousands of bins with every snapshot. | group of [`spectrum::Frame`](#spectrumframe) or absent |
 | `GET /v1/pager` | The pages the pager shows, as it shows them: masked, only the kind and length; answering one address, only that address's. | group of [`Pages`](#pages) |
 | `GET /v1/ft8` | The FT8 decodes held, each with what it measured beside what it said: the CSV export's account, as JSON. | group of [`Decodes`](#decodes) |
+| `GET /v1/doppler` | The doppler lab's rows newer than `since`, each carrier's and the differential's, with what every frequency is relative to. | group of [`Doppler`](#doppler) |
 | `GET /v1/net/band` | The 2.4 GHz band's occupancy, one megahertz to a cell: the occupancy export's account, unobserved cells unobserved rather than zero. | group of [`Band`](#band) or absent |
 | `GET /v1/net/census` | The census of transmitters, in the panel's order, addresses shown as the panel shows them: the census export's account. | group of [`Census`](#census) |
 | `GET /v1/net/ble` | The LE 1M and 2M packet list as it is showing, newest first, each with what was measured of it: the BLE export's account. `?since=N` sends only packets numbered after `N`. | group of [`Packets`](#packets) |
@@ -204,6 +205,19 @@ The decodes, for their own route.
 | `decodes` | list of [`Decode`](#decode) | Oldest first; `since` leaves out the ones numbered up to it. |
 | `note` | string or null | What the list cannot hold or no longer holds, when that is anything. |
 
+### Doppler
+
+The doppler lab's readings, for their route.
+
+| Field | Type | |
+|---|---|---|
+| `relative_to` | string | What every frequency here is relative to. |
+| `carriers` | list of [`CarrierView`](#carrierview) |  |
+| `differential` | list of [`DiffView`](#diffview) | Oldest first; free of our oscillator. |
+| `differential_refused` | string or null | Why there is no differential, when there cannot be one. |
+| `missed` | integer | Rows newer than `since` the history had already let go: a client polling too slowly is told what it missed rather than handed a gap. |
+| `feed` | [`pager::Feed`](#pagerfeed) |  |
+
 ### Band
 
 The band's occupancy, one megahertz to a cell.
@@ -317,6 +331,7 @@ The sample feeds, each one's refusals.
 | `net` | [`server::Feed`](#serverfeed) |  |
 | `pager` | [`server::Feed`](#serverfeed) |  |
 | `ft8` | [`server::Feed`](#serverfeed) |  |
+| `doppler` | [`server::Feed`](#serverfeed) |  |
 
 ### Process
 
@@ -523,6 +538,43 @@ One decode: what it said, and what it measured.
 | `held` | boolean or null | Whether the radio held its level in the cycle. |
 | `floor_db_hz` | number or null |  |
 | `unread` | string or null | `start` or `end`: the part of the transmission read as unknown. |
+
+### CarrierView
+
+One carrier: its settings, why it is not measured if it is not, and its rows.
+
+| Field | Type | |
+|---|---|---|
+| `hz` | integer |  |
+| `span_hz` | number |  |
+| `resolution_hz` | number |  |
+| `refused` | string or null | Why the tuning cannot hold this carrier, when it cannot. |
+| `discarded` | integer | Windows thrown away because the tuning changed inside them. |
+| `rows` | list of [`RowView`](#rowview) | Oldest first; `since` leaves out the ones numbered up to it. |
+
+### DiffView
+
+One carrier's shift against the first's, for one window.
+
+| Field | Type | |
+|---|---|---|
+| `seq` | integer |  |
+| `at_unix_ms` | integer |  |
+| `fi_hz` | integer | The carrier differenced against the first. |
+| `line` | [`LineView`](#lineview) or absent |  |
+
+### pager::Feed
+
+A sample feed's account: what it took, what it lost, and how hard its worker works.
+
+| Field | Type | |
+|---|---|---|
+| `blocks_in` | integer |  |
+| `gaps` | integer | Breaks in the stream the worker saw. |
+| `blocks_lost` | integer | Blocks lost inside those breaks. |
+| `refused` | integer | Blocks the feed had no room for, lately and over the session. |
+| `refused_session` | integer |  |
+| `load` | number or null | The worker's time per block over the stream time it covered: above 1 it falls behind. |
 
 ### Cell
 
@@ -800,19 +852,6 @@ A count lately and over the session.
 | `recent` | integer |  |
 | `session` | integer |  |
 
-### pager::Feed
-
-A sample feed's account: what it took, what it lost, and how hard its worker works.
-
-| Field | Type | |
-|---|---|---|
-| `blocks_in` | integer |  |
-| `gaps` | integer | Breaks in the stream the worker saw. |
-| `blocks_lost` | integer | Blocks lost inside those breaks. |
-| `refused` | integer | Blocks the feed had no room for, lately and over the session. |
-| `refused_session` | integer |  |
-| `load` | number or null | The worker's time per block over the stream time it covered: above 1 it falls behind. |
-
 ### ClockVerdict
 
 The clock as heard: the median of the decodes' DT, their spread, and how many it rests on.
@@ -916,6 +955,31 @@ The transmission's physics.
 | `preamble_bits` | integer |  |
 | `sync_errors` | integer |  |
 | `batches` | integer |  |
+
+### RowView
+
+One window of one carrier.
+
+| Field | Type | |
+|---|---|---|
+| `seq` | integer | The window's number; carriers of one resolution share it. |
+| `at_unix_ms` | integer | When the row was published, milliseconds since the Unix epoch. |
+| `window_s` | number |  |
+| `bin_hz` | number | The width of one value of `bins_db`: the resolution. |
+| `start_hz` | number | The offset the first value of `bins_db` starts at, Hz. |
+| `bins_db` | list of number | Power per resolution bin, dB over the row's median. |
+| `line` | [`LineView`](#lineview) or absent | The strongest line in the span, which is the carrier only when nothing louder is inside it. |
+| `snr_db` | number or null | The strongest bin over the noise per bin, dB. |
+| `feed_loss` | boolean | Whether the feed lost samples inside this window. |
+
+### LineView
+
+A line: its offset in Hz, and that offset's standard uncertainty.
+
+| Field | Type | |
+|---|---|---|
+| `hz` | number |  |
+| `sigma_hz` | number |  |
 
 ### Sigma
 

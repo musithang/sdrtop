@@ -20,6 +20,7 @@
 pub mod ble;
 pub mod bt;
 pub mod demod;
+pub mod doppler;
 pub mod ft8;
 pub mod iq;
 pub mod net;

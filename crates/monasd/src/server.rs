@@ -130,6 +130,7 @@ pub fn router(access: Access) -> Router {
         .route("/v1/spectrum", get(spectrum))
         .route("/v1/pager", get(pager))
         .route("/v1/ft8", get(ft8))
+        .route("/v1/doppler", get(doppler))
         .route("/v1/net/band", get(net_band))
         .route("/v1/net/census", get(net_census))
         .route("/v1/net/ble", get(net_ble))
@@ -213,6 +214,7 @@ pub struct Feeds {
     pub net: Feed,
     pub pager: Feed,
     pub ft8: Feed,
+    pub doppler: Feed,
 }
 
 /// One feed's refusals, lately and over the session.
@@ -258,6 +260,7 @@ async fn health(State(access): State<Access>) -> Json<Health> {
                 net: feed(m.net.health.refused, m.net.health.refused_session),
                 pager: feed(m.pager.feed.refused, m.pager.feed.refused_session),
                 ft8: feed(m.ft8.feed.refused, m.ft8.feed.refused_session),
+                doppler: feed(m.doppler.feed.refused, m.doppler.feed.refused_session),
             },
             process: Process {
                 cpu_pct: m.system.process_cpu_pct,
@@ -308,6 +311,20 @@ async fn pager(
 ) -> Json<crate::engine::view::Group<crate::engine::view::pager::Pages>> {
     let state = access.engine.snapshot();
     Json(crate::engine::view::pager::pages(
+        &state,
+        crate::engine::view::Clock::now(),
+        q.since,
+    ))
+}
+
+/// The doppler lab's rows newer than `since`, each carrier's and the
+/// differential's, with what every frequency is relative to.
+async fn doppler(
+    State(access): State<Access>,
+    Query(q): Query<Since>,
+) -> Json<crate::engine::view::Group<crate::engine::view::doppler::Doppler>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::doppler::doppler(
         &state,
         crate::engine::view::Clock::now(),
         q.since,
@@ -799,6 +816,32 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             json["note"], "nothing has been decoded this session",
+            "{json}"
+        );
+    }
+
+    /// The doppler route answers with no carrier chosen as absent, saying
+    /// how to choose one, and takes `since`.
+    #[tokio::test]
+    async fn the_doppler_route_answers_and_takes_since() {
+        let (engine, _) = engine_on(Bench::new());
+        let app = router(Access::loopback(engine));
+        let (status, json) = ask(app, get("/v1/doppler?since=3")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json["carriers"].as_array().is_some_and(Vec::is_empty),
+            "{json}"
+        );
+        assert!(
+            json["testimony"]["absent"]
+                .as_str()
+                .is_some_and(|w| w.contains("no carrier chosen")),
+            "{json}"
+        );
+        assert!(
+            json["relative_to"]
+                .as_str()
+                .is_some_and(|w| w.contains("our oscillator")),
             "{json}"
         );
     }
