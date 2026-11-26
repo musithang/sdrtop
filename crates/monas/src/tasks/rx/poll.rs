@@ -209,6 +209,14 @@ pub(super) fn drain(
     if ft8_drops > 0 {
         m.ft8.feed.last_loss = Some(now);
     }
+    // The doppler feed's, the same way.
+    let (doppler_depth, doppler_drops) = rx_ctx.doppler_feed.take();
+    m.doppler.feed.peak_depth = doppler_depth;
+    m.doppler.feed.refused = doppler_drops;
+    m.doppler.feed.refused_session += doppler_drops;
+    if doppler_drops > 0 {
+        m.doppler.feed.last_loss = Some(now);
+    }
     let buf_sample = (m.iq.buf_fill_pct * 10.0) as u64;
     if m.iq.buf_fill_history.len() >= THROUGHPUT_HISTORY_LEN {
         m.iq.buf_fill_history.pop_front();
@@ -251,6 +259,8 @@ mod tests {
             pager_feed: FeedHealth::default(),
             ft8_tx: crossbeam_channel::bounded(1).0,
             ft8_feed: FeedHealth::default(),
+            doppler_tx: crossbeam_channel::bounded(1).0,
+            doppler_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry {
                 format: SampleFormat::Int8,

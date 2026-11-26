@@ -21,12 +21,14 @@
 //!   whether the tuning can hold it.
 //! - `track`: one carrier's samples to dated rows and their strongest line.
 //! - `differential`: a carrier's shift against the first's, our error gone.
+//! - `worker`: blocks off the feed, rows into the state.
 
 pub mod differential;
 pub mod settings;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod track;
+pub mod worker;
 
 pub use differential::{differential, pair};
 pub use settings::{derive, placement, CarrierSetting, Derived, MAX_CARRIERS};

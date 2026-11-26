@@ -435,6 +435,8 @@ mod power_control_tests {
             pager_feed: FeedHealth::default(),
             ft8_tx: crossbeam_channel::bounded(1).0,
             ft8_feed: FeedHealth::default(),
+            doppler_tx: crossbeam_channel::bounded(1).0,
+            doppler_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry::default(),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),

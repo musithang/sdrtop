@@ -37,10 +37,16 @@ pub struct Feeds {
     /// switches it by what is on screen (and the user's own switch); a
     /// headless instance by this.
     pub demod: bool,
+    /// The doppler lab's carrier trackers.
+    pub doppler: bool,
 }
 
 /// The views whose work includes the demodulator's.
 pub const DEMOD_VIEWS: &[&str] = &["lab_signal"];
+
+/// The doppler lab: carriers watched closely. It has no terminal view of its
+/// own yet; monasd computes it by this name.
+pub const DOPPLER_VIEW: &str = "lab_doppler";
 
 /// What the 2.4 GHz receivers are asked to do, once their feed is on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
@@ -85,6 +91,7 @@ impl Mode {
                 pager: section == crate::signal::pocsag::SECTION,
                 ft8: crate::signal::ft8::SECTIONS.contains(&section),
                 demod: DEMOD_VIEWS.contains(&view),
+                doppler: view == DOPPLER_VIEW,
             },
             net: NetView {
                 classic: CLASSIC_VIEWS.contains(&view),
@@ -139,11 +146,21 @@ pub const MODES: &[(&str, &str)] = &[
     ("lab_ft8_band", crate::signal::ft8::LAB_SECTION),
     ("lab_ft8_receiver", crate::signal::ft8::LAB_SECTION),
     ("lab_signal", "lab"),
+    (DOPPLER_VIEW, "lab"),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The doppler lab asks for its own feed and nothing else's.
+    #[test]
+    fn lab_doppler_feeds_the_doppler_worker_and_nothing_else() {
+        let m = Mode::named("lab_doppler").unwrap();
+        assert!(m.feeds.doppler);
+        assert!(!m.feeds.net && !m.feeds.pager && !m.feeds.ft8 && !m.feeds.demod);
+        assert!(!Mode::named("lab_signal").unwrap().feeds.doppler);
+    }
 
     /// Every named mode is the mode its view asks for in its own section.
     #[test]

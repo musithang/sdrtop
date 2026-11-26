@@ -512,6 +512,7 @@ pub fn initial_metrics(cfg: &EngineConfig, boot: Boot) -> anyhow::Result<SdrMetr
             view: ft8_view,
             ..Default::default()
         },
+        doppler: crate::state::DopplerState::default(),
         home,
         record: crate::state::RecordState::default(),
         caps,

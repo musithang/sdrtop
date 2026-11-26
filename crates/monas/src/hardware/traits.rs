@@ -1618,6 +1618,12 @@ pub struct RxContext {
     pub ft8_tx: crossbeam_channel::Sender<TimedBlock>,
     /// What the FT8 feed did with the blocks handed to it, for the poll task.
     pub ft8_feed: FeedHealth,
+    /// Sixth, independently lossy feed, to the doppler lab's trackers, while
+    /// its mode is on. Counted as the pager's: a lost block breaks the phase
+    /// of the window it falls in, which the window's row then says.
+    pub doppler_tx: crossbeam_channel::Sender<StreamBlock>,
+    /// What the doppler feed did with the blocks handed to it, for the poll task.
+    pub doppler_feed: FeedHealth,
     /// Direct power-spectrum traces from backends that do not publish IQ.
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,
     pub geometry: SampleGeometry,

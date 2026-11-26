@@ -76,3 +76,23 @@ pub fn add(mut a: Vec<Complex<f32>>, b: &[Complex<f32>]) -> Vec<Complex<f32>> {
     }
     a
 }
+
+/// The HF+'s wire format, for feeding a worker: interleaved little-endian
+/// `i32`, `full_scale` counts to one.
+pub fn int32_bytes(samples: &[Complex<f32>], full_scale: f32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 8);
+    for s in samples {
+        out.extend_from_slice(&((s.re * full_scale) as i32).to_le_bytes());
+        out.extend_from_slice(&((s.im * full_scale) as i32).to_le_bytes());
+    }
+    out
+}
+
+/// The geometry [`int32_bytes`] writes.
+pub fn int32_geometry() -> crate::hardware::SampleGeometry {
+    crate::hardware::SampleGeometry {
+        format: crate::hardware::SampleFormat::Int32,
+        full_scale: 8_388_608.0,
+        converter_bits: Some(16),
+    }
+}

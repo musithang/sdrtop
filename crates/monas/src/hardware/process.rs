@@ -218,6 +218,7 @@ pub struct Arrival {
     net_enabled: bool,
     pager_enabled: bool,
     ft8_enabled: bool,
+    doppler_enabled: bool,
     /// Unix seconds at arrival, taken only when something needs it (the FT8
     /// feed, a recording); zero otherwise.
     arrived_unix: f64,
@@ -273,6 +274,7 @@ pub fn arrive(
         net_enabled,
         pager_enabled,
         ft8_enabled,
+        doppler_enabled,
         centre_hz,
         rate_hz,
         gain,
@@ -288,6 +290,7 @@ pub fn arrive(
             m.mode.feeds.net,
             m.mode.feeds.pager,
             m.mode.feeds.ft8,
+            m.mode.feeds.doppler,
             m.radio.frequency,
             m.radio.config_sample_rate,
             recording.then(|| (m.radio.gains.clone(), m.radio.amp_enabled)),
@@ -336,6 +339,7 @@ pub fn arrive(
         net_enabled,
         pager_enabled,
         ft8_enabled,
+        doppler_enabled,
         arrived_unix,
         centre_hz,
         rate_hz,
@@ -419,6 +423,7 @@ pub fn digest(
         net_enabled,
         pager_enabled,
         ft8_enabled,
+        doppler_enabled,
         arrived_unix,
         centre_hz,
         rate_hz,
@@ -598,6 +603,22 @@ pub fn digest(
             })
             .is_ok();
         ctx.ft8_feed.record(ctx.ft8_tx.len(), taken);
+    }
+    // The sixth, for the pager's reason: a lost block breaks the phase of
+    // the window it falls in.
+    if doppler_enabled {
+        let taken = ctx
+            .doppler_tx
+            .try_send(super::StreamBlock {
+                seq: block_seq,
+                gap_before: dropped_pairs > 0,
+                bytes: forward.clone(),
+                first_pair,
+                centre_hz,
+                rate_hz,
+            })
+            .is_ok();
+        ctx.doppler_feed.record(ctx.doppler_tx.len(), taken);
     }
     // The one point where a lost block is observable. This channel is lossy by
     // design - dropping under load beats blocking the USB callback - but lossy
@@ -905,6 +926,8 @@ pub(crate) mod tests {
             pager_feed: crate::hardware::FeedHealth::default(),
             ft8_tx: crossbeam_channel::bounded(1).0,
             ft8_feed: crate::hardware::FeedHealth::default(),
+            doppler_tx: crossbeam_channel::bounded(1).0,
+            doppler_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1324,6 +1347,8 @@ pub(crate) mod tests {
             pager_feed: crate::hardware::FeedHealth::default(),
             ft8_tx: crossbeam_channel::bounded(1).0,
             ft8_feed: crate::hardware::FeedHealth::default(),
+            doppler_tx: crossbeam_channel::bounded(1).0,
+            doppler_feed: crate::hardware::FeedHealth::default(),
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1351,6 +1376,50 @@ pub(crate) mod tests {
             "a block no pager will ever see"
         );
         assert_eq!(pager_rx.len(), 1);
+    }
+
+    /// The doppler feed runs only in its mode, and counts the block it could
+    /// not take, as the pager's does.
+    #[test]
+    fn the_doppler_feed_runs_on_its_mode_and_counts_what_it_refuses() {
+        let (ctx, _sample_rx, _demod_rx, _net_rx) = rx_ctx_holding(8, 1);
+        let (doppler_tx, doppler_rx) = crossbeam_channel::bounded(1);
+        let ctx = Arc::new(RxContext {
+            metrics: Arc::clone(&ctx.metrics),
+            sample_tx: ctx.sample_tx.clone(),
+            fft_feed: crate::hardware::FeedHealth::default(),
+            demod_tx: ctx.demod_tx.clone(),
+            net_tx: ctx.net_tx.clone(),
+            net_feed: crate::hardware::FeedHealth::default(),
+            pager_tx: crossbeam_channel::bounded(1).0,
+            pager_feed: crate::hardware::FeedHealth::default(),
+            ft8_tx: crossbeam_channel::bounded(1).0,
+            ft8_feed: crate::hardware::FeedHealth::default(),
+            doppler_tx,
+            doppler_feed: crate::hardware::FeedHealth::default(),
+            power_tx: ctx.power_tx.clone(),
+            geometry: ctx.geometry,
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
+            record: Default::default(),
+            intake: Default::default(),
+        });
+        let block = vec![0x10u8; 64];
+
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.doppler_feed.take(), (0, 0), "not its mode");
+        assert!(doppler_rx.is_empty());
+
+        ctx.metrics.lock().unwrap().mode = crate::engine::mode::Mode::named("lab_doppler").unwrap();
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.doppler_feed.take(), (1, 0), "the queue took it");
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(
+            ctx.doppler_feed.take(),
+            (1, 1),
+            "a block no tracker will see"
+        );
+        assert_eq!(doppler_rx.len(), 1);
     }
 
     /// **Each window keeps the deliveries that came earliest and latest for
@@ -1389,6 +1458,8 @@ pub(crate) mod tests {
             pager_feed: crate::hardware::FeedHealth::default(),
             ft8_tx,
             ft8_feed: crate::hardware::FeedHealth::default(),
+            doppler_tx: crossbeam_channel::bounded(1).0,
+            doppler_feed: crate::hardware::FeedHealth::default(),
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),

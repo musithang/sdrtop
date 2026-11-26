@@ -152,6 +152,7 @@ pub struct Feeds {
     net_rx: crossbeam_channel::Receiver<hardware::StreamBlock>,
     pager_rx: crossbeam_channel::Receiver<hardware::StreamBlock>,
     ft8_rx: crossbeam_channel::Receiver<hardware::TimedBlock>,
+    doppler_rx: crossbeam_channel::Receiver<hardware::StreamBlock>,
     power_rx: crossbeam_channel::Receiver<hardware::PowerTrace>,
 }
 
@@ -181,6 +182,10 @@ pub fn feeds(
     let (ft8_tx, ft8_rx) = crossbeam_channel::bounded::<crate::hardware::TimedBlock>(
         crate::signal::ft8::worker::FEED_BLOCKS,
     );
+    // The doppler queue is the pager's depth doubled: a window is seconds
+    // long and every block of it is wanted, and at the HF+'s rates a block is
+    // a few milliseconds, so eight hold a hiccup without hiding a loss.
+    let (doppler_tx, doppler_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(8);
     let (power_tx, power_rx) = crossbeam_channel::bounded::<hardware::PowerTrace>(4);
     let rx_ctx = Arc::new(hardware::RxContext {
         metrics: Arc::clone(state),
@@ -193,6 +198,8 @@ pub fn feeds(
         pager_feed: hardware::FeedHealth::default(),
         ft8_tx,
         ft8_feed: hardware::FeedHealth::default(),
+        doppler_tx,
+        doppler_feed: hardware::FeedHealth::default(),
         power_tx,
         geometry,
         stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -208,6 +215,7 @@ pub fn feeds(
             net_rx,
             pager_rx,
             ft8_rx,
+            doppler_rx,
             power_rx,
         },
     )
@@ -308,6 +316,18 @@ pub fn run(
             let ft8_state = Arc::clone(state);
             threads.push(spawn_worker("ft8-worker", move || {
                 crate::signal::ft8::worker::Ft8Worker::new(feeds.ft8_rx, ft8_state, geometry).run()
+            }));
+
+            // Spawned always, as the pager's: off its mode nothing is
+            // forwarded, and the thread waits on `recv`.
+            let doppler_state = Arc::clone(state);
+            threads.push(spawn_worker("doppler-worker", move || {
+                crate::signal::doppler::worker::DopplerWorker::new(
+                    feeds.doppler_rx,
+                    doppler_state,
+                    geometry,
+                )
+                .run()
             }));
 
             tasks.push(tasks::spawn_rx_task(

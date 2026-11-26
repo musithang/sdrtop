@@ -173,6 +173,11 @@ impl Tracker {
         &self.setting
     }
 
+    /// Whether part of a window is held: what a retune now would throw away.
+    pub fn holds_partial_window(&self) -> bool {
+        !self.ring.is_empty()
+    }
+
     /// What the setting came to at this stream's rate.
     pub fn derived(&self) -> &Derived {
         &self.d
@@ -234,9 +239,17 @@ impl Tracker {
         self.sum = Complex::new(0.0, 0.0);
         self.summed = 0;
         self.phase = (self.phase + self.step * missing_pairs as f64).rem_euclid(TAU);
-        let zeros = (missing_pairs / self.d.factor as u64).min(self.d.window as u64 + 1);
-        for _ in 0..zeros {
-            self.take(Complex::new(0.0, 0.0), true);
+        // Longer than a window, nothing before it belongs with what comes
+        // after: the ring starts again rather than spanning the pause.
+        if missing_pairs >= self.d.window as u64 * self.d.factor as u64 {
+            self.ring.clear();
+            // The clock still moves over the pause, or the next window would
+            // be dated as if the pause had not happened.
+            self.produced += missing_pairs / self.d.factor as u64;
+        } else {
+            for _ in 0..missing_pairs / self.d.factor as u64 {
+                self.take(Complex::new(0.0, 0.0), true);
+            }
         }
         self.lost_pending = true;
     }
