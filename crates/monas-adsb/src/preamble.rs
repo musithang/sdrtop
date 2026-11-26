@@ -46,6 +46,58 @@ pub struct PreambleDetector {
     pulse_probes: [(usize, usize); PULSE_CELLS.len()],
     quiet_probes: [usize; 2],
     lookahead: usize,
+    phases: [PhaseWindows; PHASES],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PhaseWindows {
+    start: f64,
+    preamble: Window,
+    pulses: [Window; PULSE_CELLS.len()],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Window {
+    start: Edge,
+    end: Edge,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Edge {
+    cell: usize,
+    fraction: f64,
+}
+
+impl Edge {
+    fn new(sample: f64) -> Self {
+        Self {
+            cell: sample as usize,
+            fraction: sample.fract(),
+        }
+    }
+
+    fn cumulative_power(self, power: &[f32], prefix: &[f64]) -> f64 {
+        let partial = power.get(self.cell).copied().unwrap_or(0.0);
+        prefix[self.cell] + f64::from(partial) * self.fraction
+    }
+
+    fn sample(self) -> f64 {
+        self.cell as f64 + self.fraction
+    }
+}
+
+impl Window {
+    fn energy(self, power: &[f32], prefix: &[f64]) -> Result<f64, PpmError> {
+        let start = self.start.cumulative_power(power, prefix);
+        let end = self.end.cumulative_power(power, prefix);
+        let energy = end - start;
+        // Preserve weak windows just after a much stronger sample.
+        if start > 0.0 && energy <= end * (8.0 * f64::EPSILON) {
+            integrate(power, self.start.sample(), self.end.sample())
+        } else {
+            Ok(energy)
+        }
+    }
 }
 
 impl PreambleDetector {
@@ -61,11 +113,27 @@ impl PreambleDetector {
         let quiet_probes = [11.0, 13.0].map(|cell| (cell * half_cell_samples) as usize);
         let last_phase = (PHASES - 1) as f64 / PHASES as f64;
         let lookahead = (PREAMBLE_HALF_CELLS as f64 * half_cell_samples + last_phase).ceil();
+        let phases = std::array::from_fn(|index| {
+            let start = index as f64 / PHASES as f64;
+            let edge = |cell| Edge::new(start + cell as f64 * half_cell_samples);
+            PhaseWindows {
+                start,
+                preamble: Window {
+                    start: edge(0),
+                    end: edge(PREAMBLE_HALF_CELLS),
+                },
+                pulses: PULSE_CELLS.map(|cell| Window {
+                    start: edge(cell),
+                    end: edge(cell + 1),
+                }),
+            }
+        });
         Ok(Self {
             half_cell_samples,
             pulse_probes,
             quiet_probes,
             lookahead: lookahead as usize,
+            phases,
         })
     }
 
@@ -88,34 +156,57 @@ impl PreambleDetector {
             .get(first_cell..)
             .and_then(|tail| tail.get(..self.lookahead))
             .ok_or(PpmError::IncompletePreamble)?;
-        self.candidates(available, first_cell)
+        let mut matches = self
+            .candidates_at_start(available, &mut Vec::new())
             .map_err(|error| match error {
                 PpmError::InvalidPower { index } => PpmError::InvalidPower {
                     index: first_cell + index,
                 },
                 other => other,
-            })
+            })?
+            .unwrap_or_default();
+        for timing in &mut matches.timings[..matches.len] {
+            timing.start_sample += first_cell as f64;
+        }
+        Ok(matches)
     }
 
-    fn candidates(&self, power: &[f32], first_cell: usize) -> Result<PreambleMatches, PpmError> {
-        let mut matches = PreambleMatches::default();
+    /// Fit an already bounded stream window and reuse its prefix scratch.
+    pub(crate) fn candidates_at_start(
+        &self,
+        power: &[f32],
+        prefix: &mut Vec<f64>,
+    ) -> Result<Option<PreambleMatches>, PpmError> {
+        let power = power
+            .get(..self.lookahead)
+            .ok_or(PpmError::IncompletePreamble)?;
         if !self.coarse_gate(power)? {
-            return Ok(matches);
+            return Ok(None);
         }
-        for phase in 0..PHASES {
-            let offset = phase as f64 / PHASES as f64;
-            if let Some(mut timing) = self.score(power, offset)? {
-                timing.start_sample += first_cell as f64;
+        prefix.clear();
+        prefix.push(0.0);
+        let mut sum = 0.0;
+        for (index, &sample) in power.iter().enumerate() {
+            sum += sample_power(sample, index)?;
+            prefix.push(sum);
+        }
+
+        let mut matches = PreambleMatches::default();
+        for windows in &self.phases {
+            if let Some(timing) = self.score(power, prefix, windows)? {
                 matches.timings[matches.len] = timing;
                 matches.len += 1;
             }
+        }
+        if matches.len == 0 {
+            return Ok(None);
         }
         matches.timings[..matches.len].sort_unstable_by(|a, b| {
             b.contrast
                 .total_cmp(&a.contrast)
                 .then_with(|| a.start_sample.total_cmp(&b.start_sample))
         });
-        Ok(matches)
+        Ok(Some(matches))
     }
 
     fn coarse_gate(&self, power: &[f32]) -> Result<bool, PpmError> {
@@ -131,12 +222,16 @@ impl PreambleDetector {
         Ok(true)
     }
 
-    fn score(&self, power: &[f32], start: f64) -> Result<Option<PreambleMatch>, PpmError> {
-        let edge = |cell| start + cell as f64 * self.half_cell_samples;
-        let all_energy = integrate(power, start, edge(PREAMBLE_HALF_CELLS))?;
+    fn score(
+        &self,
+        power: &[f32],
+        prefix: &[f64],
+        windows: &PhaseWindows,
+    ) -> Result<Option<PreambleMatch>, PpmError> {
+        let all_energy = windows.preamble.energy(power, prefix)?;
         let mut pulse_energy = [0.0; PULSE_CELLS.len()];
-        for (energy, cell) in pulse_energy.iter_mut().zip(PULSE_CELLS) {
-            *energy = integrate(power, edge(cell), edge(cell + 1))?;
+        for (energy, window) in pulse_energy.iter_mut().zip(windows.pulses) {
+            *energy = window.energy(power, prefix)?;
         }
         let on_energy: f64 = pulse_energy.iter().sum();
         let quiet_power =
@@ -148,7 +243,7 @@ impl PreambleDetector {
         let mean_pulse = on_energy / (PULSE_CELLS.len() as f64 * self.half_cell_samples);
         let contrast = (mean_pulse - quiet_power) / (mean_pulse + quiet_power);
         Ok((contrast >= MIN_CONTRAST).then_some(PreambleMatch {
-            start_sample: start,
+            start_sample: windows.start,
             pulse_power,
             quiet_power,
             contrast,
@@ -161,6 +256,40 @@ mod tests {
     use super::*;
     use crate::ppm::tests::{sampled_power, ARCHIVED_FRAME, PUBLISHED_FRAME};
     use crate::{Df17Frame, PpmSlicer};
+
+    #[test]
+    fn precomputed_windows_agree_with_direct_integration() {
+        for rate in [2_400_000.0, 2_515_625.0, 6_000_000.0, 10_000_000.0] {
+            let detector = PreambleDetector::new(rate).unwrap();
+            let power: Vec<_> = (0..detector.lookahead())
+                .map(|index| ((index * 7 % 13) as f32) / 13.0)
+                .collect();
+            let mut prefix = vec![0.0];
+            for &sample in &power {
+                prefix.push(prefix.last().unwrap() + f64::from(sample));
+            }
+            for phase in detector.phases {
+                for window in std::iter::once(phase.preamble).chain(phase.pulses) {
+                    let direct =
+                        integrate(&power, window.start.sample(), window.end.sample()).unwrap();
+                    let cached = window.energy(&power, &prefix).unwrap();
+                    assert!((direct - cached).abs() < 1e-12, "{rate} Hz, {window:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn weak_windows_survive_after_a_large_sample() {
+        let power = [f32::MAX, 1.0, 3.0];
+        let strong = f64::from(power[0]);
+        let prefix = [0.0, strong, strong, strong];
+        let window = Window {
+            start: Edge::new(1.2),
+            end: Edge::new(2.4),
+        };
+        assert!((window.energy(&power, &prefix).unwrap() - 2.0).abs() < 1e-12);
+    }
 
     #[test]
     fn finds_a_crc_valid_timing_in_the_start_cell_across_rates_and_phases() {

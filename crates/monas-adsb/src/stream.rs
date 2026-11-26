@@ -53,6 +53,7 @@ pub struct Receiver {
     slicer: PpmSlicer,
     group_cells: u64,
     power: Vec<f32>,
+    preamble_prefix: Vec<f64>,
     buffer_first: u64,
     next_pair: Option<u64>,
     cursor: usize,
@@ -69,6 +70,7 @@ impl Receiver {
             // of candidate cells must not hold an event indefinitely.
             group_cells: ((sample_rate_hz / 1_000_000.0).ceil() as u64).saturating_add(2),
             power: Vec::new(),
+            preamble_prefix: Vec::new(),
             buffer_first: 0,
             next_pair: None,
             cursor: 0,
@@ -154,8 +156,12 @@ impl Receiver {
             let power = &self.power[self.cursor..];
             let matches = self
                 .detector
-                .candidates_at(power, 0)
+                .candidates_at_start(power, &mut self.preamble_prefix)
                 .expect("scan lookahead and input power were checked");
+            self.cursor += 1;
+            let Some(matches) = matches else {
+                continue;
+            };
             for &preamble in matches.as_slice() {
                 let outcome = decode(&self.slicer, power, preamble.start_sample);
                 let event = StreamEvent {
@@ -168,7 +174,6 @@ impl Receiver {
                     None => self.group = Some(CandidateGroup::new(event)),
                 }
             }
-            self.cursor += 1;
         }
     }
 
