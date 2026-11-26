@@ -107,7 +107,10 @@ pub struct Row {
 pub struct Tracker {
     setting: CarrierSetting,
     d: Derived,
-    phase: f64,
+    /// The mixer's phasor, and what it turns by each pair: a rotation per
+    /// sample instead of a sine and a cosine, renormalised every block.
+    phasor: Complex<f64>,
+    turn: Complex<f64>,
     step: f64,
     average: usize,
     sum: Complex<f64>,
@@ -149,7 +152,8 @@ impl Tracker {
         Ok(Tracker {
             setting: s,
             d,
-            phase: 0.0,
+            phasor: Complex::new(1.0, 0.0),
+            turn: Complex::from_polar(1.0, -TAU * offset / input_rate_hz),
             step: -TAU * offset / input_rate_hz,
             average,
             sum: Complex::new(0.0, 0.0),
@@ -202,9 +206,8 @@ impl Tracker {
         // Mix and average.
         self.stage_in.clear();
         for x in block {
-            let (s, c) = self.phase.sin_cos();
-            let y = Complex::new(x.re as f64, x.im as f64) * Complex::new(c, s);
-            self.phase += self.step;
+            let y = Complex::new(x.re as f64, x.im as f64) * self.phasor;
+            self.phasor *= self.turn;
             if self.average == 1 {
                 self.stage_in.push(Complex::new(y.re as f32, y.im as f32));
                 continue;
@@ -218,7 +221,9 @@ impl Tracker {
                 self.summed = 0;
             }
         }
-        self.phase = self.phase.rem_euclid(TAU);
+        // A rotation repeated a million times drifts off the unit circle by
+        // rounding; once a block puts it back.
+        self.phasor /= self.phasor.norm();
         let mut out = std::mem::take(&mut self.stage_out);
         self.filter.process(&self.stage_in, &mut out);
         let mut rows = Vec::new();
@@ -238,7 +243,7 @@ impl Tracker {
         self.filter.reset();
         self.sum = Complex::new(0.0, 0.0);
         self.summed = 0;
-        self.phase = (self.phase + self.step * missing_pairs as f64).rem_euclid(TAU);
+        self.phasor *= Complex::from_polar(1.0, (self.step * missing_pairs as f64).rem_euclid(TAU));
         // Longer than a window, nothing before it belongs with what comes
         // after: the ring starts again rather than spanning the pause.
         if missing_pairs >= self.d.window as u64 * self.d.factor as u64 {
@@ -761,6 +766,43 @@ mod tests {
                 line(r).hz,
                 warm(t)
             );
+        }
+    }
+
+    /// **What it costs**, as a share of one core per second of input, at the
+    /// HF+'s rate and at a HackRF's, with one carrier and with four. Run in a
+    /// release build: `cargo test -p monas --release doppler_costs -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn doppler_costs_this_much_per_second_of_input() {
+        for rate in [768_000.0, 20_000_000.0] {
+            let mut seed = 1u64;
+            let block = noise(65_536, SIGMA_IN, &mut seed);
+            for carriers in [1usize, 4] {
+                let mut trackers: Vec<Tracker> = (0..carriers)
+                    .map(|i| {
+                        let s = CarrierSetting {
+                            hz: CENTRE + 20_000 + 4_000 * i as u64,
+                            ..ionosphere()
+                        };
+                        Tracker::new(s, rate, CENTRE).unwrap()
+                    })
+                    .collect();
+                let seconds = 10.0;
+                let blocks = (seconds * rate / block.len() as f64) as u64;
+                let started = std::time::Instant::now();
+                for b in 0..blocks {
+                    for t in trackers.iter_mut() {
+                        t.push(&block, b * block.len() as u64, false);
+                    }
+                }
+                let share = started.elapsed().as_secs_f64() / seconds;
+                eprintln!(
+                    "COST rate {:>10.0} S/s, {carriers} carrier(s): {:.2} % of one core",
+                    rate,
+                    share * 100.0
+                );
+            }
         }
     }
 

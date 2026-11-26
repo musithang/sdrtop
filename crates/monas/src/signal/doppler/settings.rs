@@ -28,6 +28,26 @@ use serde::{Deserialize, Serialize};
 /// widest rate Monas runs; the differential needs only two.
 pub const MAX_CARRIERS: usize = 4;
 
+/// The pairs a second the mixers may take between them, carriers times
+/// input rate. Measured in a release build: a carrier costs 0.53 % of a core
+/// at 768 kS/s and 13 % at 20 MS/s, so four at 20 MS/s were 52 %; sixty
+/// million keeps every setting under 40 %, which at the HF+'s rate is no
+/// limit at all and at a HackRF's is three carriers.
+pub const MIX_BUDGET_PAIRS_PER_S: f64 = 60e6;
+
+/// Whether `carriers` mixers fit [`MIX_BUDGET_PAIRS_PER_S`] at
+/// `input_rate_hz`, or how many do.
+pub fn within_budget(carriers: usize, input_rate_hz: f64) -> Result<(), String> {
+    if carriers as f64 * input_rate_hz <= MIX_BUDGET_PAIRS_PER_S {
+        return Ok(());
+    }
+    let most = (MIX_BUDGET_PAIRS_PER_S / input_rate_hz).floor() as usize;
+    Err(format!(
+        "{carriers} carriers at {:.0} MS/s would take too much of a core; at most {most} at this rate",
+        input_rate_hz / 1e6
+    ))
+}
+
 /// The longest row: `2 · span_hz / resolution_hz` bins. Four thousand values
 /// a row is a few hundred kilobytes a minute over the API at the fastest
 /// hop a setting this long can have, and finer than any screen draws.
@@ -274,6 +294,19 @@ mod tests {
         assert!(dc.contains("DC"), "{dc}");
         let out = placement(&ionosphere(10_330_000), centre, 768_000.0).unwrap_err();
         assert!(out.contains("9.572 to 10.320 MHz"), "{out}");
+    }
+
+    /// The mixer's budget: four carriers at the HF+'s rate, three at a
+    /// HackRF's 20 MS/s, and the refusal says how many fit.
+    #[test]
+    fn the_carriers_must_fit_the_mixers_budget() {
+        assert_eq!(within_budget(4, 768_000.0), Ok(()));
+        assert_eq!(within_budget(3, 20_000_000.0), Ok(()));
+        let why = within_budget(4, 20_000_000.0).unwrap_err();
+        assert!(
+            why.contains("at most 3") && why.contains("20 MS/s"),
+            "{why}"
+        );
     }
 
     /// Left out of a command or a config, span and resolution are the

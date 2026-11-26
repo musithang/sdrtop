@@ -234,6 +234,7 @@ pub fn plan(m: &SdrMetrics, command: &Command) -> Result<Planned, String> {
                 ));
             }
             let rate = m.radio.config_sample_rate;
+            crate::signal::doppler::within_budget(carriers.len(), rate)?;
             for (i, c) in carriers.iter().enumerate() {
                 derive(c, rate)
                     .and_then(|_| placement(c, m.radio.frequency, rate))

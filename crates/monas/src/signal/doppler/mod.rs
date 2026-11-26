@@ -31,5 +31,5 @@ pub mod track;
 pub mod worker;
 
 pub use differential::{differential, pair};
-pub use settings::{derive, placement, CarrierSetting, Derived, MAX_CARRIERS};
+pub use settings::{derive, placement, within_budget, CarrierSetting, Derived, MAX_CARRIERS};
 pub use track::{Line, Row, Tracker};
