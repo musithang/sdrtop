@@ -96,6 +96,9 @@ pub struct DopplerState {
     pub differential_refused: Option<String>,
     /// The feed's account, kept as the pager's is.
     pub feed: PagerFeed,
+    /// The highest window number given out, kept across new carriers and
+    /// the radio opened again, so numbers only rise and `since` stays good.
+    pub last_seq: Option<u64>,
 }
 
 impl DopplerState {

@@ -7,6 +7,13 @@
 //! **A window never spans two tunings.** A retune or a rate change rebuilds
 //! every tracker, and a window they held part of is thrown away and counted,
 //! because a spectrum of samples from two centres describes neither.
+//!
+//! **Window numbers never go back.** A tracker numbers its windows by stream
+//! position, which starts again from zero when the radio is opened again and
+//! counts in larger hops at a higher rate. Each rebuilt tracker is therefore
+//! lifted, on its first row, above the highest number the state has given
+//! out, so a client asking for rows newer than its last still gets them.
+//! Carriers of one resolution share their numbers, and are lifted alike.
 //! Everything is computed outside the lock; the results go in under one.
 
 use std::sync::{Arc, Mutex};
@@ -53,6 +60,11 @@ struct Session {
     carriers: Vec<CarrierSetting>,
     tuning: Option<(u64, f64)>,
     trackers: Vec<Result<Tracker, String>>,
+    /// The highest window number the state had given out when the trackers
+    /// were built, and what each tracker's numbers are lifted by, fixed on
+    /// its first row.
+    floor: Option<u64>,
+    lifts: Vec<Option<u64>>,
 }
 
 impl Session {
@@ -63,16 +75,16 @@ impl Session {
             carriers: Vec::new(),
             tuning: None,
             trackers: Vec::new(),
+            floor: None,
+            lifts: Vec::new(),
         }
     }
 
     fn block(&mut self, b: &StreamBlock, state: &Mutex<SdrMetrics>) {
-        let carriers = state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .doppler
-            .carriers
-            .clone();
+        let (carriers, last_seq) = {
+            let m = state.lock().unwrap_or_else(|e| e.into_inner());
+            (m.doppler.carriers.clone(), m.doppler.last_seq)
+        };
         crate::signal::demod::decode(&b.bytes, self.geometry, usize::MAX, &mut self.iq);
 
         // New carriers, or the same carriers at a new tuning: rebuild, and
@@ -91,13 +103,28 @@ impl Session {
                 .collect();
             self.carriers = carriers.clone();
             self.tuning = Some(tuning);
+            self.floor = last_seq;
+            self.lifts = vec![None; self.trackers.len()];
         }
 
+        let floor = self.floor;
         let rows: Vec<Vec<Row>> = self
             .trackers
             .iter_mut()
-            .map(|t| match t {
-                Ok(t) => t.push(&self.iq, b.first_pair, b.gap_before),
+            .zip(self.lifts.iter_mut())
+            .map(|(t, lift)| match t {
+                Ok(t) => {
+                    let mut rows = t.push(&self.iq, b.first_pair, b.gap_before);
+                    if let Some(first) = rows.first() {
+                        let by = *lift.get_or_insert_with(|| {
+                            floor.map_or(0, |f| (f + 1).saturating_sub(first.seq))
+                        });
+                        for r in rows.iter_mut() {
+                            r.seq += by;
+                        }
+                    }
+                    rows
+                }
                 Err(_) => Vec::new(),
             })
             .collect();
@@ -140,6 +167,7 @@ impl Session {
                 track.discarded += 1;
             }
             for row in rows {
+                d.last_seq = Some(d.last_seq.map_or(row.seq, |s| s.max(row.seq)));
                 track.push(row, now, unix_ms);
             }
         }
@@ -196,8 +224,16 @@ mod tests {
     /// Feed the stretches through a running worker and hand back its state.
     fn feed(carriers: Vec<CarrierSetting>, stretches: &[Stretch]) -> SdrMetrics {
         let st = state(carriers);
+        feed_into(&st, stretches);
+        let m = st.lock().unwrap().clone();
+        m
+    }
+
+    /// The same, into a state that may already hold rows, through a new
+    /// worker, as after the radio is opened again.
+    fn feed_into(st: &Arc<Mutex<SdrMetrics>>, stretches: &[Stretch]) {
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let worker = DopplerWorker::new(rx, Arc::clone(&st), int32_geometry());
+        let worker = DopplerWorker::new(rx, Arc::clone(st), int32_geometry());
         let running = std::thread::spawn(move || worker.run());
         let (mut p1, mut p2, mut seed, mut seq) = (0.0, 1.0, 21u64, 0u64);
         for s in stretches {
@@ -228,8 +264,6 @@ mod tests {
         }
         drop(tx);
         running.join().unwrap();
-        let m = st.lock().unwrap().clone();
-        m
     }
 
     fn stretch(start_s: f64, seconds: f64, centre: u64, gap_before: bool) -> Stretch {
@@ -302,6 +336,34 @@ mod tests {
             (l.hz - (0.2 - k * 0.2)).abs() < 3.0 * l.sigma_hz + 0.005,
             "{}",
             l.hz
+        );
+    }
+
+    /// **The window numbers never go back**: the radio opened again counts
+    /// its stream from zero, and a client asking for rows newer than the last
+    /// it had must still get the new ones.
+    #[test]
+    fn window_numbers_keep_rising_when_the_stream_starts_over() {
+        let st = state(vec![setting(CENTRE + 20_000), setting(CENTRE + 24_000)]);
+        feed_into(&st, &[stretch(0.0, 60.0, CENTRE, false)]);
+        let before = st.lock().unwrap().doppler.tracks[0]
+            .rows
+            .back()
+            .unwrap()
+            .row
+            .seq;
+        feed_into(&st, &[stretch(0.0, 25.0, CENTRE, true)]);
+        let m = st.lock().unwrap().clone();
+        for t in &m.doppler.tracks {
+            let seqs: Vec<u64> = t.rows.iter().map(|r| r.row.seq).collect();
+            assert!(seqs.windows(2).all(|w| w[1] > w[0]), "{seqs:?}");
+            assert!(*seqs.last().unwrap() > before + 2, "{seqs:?}");
+        }
+        let d: Vec<u64> = m.doppler.differential.iter().map(|d| d.seq).collect();
+        assert!(d.windows(2).all(|w| w[1] > w[0]), "{d:?}");
+        assert_eq!(
+            d.last(),
+            m.doppler.tracks[1].rows.back().map(|r| &r.row.seq)
         );
     }
 
