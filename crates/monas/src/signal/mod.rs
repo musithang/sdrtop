@@ -2,6 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 pub mod demod;
+pub mod doppler;
 pub mod fft;
 pub mod ft8;
 pub mod net;
