@@ -14,8 +14,10 @@ The streaming receiver scans a sequence of envelope blocks with absolute
 sample positions. It retains the working window across block boundaries
 and reports CRC-checked frames and other candidate outcomes.
 
-To replay a Monas 1090 MHz `ci16_le` recording, pass its SigMF metadata
+To replay a 1090 MHz `ci16_le` or `cu8` recording, pass its SigMF metadata
 path to `cargo run -p monas-adsb --example replay_sigmf -- <capture.sigmf-meta>`.
+The replay example uses the same IQ normalization as Monas and reads the
+original stream indices from the capture segments.
 The `--mean-dc` flag subtracts the capture's complex mean for offline
 comparison. Accepted frames go to stdout as TSV, and receiver counters
 go to stderr.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Offline characterization of 1090 MHz signed-IQ captures from Monas.
+//! Offline characterization of 1090 MHz Airspy and RTL-SDR IQ captures.
 
 use std::error::Error;
 use std::fs::{self, File};
@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use monas_adsb::{FrameOutcome, Receiver, StreamEvent};
+use monas_dsp::sample::{decode, SampleFormat, SampleGeometry};
 use serde_json::Value;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const PAIR_BYTES: usize = 4;
 const BLOCK_PAIRS: usize = 16_384;
 const ADSB_HZ: u64 = 1_090_000_000;
 
@@ -25,17 +25,38 @@ struct Segment {
 
 struct Capture {
     rate: f64,
-    scale: f32,
+    geometry: SampleGeometry,
     pairs: u64,
     segments: Vec<Segment>,
 }
 
 impl Capture {
-    fn from_metadata(meta: &Value, pairs: u64) -> Result<Self> {
+    fn from_metadata(meta: &Value, bytes: u64) -> Result<Self> {
         let global = &meta["global"];
-        if global["core:datatype"].as_str() != Some("ci16_le") {
-            return Err("replay requires ci16_le".into());
+        let format = match global["core:datatype"].as_str() {
+            Some("ci16_le") => SampleFormat::Int16,
+            Some("cu8") => SampleFormat::Uint8,
+            _ => return Err("replay requires ci16_le or cu8".into()),
+        };
+        let full_scale = match (format, global.get("sdrtop:full_scale")) {
+            (SampleFormat::Uint8, None) => 128.0,
+            (_, Some(value)) => value
+                .as_f64()
+                .map(|value| value as f32)
+                .filter(|scale| scale.is_finite() && *scale >= 1.0)
+                .ok_or("invalid sdrtop:full_scale")?,
+            _ => return Err("missing sdrtop:full_scale".into()),
+        };
+        let geometry = SampleGeometry {
+            format,
+            full_scale,
+            converter_bits: None,
+        };
+        let stride = geometry.bytes_per_pair() as u64;
+        if !bytes.is_multiple_of(stride) {
+            return Err("IQ data ends with an incomplete pair".into());
         }
+        let pairs = bytes / stride;
         if global.get("sdrtop:shortfall").is_some()
             || global["sdrtop:radio_drops"].as_u64().unwrap_or(0) > 0
         {
@@ -52,11 +73,6 @@ impl Capture {
             .as_f64()
             .filter(|rate| rate.is_finite() && *rate > 0.0)
             .ok_or("missing or invalid sample rate")?;
-        let scale = global["sdrtop:full_scale"]
-            .as_f64()
-            .map(|value| value as f32)
-            .filter(|scale| scale.is_finite() && *scale >= 1.0)
-            .ok_or("missing or invalid sdrtop:full_scale")?;
         let captures = meta["captures"].as_array().ok_or("missing captures")?;
         let mut segments: Vec<Segment> = Vec::with_capacity(captures.len());
         for capture in captures {
@@ -98,7 +114,7 @@ impl Capture {
         }
         Ok(Self {
             rate,
-            scale,
+            geometry,
             pairs,
             segments,
         })
@@ -109,7 +125,8 @@ impl Capture {
         mut reader: impl Read,
         mut visit: impl FnMut(u64, &[u8]) -> Result<()>,
     ) -> Result<()> {
-        let mut buffer = vec![0; BLOCK_PAIRS * PAIR_BYTES];
+        let stride = self.geometry.bytes_per_pair();
+        let mut buffer = vec![0; BLOCK_PAIRS * stride];
         for (index, segment) in self.segments.iter().enumerate() {
             let end = self
                 .segments
@@ -118,7 +135,7 @@ impl Capture {
             let mut cursor = segment.file_start;
             while cursor < end {
                 let pairs = (end - cursor).min(BLOCK_PAIRS as u64) as usize;
-                let bytes = &mut buffer[..pairs * PAIR_BYTES];
+                let bytes = &mut buffer[..pairs * stride];
                 reader.read_exact(bytes)?;
                 visit(segment.stream_start + (cursor - segment.file_start), bytes)?;
                 cursor += pairs as u64;
@@ -128,20 +145,14 @@ impl Capture {
     }
 }
 
-fn iq(pair: &[u8; PAIR_BYTES], scale: f32) -> (f32, f32) {
-    (
-        f32::from(i16::from_le_bytes([pair[0], pair[1]])) / scale,
-        f32::from(i16::from_le_bytes([pair[2], pair[3]])) / scale,
-    )
-}
-
 fn mean_dc(capture: &Capture, data: &Path) -> Result<(f32, f32)> {
     let (mut i_sum, mut q_sum) = (0.0, 0.0);
+    let mut iq = Vec::with_capacity(BLOCK_PAIRS);
     capture.blocks(BufReader::new(File::open(data)?), |_, bytes| {
-        for pair in bytes.as_chunks::<PAIR_BYTES>().0 {
-            let (i, q) = iq(pair, capture.scale);
-            i_sum += f64::from(i);
-            q_sum += f64::from(q);
+        decode(bytes, capture.geometry, BLOCK_PAIRS, &mut iq);
+        for sample in &iq {
+            i_sum += f64::from(sample.re);
+            q_sum += f64::from(sample.im);
         }
         Ok(())
     })?;
@@ -178,11 +189,8 @@ fn main() -> Result<()> {
     }
     let data = meta.with_extension("sigmf-data");
     let bytes = fs::metadata(&data)?.len();
-    if !bytes.is_multiple_of(PAIR_BYTES as u64) {
-        return Err("IQ data ends with an incomplete pair".into());
-    }
     let metadata = serde_json::from_reader(BufReader::new(File::open(meta)?))?;
-    let capture = Capture::from_metadata(&metadata, bytes / PAIR_BYTES as u64)?;
+    let capture = Capture::from_metadata(&metadata, bytes)?;
     let (dc_i, dc_q) = if remove_mean {
         mean_dc(&capture, &data)?
     } else {
@@ -190,14 +198,16 @@ fn main() -> Result<()> {
     };
     let mut receiver = Receiver::new(capture.rate).map_err(|error| format!("{error:?}"))?;
     let mut power = Vec::with_capacity(BLOCK_PAIRS);
+    let mut iq = Vec::with_capacity(BLOCK_PAIRS);
     println!("first_pair\tphase\tcontrast\tdf17_hex");
     let start = Instant::now();
     capture.blocks(BufReader::new(File::open(data)?), |first_pair, bytes| {
+        decode(bytes, capture.geometry, BLOCK_PAIRS, &mut iq);
         power.clear();
-        power.extend(bytes.as_chunks::<PAIR_BYTES>().0.iter().map(|pair| {
-            let (i, q) = iq(pair, capture.scale);
-            (i - dc_i).powi(2) + (q - dc_q).powi(2)
-        }));
+        power.extend(
+            iq.iter()
+                .map(|sample| (sample.re - dc_i).powi(2) + (sample.im - dc_q).powi(2)),
+        );
         receiver
             .push_power(first_pair, &power, print_accepted)
             .map_err(|error| format!("{error:?}"))?;
@@ -234,17 +244,14 @@ mod tests {
 
     #[test]
     fn feeds_file_pairs_at_their_original_stream_indices() {
-        let capture = Capture::from_metadata(&metadata(), 3).unwrap();
+        let capture = Capture::from_metadata(&metadata(), 12).unwrap();
         let mut seen = Vec::new();
         let bytes = [0, 0x40, 0, 0xC0, 0, 0x20, 0, 0, 0, 0xE0, 0, 0x20];
         capture
             .blocks(bytes.as_slice(), |pair, samples| {
-                let iq_values: Vec<_> = samples
-                    .as_chunks::<PAIR_BYTES>()
-                    .0
-                    .iter()
-                    .map(|sample| iq(sample, capture.scale))
-                    .collect();
+                let mut iq = Vec::new();
+                decode(samples, capture.geometry, BLOCK_PAIRS, &mut iq);
+                let iq_values: Vec<_> = iq.iter().map(|sample| (sample.re, sample.im)).collect();
                 seen.push((pair, iq_values));
                 Ok(())
             })
@@ -259,10 +266,38 @@ mod tests {
     fn rejects_unlocated_losses_and_overlapping_indices() {
         let mut capture = metadata();
         capture["global"]["sdrtop:radio_drops"] = json!(1);
-        assert!(Capture::from_metadata(&capture, 3).is_err());
+        assert!(Capture::from_metadata(&capture, 12).is_err());
         let mut capture = metadata();
         capture["captures"][1]["core:global_index"] = json!(1);
-        assert!(Capture::from_metadata(&capture, 3).is_err());
-        assert!(Capture::from_metadata(&metadata(), 2).is_err());
+        assert!(Capture::from_metadata(&capture, 12).is_err());
+        assert!(Capture::from_metadata(&metadata(), 8).is_err());
+    }
+
+    #[test]
+    fn replays_unsigned_rtl_iq_with_its_own_stride_and_zero() {
+        let mut meta = metadata();
+        meta["global"]["core:datatype"] = json!("cu8");
+        meta["global"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sdrtop:full_scale");
+        let capture = Capture::from_metadata(&meta, 6).unwrap();
+        assert!(Capture::from_metadata(&meta, 5).is_err());
+        let mut seen = Vec::new();
+        let mut iq = Vec::new();
+        capture
+            .blocks([0, 255, 127, 128, 255, 0].as_slice(), |pair, bytes| {
+                decode(bytes, capture.geometry, BLOCK_PAIRS, &mut iq);
+                seen.push((
+                    pair,
+                    iq.iter()
+                        .map(|sample| (sample.re, sample.im))
+                        .collect::<Vec<_>>(),
+                ));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(seen[0], (0, vec![(-1.0, 1.0), (-0.5 / 127.5, 0.5 / 127.5)]));
+        assert_eq!(seen[1], (9, vec![(1.0, -1.0)]));
     }
 }
