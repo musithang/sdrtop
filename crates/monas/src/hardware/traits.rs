@@ -1624,6 +1624,11 @@ pub struct RxContext {
     pub doppler_tx: crossbeam_channel::Sender<StreamBlock>,
     /// What the doppler feed did with the blocks handed to it, for the poll task.
     pub doppler_feed: FeedHealth,
+    /// Seventh, independently lossy feed, to the floor lab's long exposure,
+    /// while the mode asks for it.
+    pub floor_tx: crossbeam_channel::Sender<StreamBlock>,
+    /// What the floor feed did with the blocks handed to it, for the poll task.
+    pub floor_feed: FeedHealth,
     /// Direct power-spectrum traces from backends that do not publish IQ.
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,
     pub geometry: SampleGeometry,

@@ -31,6 +31,7 @@ pub mod settings;
 pub mod spread;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod worker;
 
 pub use frames::{Frames, Sums};
 pub use settings::{derive, Derived, FloorSetting, ZoomSpan};

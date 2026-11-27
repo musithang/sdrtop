@@ -39,6 +39,8 @@ pub struct Feeds {
     pub demod: bool,
     /// The doppler lab's carrier trackers.
     pub doppler: bool,
+    /// The floor lab's long exposure.
+    pub floor: bool,
 }
 
 /// The views whose work includes the demodulator's.
@@ -47,6 +49,10 @@ pub const DEMOD_VIEWS: &[&str] = &["lab_signal"];
 /// The doppler lab: carriers watched closely. It has no terminal view of its
 /// own yet; monasd computes it by this name.
 pub const DOPPLER_VIEW: &str = "lab_doppler";
+
+/// The floor lab: the noise floor exposed for minutes in fine bins. Like the
+/// doppler lab, monasd computes it by this name.
+pub const FLOOR_VIEW: &str = "lab_floor";
 
 /// What the 2.4 GHz receivers are asked to do, once their feed is on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
@@ -92,6 +98,7 @@ impl Mode {
                 ft8: crate::signal::ft8::SECTIONS.contains(&section),
                 demod: DEMOD_VIEWS.contains(&view),
                 doppler: view == DOPPLER_VIEW,
+                floor: view == FLOOR_VIEW,
             },
             net: NetView {
                 classic: CLASSIC_VIEWS.contains(&view),
@@ -147,6 +154,7 @@ pub const MODES: &[(&str, &str)] = &[
     ("lab_ft8_receiver", crate::signal::ft8::LAB_SECTION),
     ("lab_signal", "lab"),
     (DOPPLER_VIEW, "lab"),
+    (FLOOR_VIEW, "lab"),
 ];
 
 #[cfg(test)]
@@ -160,6 +168,16 @@ mod tests {
         assert!(m.feeds.doppler);
         assert!(!m.feeds.net && !m.feeds.pager && !m.feeds.ft8 && !m.feeds.demod);
         assert!(!Mode::named("lab_signal").unwrap().feeds.doppler);
+    }
+
+    /// The floor lab asks for its own feed and nothing else's.
+    #[test]
+    fn lab_floor_feeds_the_floor_worker_and_nothing_else() {
+        let m = Mode::named("lab_floor").unwrap();
+        assert!(m.feeds.floor);
+        assert!(!m.feeds.net && !m.feeds.pager && !m.feeds.ft8 && !m.feeds.demod);
+        assert!(!m.feeds.doppler);
+        assert!(!Mode::named("lab_doppler").unwrap().feeds.floor);
     }
 
     /// Every named mode is the mode its view asks for in its own section.

@@ -130,6 +130,7 @@ impl SdrMetrics {
             net: crate::state::NetState::default(),
             pager: crate::state::PagerState::default(),
             doppler: crate::state::DopplerState::default(),
+            floor: crate::state::FloorState::default(),
             ft8: crate::state::Ft8State::default(),
             home: crate::state::Home::default(),
             record: crate::state::RecordState::default(),

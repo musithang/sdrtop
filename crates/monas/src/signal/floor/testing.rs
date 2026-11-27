@@ -66,6 +66,11 @@ impl Fading {
             seed,
             held: 0,
         };
+        // A small seed's first xorshift draws are tiny, and one of them as
+        // the starting gain would start the fade twenty times too strong.
+        for _ in 0..16 {
+            f.gaussian();
+        }
         f.gain = f.gaussian();
         f
     }

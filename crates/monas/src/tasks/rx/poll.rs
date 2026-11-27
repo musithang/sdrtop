@@ -217,6 +217,14 @@ pub(super) fn drain(
     if doppler_drops > 0 {
         m.doppler.feed.last_loss = Some(now);
     }
+    // And the floor's.
+    let (floor_depth, floor_drops) = rx_ctx.floor_feed.take();
+    m.floor.feed.peak_depth = floor_depth;
+    m.floor.feed.refused = floor_drops;
+    m.floor.feed.refused_session += floor_drops;
+    if floor_drops > 0 {
+        m.floor.feed.last_loss = Some(now);
+    }
     let buf_sample = (m.iq.buf_fill_pct * 10.0) as u64;
     if m.iq.buf_fill_history.len() >= THROUGHPUT_HISTORY_LEN {
         m.iq.buf_fill_history.pop_front();
@@ -261,6 +269,8 @@ mod tests {
             ft8_feed: FeedHealth::default(),
             doppler_tx: crossbeam_channel::bounded(1).0,
             doppler_feed: crate::hardware::FeedHealth::default(),
+            floor_tx: crossbeam_channel::bounded(1).0,
+            floor_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry {
                 format: SampleFormat::Int8,

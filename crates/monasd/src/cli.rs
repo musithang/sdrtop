@@ -90,10 +90,12 @@ and the person at the terminal mean the same thing by net_survey:
   FT8 Lab            lab_ft8_signal, lab_ft8_band, lab_ft8_receiver
   Demodulator        lab_signal
   Doppler            lab_doppler
+  Noise floor        lab_floor
 
 spectrum is the default. The other Lab benches and the compact views read
 nothing beyond the spectrum, so they need no mode of their own. lab_doppler
-has no sdrtop view yet: it watches the carriers the doppler command chose.",
+has no sdrtop view yet: it watches the carriers the doppler command chose.
+Nor has lab_floor: it exposes the band's floor for as long as it runs.",
     ),
     (
         "API",

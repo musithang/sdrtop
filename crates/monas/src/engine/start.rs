@@ -153,6 +153,7 @@ pub struct Feeds {
     pager_rx: crossbeam_channel::Receiver<hardware::StreamBlock>,
     ft8_rx: crossbeam_channel::Receiver<hardware::TimedBlock>,
     doppler_rx: crossbeam_channel::Receiver<hardware::StreamBlock>,
+    floor_rx: crossbeam_channel::Receiver<hardware::StreamBlock>,
     power_rx: crossbeam_channel::Receiver<hardware::PowerTrace>,
 }
 
@@ -186,6 +187,9 @@ pub fn feeds(
     // long and every block of it is wanted, and at the HF+'s rates a block is
     // a few milliseconds, so eight hold a hiccup without hiding a loss.
     let (doppler_tx, doppler_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(8);
+    // The floor queue, the doppler's depth for the doppler's reason: a frame
+    // is a second or more of blocks, every one of them wanted.
+    let (floor_tx, floor_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(8);
     let (power_tx, power_rx) = crossbeam_channel::bounded::<hardware::PowerTrace>(4);
     let rx_ctx = Arc::new(hardware::RxContext {
         metrics: Arc::clone(state),
@@ -200,6 +204,8 @@ pub fn feeds(
         ft8_feed: hardware::FeedHealth::default(),
         doppler_tx,
         doppler_feed: hardware::FeedHealth::default(),
+        floor_tx,
+        floor_feed: hardware::FeedHealth::default(),
         power_tx,
         geometry,
         stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -216,6 +222,7 @@ pub fn feeds(
             pager_rx,
             ft8_rx,
             doppler_rx,
+            floor_rx,
             power_rx,
         },
     )
@@ -325,6 +332,17 @@ pub fn run(
                 crate::signal::doppler::worker::DopplerWorker::new(
                     feeds.doppler_rx,
                     doppler_state,
+                    geometry,
+                )
+                .run()
+            }));
+
+            // The same, for the floor lab.
+            let floor_state = Arc::clone(state);
+            threads.push(spawn_worker("floor-worker", move || {
+                crate::signal::floor::worker::FloorWorker::new(
+                    feeds.floor_rx,
+                    floor_state,
                     geometry,
                 )
                 .run()

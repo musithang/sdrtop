@@ -517,6 +517,7 @@ pub fn initial_metrics(cfg: &EngineConfig, boot: Boot) -> anyhow::Result<SdrMetr
             d.set_carriers(cfg.doppler.carriers.clone());
             d
         },
+        floor: crate::state::FloorState::default(),
         home,
         record: crate::state::RecordState::default(),
         caps,

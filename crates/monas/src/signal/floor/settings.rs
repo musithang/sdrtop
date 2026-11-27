@@ -80,7 +80,7 @@ pub struct Derived {
 }
 
 /// A number with a space between thousands, as the refusals print them.
-fn grouped(n: usize) -> String {
+pub(super) fn grouped(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {

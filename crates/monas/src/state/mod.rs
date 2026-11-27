@@ -6,6 +6,7 @@ mod demod;
 pub mod doppler;
 #[cfg(any(test, feature = "testing"))]
 pub mod fixture;
+pub mod floor;
 pub mod ft8;
 mod home;
 mod iq;
@@ -47,6 +48,7 @@ pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
 // funnel and latest frame with it.
 pub use doppler::DopplerState;
+pub use floor::FloorState;
 pub use ft8::{verdict as ft8_verdict, CycleEntry, CycleOutcome, Ft8State, Station};
 pub use home::{Home, StationField};
 pub use log::{LogEntry, LogLevel};
@@ -151,6 +153,8 @@ pub struct SdrMetrics {
     pub ft8: Ft8State,
     /// The doppler lab's carriers and their rows. See [`DopplerState`].
     pub doppler: DopplerState,
+    /// The floor lab's long exposure. See [`FloorState`].
+    pub floor: FloorState,
     /// Where you listen from and your call. See [`Home`].
     pub home: Home,
     /// What the IQ recorder is doing. See [`RecordState`].

@@ -219,6 +219,7 @@ pub struct Arrival {
     pager_enabled: bool,
     ft8_enabled: bool,
     doppler_enabled: bool,
+    floor_enabled: bool,
     /// Unix seconds at arrival, taken only when something needs it (the FT8
     /// feed, a recording); zero otherwise.
     arrived_unix: f64,
@@ -275,6 +276,7 @@ pub fn arrive(
         pager_enabled,
         ft8_enabled,
         doppler_enabled,
+        floor_enabled,
         centre_hz,
         rate_hz,
         gain,
@@ -291,6 +293,7 @@ pub fn arrive(
             m.mode.feeds.pager,
             m.mode.feeds.ft8,
             m.mode.feeds.doppler,
+            m.mode.feeds.floor,
             m.radio.frequency,
             m.radio.config_sample_rate,
             recording.then(|| (m.radio.gains.clone(), m.radio.amp_enabled)),
@@ -340,6 +343,7 @@ pub fn arrive(
         pager_enabled,
         ft8_enabled,
         doppler_enabled,
+        floor_enabled,
         arrived_unix,
         centre_hz,
         rate_hz,
@@ -424,6 +428,7 @@ pub fn digest(
         pager_enabled,
         ft8_enabled,
         doppler_enabled,
+        floor_enabled,
         arrived_unix,
         centre_hz,
         rate_hz,
@@ -619,6 +624,21 @@ pub fn digest(
             })
             .is_ok();
         ctx.doppler_feed.record(ctx.doppler_tx.len(), taken);
+    }
+    // The seventh, for the same reason: a lost block cuts a frame short.
+    if floor_enabled {
+        let taken = ctx
+            .floor_tx
+            .try_send(super::StreamBlock {
+                seq: block_seq,
+                gap_before: dropped_pairs > 0,
+                bytes: forward.clone(),
+                first_pair,
+                centre_hz,
+                rate_hz,
+            })
+            .is_ok();
+        ctx.floor_feed.record(ctx.floor_tx.len(), taken);
     }
     // The one point where a lost block is observable. This channel is lossy by
     // design - dropping under load beats blocking the USB callback - but lossy
@@ -928,6 +948,8 @@ pub(crate) mod tests {
             ft8_feed: crate::hardware::FeedHealth::default(),
             doppler_tx: crossbeam_channel::bounded(1).0,
             doppler_feed: crate::hardware::FeedHealth::default(),
+            floor_tx: crossbeam_channel::bounded(1).0,
+            floor_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1349,6 +1371,8 @@ pub(crate) mod tests {
             ft8_feed: crate::hardware::FeedHealth::default(),
             doppler_tx: crossbeam_channel::bounded(1).0,
             doppler_feed: crate::hardware::FeedHealth::default(),
+            floor_tx: crossbeam_channel::bounded(1).0,
+            floor_feed: crate::hardware::FeedHealth::default(),
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1397,6 +1421,8 @@ pub(crate) mod tests {
             ft8_feed: crate::hardware::FeedHealth::default(),
             doppler_tx,
             doppler_feed: crate::hardware::FeedHealth::default(),
+            floor_tx: crossbeam_channel::bounded(1).0,
+            floor_feed: crate::hardware::FeedHealth::default(),
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1420,6 +1446,48 @@ pub(crate) mod tests {
             "a block no tracker will see"
         );
         assert_eq!(doppler_rx.len(), 1);
+    }
+
+    /// The floor feed runs only in its mode, and counts the block it could not
+    /// take, as the doppler's does.
+    #[test]
+    fn the_floor_feed_runs_on_its_mode_and_counts_what_it_refuses() {
+        let (ctx, _sample_rx, _demod_rx, _net_rx) = rx_ctx_holding(8, 1);
+        let (floor_tx, floor_rx) = crossbeam_channel::bounded(1);
+        let ctx = Arc::new(RxContext {
+            metrics: Arc::clone(&ctx.metrics),
+            sample_tx: ctx.sample_tx.clone(),
+            fft_feed: crate::hardware::FeedHealth::default(),
+            demod_tx: ctx.demod_tx.clone(),
+            net_tx: ctx.net_tx.clone(),
+            net_feed: crate::hardware::FeedHealth::default(),
+            pager_tx: crossbeam_channel::bounded(1).0,
+            pager_feed: crate::hardware::FeedHealth::default(),
+            ft8_tx: crossbeam_channel::bounded(1).0,
+            ft8_feed: crate::hardware::FeedHealth::default(),
+            doppler_tx: crossbeam_channel::bounded(1).0,
+            doppler_feed: crate::hardware::FeedHealth::default(),
+            floor_tx,
+            floor_feed: crate::hardware::FeedHealth::default(),
+            power_tx: ctx.power_tx.clone(),
+            geometry: ctx.geometry,
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
+            record: Default::default(),
+            intake: Default::default(),
+        });
+        let block = vec![0x10u8; 64];
+
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.floor_feed.take(), (0, 0), "not its mode");
+        assert!(floor_rx.is_empty());
+
+        ctx.metrics.lock().unwrap().mode = crate::engine::mode::Mode::named("lab_floor").unwrap();
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.floor_feed.take(), (1, 0), "the queue took it");
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.floor_feed.take(), (1, 1), "a block no frame will see");
+        assert_eq!(floor_rx.len(), 1);
     }
 
     /// **Each window keeps the deliveries that came earliest and latest for
@@ -1460,6 +1528,8 @@ pub(crate) mod tests {
             ft8_feed: crate::hardware::FeedHealth::default(),
             doppler_tx: crossbeam_channel::bounded(1).0,
             doppler_feed: crate::hardware::FeedHealth::default(),
+            floor_tx: crossbeam_channel::bounded(1).0,
+            floor_feed: crate::hardware::FeedHealth::default(),
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
