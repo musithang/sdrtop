@@ -4,6 +4,7 @@
 pub mod demod;
 pub mod doppler;
 pub mod fft;
+pub mod floor;
 pub mod ft8;
 pub mod net;
 pub mod noise_slope;
