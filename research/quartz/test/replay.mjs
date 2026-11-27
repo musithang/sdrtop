@@ -37,7 +37,7 @@ function run({ search, fetchImpl, seconds }) {
     set: () => true,
   });
   const element = () => {
-    const e = { style: { setProperty() {} }, getContext: () => ctx, width: 0, height: 0 };
+    const e = { style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, getContext: () => ctx, width: 0, height: 0 };
     let text = "", html = "";
     Object.defineProperty(e, "textContent", { get: () => text, set: v => { text = String(v); drawn.push(text); } });
     Object.defineProperty(e, "innerHTML", { get: () => html, set: v => { html = String(v); drawn.push(html); } });
@@ -105,7 +105,12 @@ for (const s of played.drawn) {
   for (const n of names) if (low.includes(n.toLowerCase())) fail.push(`name ${JSON.stringify(n)} drawn: ${JSON.stringify(s)}`);
   for (const w of words) if (low.includes(w)) fail.push(`a word of a name, ${JSON.stringify(w)}, drawn: ${JSON.stringify(s)}`);
   if (s.includes("NaN")) fail.push(`NaN drawn: ${JSON.stringify(s)}`);
+  if (/serial|[0-9a-f]{12,}/i.test(s)) fail.push(`a serial number drawn: ${JSON.stringify(s)}`);
 }
+
+// 1b. The receiver is named as the recording names it, its serial cut off.
+if (fx.device && !played.drawn.includes(fx.device.split(/\s+serial\s/)[0].trim()))
+  fail.push(`the receiver ${JSON.stringify(fx.device.split(/\s+serial\s/)[0].trim())} is not named`);
 
 // 2. A device with no offset or no index is not drawn.
 const q = played.q;
@@ -157,6 +162,13 @@ if (q) {
   for (const k of new Set(counts.values())) {
     const label = k === 1 ? "NEW ADDRESS, SAME QUARTZ?" : `${k} CRYSTALS MATCH`;
     if (!played.drawn.includes(label)) fail.push(`a link was not labelled ${label}`);
+  }
+  // The moment takes the right-hand panel: its question, and the two numbers
+  // it rests on (how close in quartz, how soon after the old one fell quiet).
+  if (counts.size) {
+    if (!played.drawn.some(t => t === "SAME QUARTZ?" || /^\d+ CRYSTALS MATCH$/.test(t))) fail.push("the moment's heading was never shown");
+    if (!played.drawn.some(t => /\d(\.\d)?σ<\/b> apart/.test(t))) fail.push("the moment never said how far apart in quartz");
+    if (!played.drawn.some(t => /later|same moment|within 30 s/.test(t))) fail.push("the moment never said when the new address began");
   }
 }
 

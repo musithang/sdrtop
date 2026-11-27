@@ -1614,5 +1614,6 @@
     ]
    }
   }
- ]
+ ],
+ "device": "HackRF One  serial 0000000000000000deadbeefcafe1234"
 }

@@ -71,7 +71,10 @@ def anonymize(rec, every=0.0):
             devices.append(kept)
         polls.append({"t": p.get("t"), "census": {"testimony": testimony, "devices": devices}})
     reference = (rec.get("reference") or "not said").split(",")[0]
-    return {"reference": reference, "polls": polls}
+    # The radio by its name only, whatever the capture kept: a serial number
+    # names one unit.
+    device = re.split(r"\s+serial\s", rec.get("device") or "")[0].strip() or None
+    return {"reference": reference, "device": device, "polls": polls}
 
 
 if __name__ == "__main__":

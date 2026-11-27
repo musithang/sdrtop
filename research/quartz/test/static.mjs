@@ -27,7 +27,7 @@ for (const m of page.matchAll(/https?:\/\/[^\s"'<>)]+/g)) {
   const before = page.slice(Math.max(0, m.index - 8), m.index);
   if (!/xmlns(:\w+)?="$/.test(before)) fail.push(`index.html fetches or links ${m[0]}`);
 }
-for (const word of ["localStorage", "sessionStorage", "document.cookie", "indexedDB", "fonts.googleapis"])
+for (const word of ["localStorage", "sessionStorage", "document.cookie", "indexedDB", "fonts.googleapis", "PortaPack"])
   if (page.includes(word)) fail.push(`index.html uses ${word}`);
 
 // The config: the radio and masked addresses, nothing about the place.
@@ -71,6 +71,7 @@ function checkRecording(label, text) {
     else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x);
   })(rec);
   for (const s of strings) {
+    if (/serial|[0-9a-f]{12,}/i.test(s)) fail.push(`${label} holds a serial number ${JSON.stringify(s)}`);
     if (/([0-9a-f]{2}:){2,}|\.\.[0-9a-f]{2}|#\d+/i.test(s)) fail.push(`${label} holds an address form ${JSON.stringify(s)}`);
     if (/\b(lat|lon)\w*\b.*\d{1,3}\.\d+/i.test(s)) fail.push(`${label} holds a coordinate ${JSON.stringify(s)}`);
     if (/name/i.test(s)) fail.push(`${label} holds a name ${JSON.stringify(s)}`);

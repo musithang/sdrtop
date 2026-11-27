@@ -20,7 +20,10 @@ def ask(route):
         return json.loads(r.read())
 
 
-reference = ask("/v1/provenance").get("reference") or "not said"
+provenance = ask("/v1/provenance")
+reference = provenance.get("reference") or "not said"
+# The radio by its name only: its serial number names one unit.
+device = (provenance.get("device") or "").split("  serial")[0].strip() or None
 polls, start = [], time.monotonic()
 while time.monotonic() - start < minutes * 60:
     t = time.monotonic()
@@ -33,5 +36,5 @@ while time.monotonic() - start < minutes * 60:
         print(f"{len(polls)} polls, {n} addresses so far", file=sys.stderr)
     time.sleep(max(0.0, 1.0 - (time.monotonic() - t)))
 with open(out, "w") as f:
-    json.dump({"reference": reference, "polls": polls}, f)
+    json.dump({"reference": reference, "device": device, "polls": polls}, f)
 print(f"{len(polls)} polls written to {out}; anonymize it before sharing")

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="pics/quartz.jpg" alt="The quartz page: Bluetooth devices placed by crystal offset and modulation index, one new address linked to an old one" width="900">
+  <img src="pics/quartz.jpg" alt="The quartz page: a new Bluetooth address linked to an old one that went quiet 2 s before, 0.5 sigma apart in quartz, everything else stepped back" width="900">
 </p>
 
 ## What you are looking at
@@ -56,17 +56,49 @@ PortaPack H4M in HackRF mode) should work too; I have only tried the HackRF.
 The first dots appear within half a minute. Watch your own phone: put it
 near the antenna and wait for its address to change.
 
-**No dots?** Check the antenna is on, and that nothing else has the radio.
-**No radio?** Open <http://127.0.0.1:7380/?fixture> instead: twenty minutes
-of my flat, anonymised, played back (add `&speed=10` if you are impatient).
+## If it does not work
 
-## Privacy
+- **monasd finds no radio.** It needs libhackrf: the installer's `--hackrf`
+  puts it in. If you have your distribution's HackRF tools, `hackrf_info`
+  should list the radio.
+- **The radio is busy.** One program at a time: close SDR++, GQRX,
+  `hackrf_transfer` or anything else that has it open.
+- **No dots.** Check the antenna. In a quiet room, more gain helps: in your
+  copy of the config, `gain = "LNA=32,VGA=30"`.
+- **Windows.** monasd runs on Linux and macOS only.
+- **No radio at all.** Open <http://127.0.0.1:7380/?fixture> instead: twenty
+  minutes of my flat, anonymised, played back (add `&speed=10` if you are
+  impatient). It needs only `server.py`, no monasd.
 
-Addresses are masked at the source: monasd itself answers with "Apple #12",
-not an address, and the page never draws a device's name or any part of its
-address, only its maker. Nothing is stored and nothing is fetched from
-anywhere else. Watch your own devices; your neighbours did not ask to be in
-your screenshots.
+## Privacy, and the law
+
+**What it reads.** Bluetooth LE advertising, which every device sends in the
+clear to anyone in range. The page uses two physical properties of each
+packet, its frequency error and its modulation index, and nothing of what the
+packet says.
+
+**What it keeps from you.** monasd masks addresses at the source: it answers
+"Apple #12", not an address, and a name's length, not the name. The page
+draws only a device's maker, cuts the serial number off your radio's name,
+stores nothing, and fetches nothing from anywhere else. These are defaults in
+open code, not locks. Change them and what you do with it is on you.
+
+**The rules.** In the EU a device's Bluetooth address can be personal data
+(see, for example, the Spanish data protection authority's
+[guidance on Wi-Fi and Bluetooth tracking](https://www.aepd.es/guides/wi-fi-tracking-technologies-guidance-for-data-controllers.pdf)).
+The GDPR leaves purely personal use alone, but the EU Court reads "purely"
+narrowly (Ryneš, C-212/13; Buivids, C-345/17): putting other people's
+identifiable data online is not personal use. So:
+
+- watch your own devices;
+- share a capture only after `anonymize.py` (it keeps no address, no name,
+  no serial number and no time of day);
+- do not post screenshots in which other people's devices can be told
+  apart by more than their maker;
+- never use it to follow a person. Tracking someone without their consent
+  is against the law nearly everywhere, whatever the tool.
+
+This is not legal advice, and the law differs from country to country.
 
 ## In this folder
 

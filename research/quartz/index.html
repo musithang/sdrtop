@@ -33,6 +33,17 @@
   .spot canvas { display: block; width: calc(var(--u) * 440); height: calc(var(--u) * 140); margin-top: calc(var(--u) * 26); }
   .spot .verdict { margin-top: calc(var(--u) * 16); font-size: calc(var(--u) * 22); line-height: 1.45; color: #A9A69C; }
   .spot .verdict b { color: var(--foszfor); font-weight: 400; }
+  /* A rotation found takes the panel for a while: the question, big, and
+     the two numbers it rests on. */
+  .spot .moment { display: none; }
+  .spot.is-moment .name, .spot.is-moment .kind, .spot.is-moment .big, .spot.is-moment .unit, .spot.is-moment .verdict { display: none; }
+  .spot.is-moment .moment { display: block; }
+  .moment .mo-kicker { font-size: calc(var(--u) * 22); letter-spacing: 0.14em; color: #A9A69C; }
+  .moment .mo-kicker i { display: inline-block; width: calc(var(--u) * 10); height: calc(var(--u) * 10); border-radius: 50%;
+    background: var(--vivo); margin-right: calc(var(--u) * 12); vertical-align: calc(var(--u) * 1); }
+  .moment .mo-head { margin-top: calc(var(--u) * 10); font-size: calc(var(--u) * 62); font-weight: 400; line-height: 1.02; letter-spacing: -0.02em; }
+  .moment .mo-facts { margin-top: calc(var(--u) * 26); font-size: calc(var(--u) * 21); line-height: 1.55; color: #A9A69C; }
+  .moment .mo-facts b { color: var(--foszfor); font-weight: 400; }
 
   .foot { position: fixed; left: calc(var(--u) * 60); bottom: calc(var(--u) * 44); max-width: calc(var(--u) * 1200);
           font-size: calc(var(--u) * 18); line-height: 1.5; color: #A9A69C; pointer-events: none; }
@@ -62,6 +73,11 @@
 </div>
 
 <div class="spot" id="spot">
+  <div class="moment" id="mo">
+    <div class="mo-kicker"><i></i>NEW ADDRESS</div>
+    <div class="mo-head" id="mo-h">SAME QUARTZ?</div>
+    <div class="mo-facts" id="mo-f"></div>
+  </div>
   <div class="name" id="sp-name">–</div>
   <div class="kind" id="sp-kind"></div>
   <div class="big" id="sp-big">–</div>
@@ -70,7 +86,7 @@
   <div class="verdict" id="sp-v"></div>
 </div>
 
-<div class="foot">Measured against this receiver's own clock (<b>HackRF + PortaPack TCXO</b>, <span id="ref">…</span>):
+<div class="foot">Measured against this receiver's own clock (<b id="dev">…</b>, <span id="ref">…</span>):
 the distances between crystals are the measurement, where zero sits is not.</div>
 
 <div class="powered">
@@ -113,7 +129,7 @@ let recording = null, recordingStart = 0, askT = 0;
 async function ask(route) {
   if (!FIXTURE) { askT = performance.now() / 1000; return (await fetch(route, { cache: "no-store" })).json(); }
   if (!recording) { recording = await (await fetch(FIXTURE, { cache: "no-store" })).json(); recordingStart = performance.now(); }
-  if (route === "/v1/provenance") return { reference: recording.reference };
+  if (route === "/v1/provenance") return { reference: recording.reference, device: recording.device };
   const t = (performance.now() - recordingStart) / 1000 * SPEED;
   let at = recording.polls[0];
   for (const p of recording.polls) { if (p.t <= t) at = p; else break; }
@@ -174,6 +190,12 @@ const sep = (a, b) => Math.hypot(
 // the same company, started within SWAP_S of the old one's last packet,
 // within 2 combined sigma on both axes. k is how many qualify: one is drawn
 // as NEW ADDRESS, SAME QUARTZ?, several as "k CRYSTALS MATCH".
+// The latest rotation found, shown big for MOMENT_MS while its new address
+// is live: the panel tells it, and the plot dims everything else.
+const MOMENT_MS = 15000;
+let moment = null;
+const activeMoment = now => moment && now - moment.at < MOMENT_MS && devices.some(d => d.address === moment.to) ? moment : null;
+
 function relink(T, now, live) {
   const before = new Map(links.map(L => [L.from.address + ">" + L.to, L.at]));
   const next = [];
@@ -183,7 +205,12 @@ function relink(T, now, live) {
     for (const [ga, g] of heard)
       if (ga !== xa && rotating(g.d) && !live(ga) && (g.d.company || "") === (x.d.company || "")
           && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2) c.push(g.d);
-    for (const g of c) next.push({ from: g, to: xa, k: c.length, at: before.get(g.address + ">" + xa) ?? now });
+    for (const g of c) {
+      const key = g.address + ">" + xa, fresh = !before.has(key);
+      const L = { from: g, to: xa, k: c.length, sep: sep(g, x.d), gap: x.first - heard.get(g.address).last, at: before.get(key) ?? now };
+      next.push(L);
+      if (fresh && polls > 1) moment = L;
+    }
   }
   links = next.slice(-40);
 }
@@ -220,6 +247,8 @@ async function provenance() {
   try {
     const p = await ask("/v1/provenance");
     document.getElementById("ref").textContent = (p.reference || "not said").split(",")[0];
+    // The radio by its name only: its serial number names one unit.
+    document.getElementById("dev").textContent = (p.device || "the receiver").split(/\s+serial\s/)[0].trim();
   } catch (e) {}
 }
 
@@ -300,12 +329,16 @@ function frame(t) {
   }
   cv.style.cursor = hover ? "pointer" : "default";
   chooseFocus(now);
-  const F = devices.find(d => d.address === focus);
+  // While a moment holds the stage, everything but its two addresses steps
+  // back, and the new address is the one in focus.
+  const M = activeMoment(now);
+  const F = devices.find(d => d.address === (M ? M.to : focus));
 
   ctx.save(); ctx.beginPath(); ctx.rect(G.l, G.t - 40 * U, PW(), B - G.t + 40 * U); ctx.clip();
 
+  const back = a => (M && a !== M.to && a !== M.from.address ? 0.3 : 1);
   for (const g of gone.values()) {
-    const a = 0.5 * (1 - (now - g.goneAt) / 600000); if (a <= 0) continue;
+    const a = (M && g.address === M.from.address ? 0.95 : 0.5 * back(g.address)) * (1 - (now - g.goneAt) / 600000); if (a <= 0) continue;
     const x = sx(g.crystal_offset_ppm.value), y = sy(g.modulation_index.value);
     ctx.strokeStyle = rgba(HA, a); ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(x, y, 9 * U, 0, 7); ctx.stroke(); ctx.setLineDash([]);
@@ -315,13 +348,16 @@ function frame(t) {
   for (const L of links) {
     const to = devices.find(d => d.address === L.to); if (!to || to._px == null) continue;
     const x0 = sx(L.from.crystal_offset_ppm.value), y0 = sy(L.from.modulation_index.value);
-    const a = Math.max(0, 1 - (now - L.at) / 90000) * (L.k > 1 ? 0.6 : 1);
-    ctx.strokeStyle = rgba(PH, 0.15 + 0.45 * a); ctx.setLineDash([4, 5]); ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(to._px, to._py); ctx.stroke(); ctx.setLineDash([]);
+    const isM = M && L.to === M.to && L.from.address === M.from.address;
+    const a = Math.max(0, 1 - (now - L.at) / 90000) * (L.k > 1 ? 0.6 : 1) * (M && !isM ? 0.3 : 1);
+    // The moment's line draws itself from the old address to the new one.
+    const pr = isM ? Math.min(1, (now - M.at) / 900) : 1;
+    ctx.strokeStyle = rgba(PH, isM ? 0.95 : 0.15 + 0.45 * a); ctx.setLineDash([4, 5]); ctx.lineWidth = isM ? 2.2 : 1.4;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + (to._px - x0) * pr, y0 + (to._py - y0) * pr); ctx.stroke(); ctx.setLineDash([]);
     if (a > 0) {
       ctx.fillStyle = rgba(VI, a); ctx.beginPath(); ctx.arc(x0, y0, 4 * U, 0, 7); ctx.fill();
       ctx.font = fnt(18, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, a);
-      if (!labelled.has(L.to)) {
+      if (!labelled.has(L.to) && (!M || isM)) {
         labelled.add(L.to);
         // Right of the pair, else left of it, a line up or down if another
         // label is there; left out rather than drawn over one (the line stays).
@@ -351,7 +387,7 @@ function frame(t) {
     d._py = d._py == null ? y : d._py + (y - d._py) * 0.12;
     const X = d._px, Y = d._py, isF = d === F;
     const born = Math.min(1, (now - d._born) / 1200);
-    const A = Math.max(0.3, 1 - d.last_seen_s / 120) * born * (F && !isF ? 0.8 : 1);
+    const A = Math.max(0.3, 1 - d.last_seen_s / 120) * born * (F && !isF && !M ? 0.8 : 1) * back(d.address);
     const rx = Math.max(2, Math.abs(sx(p.value + 2 * p.sigma) - sx(p.value)));
     const ry = Math.max(2, Math.min(200 * U, Math.abs(sy(h.value + 2 * h.sigma) - sy(h.value))));
     if (born < 1) {
@@ -430,7 +466,8 @@ function frame(t) {
   const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.4, W / 2, H / 2, Math.max(W, H) * 0.78);
   vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.4)");
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
-  spotlight(F);
+  document.getElementById("spot").classList.toggle("is-moment", !!M);
+  if (M) momentPanel(M); else spotlight(F);
   next(frame);
 }
 
@@ -483,6 +520,37 @@ function spectrum(F, B, R) {
     ctx.fillStyle = rgba(isF ? VI : PH, isF ? 0.2 : 0.05 * d._A); ctx.fill();
     ctx.strokeStyle = rgba(isF ? VI : PH, isF ? 1 : 0.45 * d._A); ctx.lineWidth = (isF ? 2.4 : 1.4) * U; ctx.stroke();
   }
+}
+
+// ---- A rotation found, told in the panel ----
+let lastM = null;
+function momentPanel(M) {
+  if (lastM === M) return;
+  lastM = M;
+  const to = devices.find(d => d.address === M.to);
+  const when = M.gap < 1 ? "at the same moment" : `<b>${Math.round(M.gap)} s</b> later`;
+  document.getElementById("mo-h").textContent = M.k > 1 ? `${M.k} CRYSTALS MATCH` : "SAME QUARTZ?";
+  document.getElementById("mo-f").innerHTML = M.k > 1
+    ? `${M.k} quiet addresses of ${shortName(to)} fit this one within 30 s and 2σ: the quartz alone cannot say which.`
+    : `${/^[aeiou]/i.test(shortName(to)) ? "An" : "A"} ${shortName(to)} address went quiet, and this one began ${when}.<br><b>${M.sep.toFixed(1)}σ</b> apart in quartz and modulation.`;
+  // The two crystals, old and new, on the panel's spectrum.
+  const Wg = 880, Hg = 280, o = M.from.crystal_offset_ppm, n = to.crystal_offset_ppm;
+  const span = Math.max(6 * Math.max(o.sigma, n.sigma), Math.abs(o.value - n.value) * 2, 0.1), c = (o.value + n.value) / 2;
+  gc.clearRect(0, 0, Wg, Hg);
+  const peak = (q, col, lw, fill, dash) => {
+    gc.beginPath(); gc.moveTo(0, Hg - 3);
+    for (let i = 0; i <= Wg; i += 2) {
+      const zz = (c - span + i / Wg * 2 * span - q.value) / Math.max(q.sigma, span / 300);
+      gc.lineTo(i, Hg - 3 - Math.exp(-0.5 * zz * zz) * (Hg - 20));
+    }
+    gc.lineTo(Wg, Hg - 3);
+    if (fill) { gc.fillStyle = fill; gc.fill(); }
+    gc.setLineDash(dash || []); gc.strokeStyle = col; gc.lineWidth = lw; gc.stroke(); gc.setLineDash([]);
+  };
+  peak(o, rgba(DIM, 0.9), 3, null, [10, 8]);
+  peak(n, rgba(VI, 1), 5, rgba(VI, 0.12));
+  gc.strokeStyle = "#3a3d39"; gc.lineWidth = 3; gc.beginPath(); gc.moveTo(0, Hg - 1.5); gc.lineTo(Wg, Hg - 1.5); gc.stroke();
+  lastF = null;
 }
 
 // ---- The spotlight panel ----
