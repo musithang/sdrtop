@@ -59,6 +59,7 @@ dB here, a header that could not be read.
 | `GET /v1/pager` | The pages the pager shows, as it shows them: masked, only the kind and length; answering one address, only that address's. | group of [`Pages`](#pages) |
 | `GET /v1/ft8` | The FT8 decodes held, each with what it measured beside what it said: the CSV export's account, as JSON. | group of [`Decodes`](#decodes) |
 | `GET /v1/doppler` | The doppler lab's rows newer than `since`, each carrier's and the differential's, with what every frequency is relative to. | group of [`Doppler`](#doppler) |
+| `GET /v1/floor` | The floor lab's exposure: its depth, the band in cells, the lines chance does not explain and the grids they fall on, relative to a floor it names. | group of [`Floor`](#floor) |
 | `GET /v1/net/band` | The 2.4 GHz band's occupancy, one megahertz to a cell: the occupancy export's account, unobserved cells unobserved rather than zero. | group of [`Band`](#band) or absent |
 | `GET /v1/net/census` | The census of transmitters, in the panel's order, addresses shown as the panel shows them: the census export's account. | group of [`Census`](#census) |
 | `GET /v1/net/ble` | The LE 1M and 2M packet list as it is showing, newest first, each with what was measured of it: the BLE export's account. `?since=N` sends only packets numbered after `N`. | group of [`Packets`](#packets) |
@@ -220,6 +221,28 @@ The doppler lab's readings, for their route.
 | `missed` | integer | Rows newer than `since` the history had already let go: a client polling too slowly is told what it missed rather than handed a gap. |
 | `feed` | [`pager::Feed`](#pagerfeed) |  |
 
+### Floor
+
+The floor lab's readings, for their route.
+
+| Field | Type | |
+|---|---|---|
+| `relative_to` | string | What every level here is relative to. |
+| `exposure_s` | number | The frames summed, as seconds of signal. |
+| `frames` | integer |  |
+| `dropped` | integer | Frames a gap cut short and threw away, this exposure. |
+| `restarts` | integer | Exposures started again, and why the last one was. |
+| `last_restart` | string or null |  |
+| `depth_db` | number | How far down the exposure sees, dB: `10·log10(1 + 1/√frames)`. |
+| `bin_hz` | number | The bin width delivered, Hz. |
+| `span` | [`Span`](#span) | The band examined. |
+| `overview` | list of [`CellView`](#cellview) | The band in at most 4096 cells. |
+| `lines` | list of [`floor::LineView`](#floorlineview) | Strongest first. |
+| `lines_left_out` | integer | Lines past the cap, weaker than every one listed. |
+| `grids` | list of [`GridView`](#gridview) |  |
+| `zoom` | [`ZoomView`](#zoomview) or absent |  |
+| `feed` | [`pager::Feed`](#pagerfeed) |  |
+
 ### Band
 
 The band's occupancy, one megahertz to a cell.
@@ -343,6 +366,7 @@ The sample feeds, each one's refusals.
 | `pager` | [`server::Feed`](#serverfeed) |  |
 | `ft8` | [`server::Feed`](#serverfeed) |  |
 | `doppler` | [`server::Feed`](#serverfeed) |  |
+| `floor` | [`server::Feed`](#serverfeed) |  |
 
 ### Process
 
@@ -572,7 +596,7 @@ One carrier's shift against the first's, for one window.
 | `seq` | integer |  |
 | `at_unix_ms` | integer |  |
 | `fi_hz` | integer | The carrier differenced against the first. |
-| `line` | [`LineView`](#lineview) or absent |  |
+| `line` | [`doppler::LineView`](#dopplerlineview) or absent |  |
 
 ### pager::Feed
 
@@ -586,6 +610,72 @@ A sample feed's account: what it took, what it lost, and how hard its worker wor
 | `refused` | integer | Blocks the feed had no room for, lately and over the session. |
 | `refused_session` | integer |  |
 | `load` | number or null | The worker's time per block over the stream time it covered: above 1 it falls behind. |
+
+### Span
+
+A frequency span, Hz, absolute.
+
+| Field | Type | |
+|---|---|---|
+| `from_hz` | number |  |
+| `to_hz` | number |  |
+
+### CellView
+
+A stretch of the band, summarised.
+
+| Field | Type | |
+|---|---|---|
+| `from_hz` | number |  |
+| `to_hz` | number |  |
+| `min_db` | number | The least, the median and the most of its bins' excess, dB. |
+| `median_db` | number |  |
+| `max_db` | number |  |
+| `chance` | integer | Its bins that behave like chance, like clicks, and like a steady line. |
+| `impulsive` | integer |  |
+| `steady` | integer |  |
+
+### floor::LineView
+
+A line chance does not explain.
+
+| Field | Type | |
+|---|---|---|
+| `hz` | number | Its frequency, Hz, absolute, and that frequency's standard uncertainty. |
+| `hz_sigma` | number |  |
+| `excess_db` | number | How far it stands over the floor, dB, and that level's uncertainty. |
+| `excess_sigma_db` | number |  |
+| `width_bins` | integer | Bins it spans. |
+| `first_seen_s` | number | The exposure at which it first stood out, seconds. |
+| `spread` | number | Its peak bin's spread (one for chance), and that spread's error. |
+| `spread_sigma` | number |  |
+| `steadiness` | string or absent | `steady` or `fading`, or why that cannot be told yet. |
+| `grids` | list of integer | The grids it is a member of, as indices into `grids`. |
+
+### GridView
+
+Lines on one spacing, more of them than chance puts there.
+
+| Field | Type | |
+|---|---|---|
+| `spacing_hz` | number | The spacing, Hz, and its standard uncertainty. |
+| `spacing_sigma_hz` | number |  |
+| `offset_hz` | number | Where the teeth sit: every `offset_hz + k · spacing_hz`. |
+| `members_hz` | list of number | Its members' frequencies, lowest first. |
+| `gaps` | integer | Positions inside its span with no line. |
+| `span` | [`Span`](#span) |  |
+| `chance` | number | The chance of so many members by accident, every grid tried counted. |
+
+### ZoomView
+
+The band at full resolution over the chosen span.
+
+| Field | Type | |
+|---|---|---|
+| `from_hz` | number | Its first bin's centre, Hz, absolute. |
+| `bin_hz` | number |  |
+| `excess_db` | list of number | Each bin's excess over the floor, dB. |
+| `spread` | list of number | Each bin's spread. |
 
 ### Cell
 
@@ -988,11 +1078,11 @@ One window of one carrier.
 | `bin_hz` | number | The width of one value of `bins_db`: the resolution. |
 | `start_hz` | number | The offset the first value of `bins_db` starts at, Hz. |
 | `bins_db` | list of number | Power per resolution bin, dB over the row's median. |
-| `line` | [`LineView`](#lineview) or absent | The strongest line in the span, which is the carrier only when nothing louder is inside it. |
+| `line` | [`doppler::LineView`](#dopplerlineview) or absent | The strongest line in the span, which is the carrier only when nothing louder is inside it. |
 | `snr_db` | number or null | The strongest bin over the noise per bin, dB. |
 | `feed_loss` | boolean | Whether the feed lost samples inside this window. |
 
-### LineView
+### doppler::LineView
 
 A line: its offset in Hz, and that offset's standard uncertainty.
 

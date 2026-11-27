@@ -131,6 +131,7 @@ pub fn router(access: Access) -> Router {
         .route("/v1/pager", get(pager))
         .route("/v1/ft8", get(ft8))
         .route("/v1/doppler", get(doppler))
+        .route("/v1/floor", get(floor))
         .route("/v1/net/band", get(net_band))
         .route("/v1/net/census", get(net_census))
         .route("/v1/net/ble", get(net_ble))
@@ -215,6 +216,7 @@ pub struct Feeds {
     pub pager: Feed,
     pub ft8: Feed,
     pub doppler: Feed,
+    pub floor: Feed,
 }
 
 /// One feed's refusals, lately and over the session.
@@ -261,6 +263,7 @@ async fn health(State(access): State<Access>) -> Json<Health> {
                 pager: feed(m.pager.feed.refused, m.pager.feed.refused_session),
                 ft8: feed(m.ft8.feed.refused, m.ft8.feed.refused_session),
                 doppler: feed(m.doppler.feed.refused, m.doppler.feed.refused_session),
+                floor: feed(m.floor.feed.refused, m.floor.feed.refused_session),
             },
             process: Process {
                 cpu_pct: m.system.process_cpu_pct,
@@ -328,6 +331,18 @@ async fn doppler(
         &state,
         crate::engine::view::Clock::now(),
         q.since,
+    ))
+}
+
+/// The floor lab's exposure: its depth, the band in cells, the lines chance
+/// does not explain and the grids they fall on, relative to a floor it names.
+async fn floor(
+    State(access): State<Access>,
+) -> Json<crate::engine::view::Group<crate::engine::view::floor::Floor>> {
+    let state = access.engine.snapshot();
+    Json(crate::engine::view::floor::floor(
+        &state,
+        crate::engine::view::Clock::now(),
     ))
 }
 
@@ -846,6 +861,29 @@ mod tests {
         );
     }
 
+    /// The floor route answers off its mode as absent, saying so, with what
+    /// its levels are relative to and the overview it holds.
+    #[tokio::test]
+    async fn the_floor_route_answers() {
+        let (engine, _) = engine_on(Bench::new());
+        let app = router(Access::loopback(engine));
+        let (status, json) = ask(app, get("/v1/floor")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            json["relative_to"]
+                .as_str()
+                .is_some_and(|w| w.contains("local floor")),
+            "{json}"
+        );
+        assert!(json["overview"].is_array(), "{json}");
+        assert!(
+            json["testimony"]["absent"]
+                .as_str()
+                .is_some_and(|w| w.contains("not computing")),
+            "{json}"
+        );
+    }
+
     /// Outside the survey the band says where it is measured; the census
     /// answers with the transmitters it holds, none yet.
     #[tokio::test]
@@ -1099,6 +1137,7 @@ mod tests {
         assert_eq!(json["lost_samples"]["driver"], 400);
         assert_eq!(json["lost_samples"]["monas"], 600);
         assert_eq!(json["feeds"]["net"]["refused_session"], 3);
+        assert_eq!(json["feeds"]["floor"]["refused_session"], 0);
         assert!(json["process"]["rss_mb"].is_number());
     }
 
