@@ -35,6 +35,10 @@ one starts close by on both axes, the page draws a line and asks
 **NEW ADDRESS, SAME QUARTZ?** It is a question, not an identification. When
 more than one quiet address fits, it says so: **3 CRYSTALS MATCH**.
 
+The effect is known: it was studied on 647 devices at UC San Diego in 2022
+(the paper is linked in [METHOD.md](METHOD.md#not-a-new-idea)). This page
+lets you see it with a radio on your desk.
+
 ## Try it
 
 You need a HackRF One with a 2.4 GHz antenna, and Python 3. Other radios that

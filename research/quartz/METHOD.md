@@ -28,6 +28,20 @@ Both come from monasd's census (`/v1/net/census`, in
 [the API reference](../../user_docs/api.md)); the terminal shows the same
 two as `CFO` and `MOD` in [the Census](../../user_docs/net-le.md).
 
+## Not a new idea
+
+Tracking Bluetooth LE devices by the imperfections of their radios, the
+carrier frequency offset among them, was studied at scale by Givehchian and
+colleagues at UC San Diego:
+[*Evaluating Physical-Layer BLE Location Tracking Attacks on Mobile Devices*](https://wcsng.ucsd.edu/files/sp22_paper.pdf),
+IEEE Symposium on Security and Privacy 2022
+([IEEE Xplore](https://ieeexplore.ieee.org/document/9833758)). On 647
+devices they found it workable but not always reliable: about half had a
+fingerprint of their own, temperature and cheap receivers blurred it, and
+some devices shared one. This page shows the same effect with an
+off-the-shelf radio and two numbers per device, and puts the same limits in
+front of the viewer.
+
 ## Every offset carries your radio's error
 
 The offsets are measured against your own receiver's crystal, which is off
