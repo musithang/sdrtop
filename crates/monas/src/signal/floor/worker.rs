@@ -283,7 +283,7 @@ impl Session {
     }
 
     fn block(&mut self, b: &StreamBlock, state: &Mutex<SdrMetrics>) {
-        let (setting, key): (FloorSetting, Key) = {
+        let (setting, key, held): (FloorSetting, Key, bool) = {
             let m = state.lock().unwrap_or_else(|e| e.into_inner());
             let f = &m.floor;
             (
@@ -296,13 +296,17 @@ impl Session {
                     amp: m.radio.amp_enabled,
                     generation: f.reset_generation,
                 },
+                f.frames > 0,
             )
         };
         crate::signal::demod::decode(&b.bytes, self.geometry, usize::MAX, &mut self.iq);
 
         // Why this exposure cannot go on, if it cannot: what moved first,
         // then the stream itself.
+        // A worker begun with an exposure already in the state is a radio
+        // opened again: that exposure ends here, and says so.
         let mut restart: Option<String> = match &self.key {
+            None if held => Some("the radio was opened again".into()),
             None => None,
             Some(old) => old.changed(&key).map(str::to_string),
         };
@@ -568,6 +572,39 @@ mod tests {
         let m = st.lock().unwrap();
         assert_eq!(m.floor.restarts, 1);
         assert_eq!(m.floor.last_restart.as_deref(), Some("retuned"));
+    }
+
+    /// A radio opened again starts a new worker on the old state: the
+    /// exposure it held ends there, counted, with its reason, not in
+    /// silence.
+    #[test]
+    fn a_radio_opened_again_restarts_the_exposure_and_says_so() {
+        let st = state();
+        let mut f = Feeder::new(48_000.0, 0.0);
+        f.feed(
+            &mut Session::new(int32_geometry()),
+            &st,
+            0.0,
+            3.0,
+            CENTRE,
+            false,
+        );
+        assert!(st.lock().unwrap().floor.frames >= 2);
+        f.feed(
+            &mut Session::new(int32_geometry()),
+            &st,
+            0.0,
+            1.5,
+            CENTRE,
+            false,
+        );
+        let m = st.lock().unwrap();
+        assert_eq!(m.floor.restarts, 1);
+        assert_eq!(
+            m.floor.last_restart.as_deref(),
+            Some("the radio was opened again")
+        );
+        assert_eq!(m.floor.frames, 1);
     }
 
     /// The command's reset is a restart with its own reason.
