@@ -29,6 +29,9 @@ hz = 10000000
 resolution_hz = 0.1
 span_hz = 25.0
 
+[floor]
+bin_hz = 0.5
+
 [ft8]
 long_path = true
 names = "this cycle"

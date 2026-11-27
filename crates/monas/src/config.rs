@@ -164,6 +164,32 @@ impl DopplerSettings {
     }
 }
 
+/// `[floor]`: the floor lab's bin width. The zoom is a viewing choice and
+/// is not kept.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+pub struct FloorSettings {
+    #[serde(default = "default_floor_bin_hz")]
+    pub bin_hz: f64,
+}
+
+fn default_floor_bin_hz() -> f64 {
+    crate::signal::floor::FloorSetting::default().bin_hz
+}
+
+impl Default for FloorSettings {
+    fn default() -> Self {
+        FloorSettings {
+            bin_hz: default_floor_bin_hz(),
+        }
+    }
+}
+
+impl FloorSettings {
+    pub fn is_default(&self) -> bool {
+        *self == FloorSettings::default()
+    }
+}
+
 /// `[pager]`: what the pager view keeps between runs. Only how its display
 /// looks: which page was on it, or whose pager it was, is a session's.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -476,6 +502,9 @@ pub struct EngineConfig {
     /// Written only once a carrier is chosen.
     #[serde(default, skip_serializing_if = "DopplerSettings::is_default")]
     pub doppler: DopplerSettings,
+    /// Written only once the bin width differs from one hertz.
+    #[serde(default, skip_serializing_if = "FloorSettings::is_default")]
+    pub floor: FloorSettings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
     /// Written only once it differs from the default, so a file from a radio
@@ -564,12 +593,27 @@ pub fn save_blocks<T: Serialize>(value: &T, path: &Path, owned: &[&str]) -> anyh
 /// The blocks of the config file the engine writes: the radio and
 /// everything it measures with. See [`save_blocks`].
 pub const ENGINE_BLOCKS: &[&str] = &[
-    "radio", "sweep", "net", "record", "pager", "station", "ft8", "doppler", "tinysa", "airspy",
-    "airspyhf", "sdrplay", "plutosky",
+    "radio", "sweep", "net", "record", "pager", "station", "ft8", "doppler", "floor", "tinysa",
+    "airspy", "airspyhf", "sdrplay", "plutosky",
 ];
 
 #[cfg(test)]
 mod tests {
+
+    /// `[floor]` keeps the bin width, written only once it differs from
+    /// one hertz; the zoom is a viewing choice and is not kept.
+    #[test]
+    fn the_floor_block_round_trips() {
+        let mut cfg = EngineConfig::default();
+        assert_eq!(cfg.floor.bin_hz, 1.0);
+        assert!(!toml::to_string(&cfg).unwrap().contains("[floor]"));
+        cfg.floor.bin_hz = 0.5;
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("[floor]\nbin_hz = 0.5\n"), "{text}");
+        let back: EngineConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.floor, cfg.floor);
+        assert!(!text.contains("zoom"));
+    }
 
     /// `[doppler]` holds the carriers as the command takes them, span and
     /// resolution filled in where a line leaves them out.

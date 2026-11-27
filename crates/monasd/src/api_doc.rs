@@ -231,14 +231,18 @@ fn parse(module: &str, src: &str) -> Vec<Item> {
                         // Its fields, one to a line, to the closing brace.
                         let mut fs = Vec::new();
                         let mut fdoc: Vec<String> = Vec::new();
+                        let mut flatten = false;
                         i += 1;
                         while i < lines.len() && !lines[i].trim().starts_with('}') {
                             let fl = lines[i].trim();
                             if let Some(d) = fl.strip_prefix("///") {
                                 fdoc.push(d.strip_prefix(' ').unwrap_or(d).to_string());
+                            } else if fl.starts_with("#[") {
+                                flatten |= fl.contains("flatten");
                             } else {
-                                fs.extend(field_of(fl, &fdoc, false));
+                                fs.extend(field_of(fl, &fdoc, flatten));
                                 fdoc.clear();
+                                flatten = false;
                             }
                             i += 1;
                         }
@@ -340,6 +344,11 @@ impl Types {
         files.push((
             "doppler_settings".into(),
             format!("{root}/monas/src/signal/doppler/settings.rs"),
+        ));
+        // The floor's setting, as the floor command takes it.
+        files.push((
+            "floor_settings".into(),
+            format!("{root}/monas/src/signal/floor/settings.rs"),
         ));
         files.push(("server".into(), format!("{root}/monasd/src/server.rs")));
         let mut items = Vec::new();
@@ -742,11 +751,12 @@ fn enum_section(item: &Item, types: &Types, queue: &mut VecDeque<(String, String
                     .fields
                     .iter()
                     .map(|f| {
-                        format!(
-                            "`{}`: {}",
-                            f.name,
-                            render(&f.ty, &item.module, types, queue)
-                        )
+                        let ty = render(&f.ty, &item.module, types, queue);
+                        if f.flatten {
+                            format!("*(the fields of)* {ty}")
+                        } else {
+                            format!("`{}`: {ty}", f.name)
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join("<br>");

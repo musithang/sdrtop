@@ -96,6 +96,8 @@ dB here, a header that could not be read.
 | `"command": "addresses"` | `show`: string | Show addresses `full`, by registrant (`oui`) or `masked`, on every screen and in every export and API answer alike. |
 | `"command": "pager"` | `masked`: boolean<br>`mine`: integer or null | The pager's view: text `masked` to its kind and length, and the one address it answers to (`mine`, none for every address). |
 | `"command": "doppler"` | `carriers`: list of [`CarrierSetting`](#carriersetting) | The carriers the doppler lab watches, one to four, each with its span and resolution (the ionosphere's when left out); the first is the one the others are differenced against. |
+| `"command": "floor"` | *(the fields of)* [`FloorSetting`](#floorsetting) | The floor lab's bin width, and a span to serve at full resolution; an exposure under way starts again when the width changes. |
+| `"command": "floor_reset"` |  | Start the floor's exposure again, from nothing. |
 
 The reply:
 
@@ -304,6 +306,15 @@ One carrier to watch: its absolute frequency and its two settings.
 | `hz` | integer | The carrier's nominal frequency, Hz. |
 | `span_hz` | number | The half-width watched around it, Hz: 25 when left out. |
 | `resolution_hz` | number | The finest separation between two lines that is wanted, Hz: 0.1 when left out. |
+
+### FloorSetting
+
+What the floor is asked to do: its bin width, and an optional span to serve at full resolution.
+
+| Field | Type | |
+|---|---|---|
+| `bin_hz` | number | The bin width, Hz: 0.25 to 10. |
+| `zoom` | [`ZoomSpan`](#zoomspan) or null | A span served at full resolution, for a closer look. |
 
 ### LogLevel
 
@@ -763,6 +774,15 @@ The gaps between frames, binned, as the rhythm strip draws them.
 | `past` | integer |  |
 | `corrected` | integer |  |
 | `unplaced` | integer |  |
+
+### ZoomSpan
+
+An absolute frequency span, Hz.
+
+| Field | Type | |
+|---|---|---|
+| `from_hz` | integer |  |
+| `to_hz` | integer |  |
 
 ### server::Feed
 

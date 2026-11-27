@@ -20,8 +20,7 @@ use crate::state::PagerFeed;
 /// Cells the band is summarised in, at most.
 pub const MAX_CELLS: usize = 4096;
 
-/// Bins a zoom spans, at most.
-pub const MAX_ZOOM_BINS: usize = 8192;
+pub use crate::signal::floor::settings::MAX_ZOOM_BINS;
 
 /// What no zoom says until one is chosen.
 pub const NO_ZOOM: &str = "no zoom chosen: send the floor command with a span";

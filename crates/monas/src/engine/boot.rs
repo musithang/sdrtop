@@ -517,7 +517,13 @@ pub fn initial_metrics(cfg: &EngineConfig, boot: Boot) -> anyhow::Result<SdrMetr
             d.set_carriers(cfg.doppler.carriers.clone());
             d
         },
-        floor: crate::state::FloorState::default(),
+        floor: crate::state::FloorState {
+            setting: crate::signal::floor::FloorSetting {
+                bin_hz: cfg.floor.bin_hz,
+                zoom: None,
+            },
+            ..Default::default()
+        },
         home,
         record: crate::state::RecordState::default(),
         caps,
@@ -568,6 +574,14 @@ pub fn radio_block(m: &SdrMetrics, loaded: &RadioConfig) -> RadioConfig {
 pub fn doppler_block(m: &SdrMetrics) -> crate::config::DopplerSettings {
     crate::config::DopplerSettings {
         carriers: m.doppler.carriers.clone(),
+    }
+}
+
+/// `[floor]` as the state now has it, for the save: the bin width a command
+/// chose outlives the run; the zoom does not.
+pub fn floor_block(m: &SdrMetrics) -> crate::config::FloorSettings {
+    crate::config::FloorSettings {
+        bin_hz: m.floor.setting.bin_hz,
     }
 }
 

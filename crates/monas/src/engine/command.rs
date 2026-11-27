@@ -63,6 +63,14 @@ pub enum Command {
     Doppler {
         carriers: Vec<crate::signal::doppler::CarrierSetting>,
     },
+    /// The floor lab's bin width, and a span to serve at full resolution;
+    /// an exposure under way starts again when the width changes.
+    Floor {
+        #[serde(flatten)]
+        setting: crate::signal::floor::FloorSetting,
+    },
+    /// Start the floor's exposure again, from nothing.
+    FloorReset,
 }
 
 /// The highest pager address: an address is 21 bits.
@@ -244,6 +252,15 @@ pub fn plan(m: &SdrMetrics, command: &Command) -> Result<Planned, String> {
             }
             Ok(Planned::as_asked(command))
         }
+        Command::Floor { setting } => {
+            let d = crate::signal::floor::derive(setting, m.radio.config_sample_rate)?;
+            if let Some(z) = setting.zoom {
+                crate::signal::floor::settings::zoom_bins(z, &d, m.radio.frequency)
+                    .map_err(|miss| miss.into_message())?;
+            }
+            Ok(Planned::as_asked(command))
+        }
+        Command::FloorReset => Ok(Planned::as_asked(command)),
         Command::Agc { .. }
         | Command::Boost { .. }
         | Command::Reset
@@ -251,6 +268,37 @@ pub fn plan(m: &SdrMetrics, command: &Command) -> Result<Planned, String> {
         | Command::Stream { .. }
         | Command::DcBlock { .. } => Ok(Planned::as_asked(command)),
     }
+}
+
+/// What a planned floor setting will do at the tuning: "1 Hz bins over
+/// 153.6 kHz; ±0.17 dB deep after 10 minutes", and its zoom.
+fn floor_words(setting: &crate::signal::floor::FloorSetting, m: &SdrMetrics) -> String {
+    use crate::signal::floor::chance::depth_db;
+    use crate::signal::floor::settings::{grouped, ZoomSpan};
+    let Ok(d) = crate::signal::floor::derive(setting, m.radio.config_sample_rate) else {
+        return String::new();
+    };
+    let trim = |v: f64, places: usize| {
+        let s = format!("{v:.places$}");
+        let s = s.trim_end_matches('0').trim_end_matches('.');
+        s.to_string()
+    };
+    let span_khz = d.usable.len() as f64 * d.bin_hz / 1000.0;
+    let ten_minutes = (600.0 / (1.0 / d.bin_hz)).round() as u64;
+    let mut words = format!(
+        "{} Hz bins over {} kHz; ±{:.2} dB deep after 10 minutes",
+        trim(d.bin_hz, 3),
+        trim(span_khz, 1),
+        depth_db(ten_minutes)
+    );
+    if let Some(ZoomSpan { from_hz, to_hz }) = setting.zoom {
+        words.push_str(&format!(
+            "; zoom {}–{} Hz",
+            grouped(from_hz as usize),
+            grouped(to_hz as usize)
+        ));
+    }
+    words
 }
 
 fn stage_names(stages: &[crate::hardware::StageSpec]) -> String {
@@ -450,6 +498,22 @@ impl Engine {
                 self.lock().doppler.set_carriers(carriers);
                 Reply::Applied {
                     detail: format!("watching {}", words.join("; ")),
+                }
+            }
+            Command::Floor { setting } => {
+                // Planned: the width fits the rate and the zoom the band.
+                let detail = {
+                    let mut m = self.lock();
+                    let detail = floor_words(&setting, &m);
+                    m.floor.setting = setting;
+                    detail
+                };
+                Reply::Applied { detail }
+            }
+            Command::FloorReset => {
+                self.lock().floor.reset_generation += 1;
+                Reply::Applied {
+                    detail: "the floor's exposure starts again".to_string(),
                 }
             }
             Command::Pager { masked, mine } => {
@@ -732,6 +796,94 @@ mod tests {
         let m = engine.snapshot();
         assert_eq!(m.doppler.carriers, carriers);
         assert_eq!(m.doppler.tracks.len(), 2);
+    }
+
+    /// The bench tuned as the HF+ on 31 m: 9 980 kHz at 192 kS/s.
+    fn on_31m() -> super::super::Engine {
+        let (engine, _) = engine_on(Bench::new());
+        {
+            let mut m = engine.lock();
+            m.radio.frequency = 9_980_000;
+            m.radio.config_sample_rate = 192_000.0;
+        }
+        engine
+    }
+
+    /// The floor command answers with the band its bins cover and the depth
+    /// ten minutes reach, computed from the tuning.
+    #[test]
+    fn the_floor_command_says_its_span_and_depth() {
+        let engine = on_31m();
+        let c: Command = serde_json::from_str(
+            r#"{"command":"floor","bin_hz":1.0,"zoom":{"from_hz":9975000,"to_hz":9977000}}"#,
+        )
+        .unwrap();
+        let Reply::Applied { detail } = engine.apply(c) else {
+            panic!("refused");
+        };
+        assert!(
+            detail.starts_with("1 Hz bins over 153.6 kHz; ±0.17 dB deep after 10 minutes"),
+            "{detail}"
+        );
+        assert!(detail.contains("zoom 9 975 000–9 977 000 Hz"), "{detail}");
+        let m = engine.snapshot();
+        assert_eq!(m.floor.setting.bin_hz, 1.0);
+        assert_eq!(
+            m.floor.setting.zoom,
+            Some(crate::signal::floor::ZoomSpan {
+                from_hz: 9_975_000,
+                to_hz: 9_977_000
+            })
+        );
+        // A width the rate cannot give is refused with the limit, and
+        // changes nothing.
+        let Reply::Refused { reason } =
+            engine.apply(serde_json::from_str(r#"{"command":"floor","bin_hz":0.1}"#).unwrap())
+        else {
+            panic!("0.1 Hz applied");
+        };
+        assert!(reason.contains("0.25 Hz"), "{reason}");
+        assert_eq!(engine.snapshot().floor.setting.bin_hz, 1.0);
+    }
+
+    #[test]
+    fn a_zoom_outside_the_band_is_refused() {
+        let engine = on_31m();
+        let Reply::Refused { reason } = engine.apply(
+            serde_json::from_str(
+                r#"{"command":"floor","bin_hz":1.0,"zoom":{"from_hz":10070000,"to_hz":10071000}}"#,
+            )
+            .unwrap(),
+        ) else {
+            panic!("a zoom outside the band applied");
+        };
+        assert!(reason.contains("outside the band examined"), "{reason}");
+        assert!(engine.snapshot().floor.setting.zoom.is_none());
+    }
+
+    #[test]
+    fn a_zoom_wider_than_8192_bins_is_refused() {
+        let engine = on_31m();
+        let Reply::Refused { reason } = engine.apply(
+            serde_json::from_str(
+                r#"{"command":"floor","bin_hz":1.0,"zoom":{"from_hz":9960000,"to_hz":9970000}}"#,
+            )
+            .unwrap(),
+        ) else {
+            panic!("10 001 bins applied");
+        };
+        assert!(reason.contains("at most 8 192"), "{reason}");
+    }
+
+    #[test]
+    fn floor_reset_restarts_the_exposure() {
+        let engine = on_31m();
+        let c: Command = serde_json::from_str(r#"{"command":"floor_reset"}"#).unwrap();
+        assert_eq!(c, Command::FloorReset);
+        let before = engine.snapshot().floor.reset_generation;
+        let reply = engine.apply(c);
+        assert!(matches!(reply, Reply::Applied { .. }), "{reply:?}");
+        assert_eq!(engine.snapshot().floor.reset_generation, before + 1);
     }
 
     #[test]

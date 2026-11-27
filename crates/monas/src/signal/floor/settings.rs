@@ -79,8 +79,71 @@ pub struct Derived {
     pub block: usize,
 }
 
+/// Bins a zoom spans, at most.
+pub const MAX_ZOOM_BINS: usize = 8192;
+
+/// Bin 0's centre, Hz, absolute, at a tuning of `centre`.
+pub fn low_edge_hz(d: &Derived, centre: u64) -> f64 {
+    centre as f64 - (d.bins / 2) as f64 * d.bin_hz
+}
+
+/// The band examined, Hz, absolute: from the first usable bin's lower edge
+/// to the last one's upper edge.
+pub fn span_hz(d: &Derived, centre: u64) -> (f64, f64) {
+    let low = low_edge_hz(d, centre);
+    (
+        low + (d.usable.start as f64 - 0.5) * d.bin_hz,
+        low + (d.usable.end as f64 - 0.5) * d.bin_hz,
+    )
+}
+
+/// Why a zoom cannot be had.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ZoomMiss {
+    /// It reaches outside the band examined.
+    Outside(String),
+    /// It spans more than [`MAX_ZOOM_BINS`].
+    TooWide(String),
+}
+
+impl ZoomMiss {
+    pub fn into_message(self) -> String {
+        match self {
+            ZoomMiss::Outside(s) | ZoomMiss::TooWide(s) => s,
+        }
+    }
+}
+
+/// The first and last bin of a zoom at a tuning of `centre`, or why it
+/// cannot be had there.
+pub fn zoom_bins(z: ZoomSpan, d: &Derived, centre: u64) -> Result<(usize, usize), ZoomMiss> {
+    let low = low_edge_hz(d, centre);
+    let k0 = ((z.from_hz as f64 - low) / d.bin_hz).ceil();
+    let k1 = ((z.to_hz as f64 - low) / d.bin_hz).floor();
+    if z.to_hz <= z.from_hz || k0 < d.usable.start as f64 || k1 >= d.usable.end as f64 || k1 < k0 {
+        let span = span_hz(d, centre);
+        return Err(ZoomMiss::Outside(format!(
+            "the zoom {}–{} Hz reaches outside the band examined, {}–{} Hz",
+            grouped(z.from_hz as usize),
+            grouped(z.to_hz as usize),
+            grouped(span.0.ceil() as usize),
+            grouped(span.1.floor() as usize),
+        )));
+    }
+    let (k0, k1) = (k0 as usize, k1 as usize);
+    let n = k1 - k0 + 1;
+    if n > MAX_ZOOM_BINS {
+        return Err(ZoomMiss::TooWide(format!(
+            "the zoom spans {} bins; at most {}",
+            grouped(n),
+            grouped(MAX_ZOOM_BINS)
+        )));
+    }
+    Ok((k0, k1))
+}
+
 /// A number with a space between thousands, as the refusals print them.
-pub(super) fn grouped(n: usize) -> String {
+pub(crate) fn grouped(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {

@@ -24,11 +24,13 @@ use rustfft::num_complex::Complex;
 use super::chance::{depth_db, local_floor};
 use super::grids::{find_grids, Grid};
 use super::lines::find_lines;
-use super::settings::{derive, grouped, Derived, FloorSetting, ZoomSpan};
+use super::settings::{
+    derive, low_edge_hz, span_hz, zoom_bins, Derived, FloorSetting, ZoomMiss, ZoomSpan,
+};
 use super::spread::{kinds, spread, spread_sigma_chance, steadiness, steady_spread, BinKind};
 use super::{Frames, Sums};
 use crate::hardware::{SampleGeometry, StreamBlock};
-use crate::state::floor::{Cell, FloorLine, Zoom, MAX_CELLS, MAX_ZOOM_BINS, NO_ZOOM};
+use crate::state::floor::{Cell, FloorLine, Zoom, MAX_CELLS, NO_ZOOM};
 use crate::state::SdrMetrics;
 
 pub struct FloorWorker {
@@ -96,7 +98,8 @@ struct Run {
     frames: Frames,
     sums: Sums,
     first_over: Vec<u32>,
-    /// Bin 0's centre, Hz, absolute.
+    /// The tuning, and bin 0's centre there, Hz, absolute.
+    centre: u64,
     low_edge_hz: f64,
 }
 
@@ -106,7 +109,8 @@ impl Run {
             frames: Frames::new(&d),
             sums: Sums::new(&d),
             first_over: vec![0; d.bins],
-            low_edge_hz: centre as f64 - (d.bins / 2) as f64 * d.bin_hz,
+            centre,
+            low_edge_hz: low_edge_hz(&d, centre),
             d,
         }
     }
@@ -116,7 +120,8 @@ impl Run {
         self.frames.clear();
         self.sums.clear();
         self.first_over.iter_mut().for_each(|v| *v = 0);
-        self.low_edge_hz = centre as f64 - (self.d.bins / 2) as f64 * self.d.bin_hz;
+        self.centre = centre;
+        self.low_edge_hz = low_edge_hz(&self.d, centre);
     }
 
     fn frame_s(&self) -> f64 {
@@ -220,20 +225,24 @@ fn products(run: &mut Run, zoom: Option<ZoomSpan>) -> Products {
         })
         .collect();
 
-    let span_hz = (
-        centre(d.usable.start) - bin_hz / 2.0,
-        centre(d.usable.end - 1) + bin_hz / 2.0,
-    );
+    let span_hz = span_hz(d, run.centre);
     let zoom = match zoom {
         None => Err(NO_ZOOM.to_string()),
-        Some(z) => zoom_bins(z, run.low_edge_hz, d, span_hz).map(|(k0, k1)| Zoom {
-            from_hz: centre(k0),
-            bin_hz,
-            excess_db: (k0..=k1).map(|k| db(x[k])).collect(),
-            spread: (k0..=k1)
-                .map(|k| spread(sums.s1[k], sums.s2[k], t) as f32)
-                .collect(),
-        }),
+        Some(z) => zoom_bins(z, d, run.centre)
+            .map_err(|miss| match miss {
+                // The command refuses a zoom outside the band: one outside
+                // now was left there by the tuning moving.
+                ZoomMiss::Outside(why) => format!("outside the tuned band after a retune: {why}"),
+                ZoomMiss::TooWide(why) => why,
+            })
+            .map(|(k0, k1)| Zoom {
+                from_hz: centre(k0),
+                bin_hz,
+                excess_db: (k0..=k1).map(|k| db(x[k])).collect(),
+                spread: (k0..=k1)
+                    .map(|k| spread(sums.s1[k], sums.s2[k], t) as f32)
+                    .collect(),
+            }),
     };
 
     Products {
@@ -249,39 +258,6 @@ fn products(run: &mut Run, zoom: Option<ZoomSpan>) -> Products {
         grids,
         zoom,
     }
-}
-
-/// The first and last bin of a zoom, or why it cannot be had at this tuning.
-fn zoom_bins(
-    z: ZoomSpan,
-    low_edge_hz: f64,
-    d: &Derived,
-    span_hz: (f64, f64),
-) -> Result<(usize, usize), String> {
-    let outside = || {
-        format!(
-            "the zoom {}–{} Hz reaches outside the band examined, {}–{} Hz",
-            grouped(z.from_hz as usize),
-            grouped(z.to_hz as usize),
-            grouped(span_hz.0.ceil() as usize),
-            grouped(span_hz.1.floor() as usize),
-        )
-    };
-    let k0 = ((z.from_hz as f64 - low_edge_hz) / d.bin_hz).ceil();
-    let k1 = ((z.to_hz as f64 - low_edge_hz) / d.bin_hz).floor();
-    if z.to_hz <= z.from_hz || k0 < d.usable.start as f64 || k1 >= d.usable.end as f64 || k1 < k0 {
-        return Err(outside());
-    }
-    let (k0, k1) = (k0 as usize, k1 as usize);
-    let n = k1 - k0 + 1;
-    if n > MAX_ZOOM_BINS {
-        return Err(format!(
-            "the zoom spans {} bins; at most {}",
-            grouped(n),
-            grouped(MAX_ZOOM_BINS)
-        ));
-    }
-    Ok((k0, k1))
 }
 
 struct Session {
@@ -606,6 +582,28 @@ mod tests {
         let m = st.lock().unwrap();
         assert_eq!(m.floor.restarts, 1);
         assert_eq!(m.floor.last_restart.as_deref(), Some("reset by command"));
+    }
+
+    /// A zoom the command accepted, left outside the band by a later retune,
+    /// is answered as that rather than dropped in silence.
+    #[test]
+    fn a_retune_leaves_a_zoom_outside_and_says_so() {
+        let st = state();
+        st.lock().unwrap().floor.setting.zoom = Some(ZoomSpan {
+            from_hz: CENTRE + 9_990,
+            to_hz: CENTRE + 10_010,
+        });
+        let mut s = Session::new(int32_geometry());
+        let mut f = Feeder::new(48_000.0, 0.0);
+        f.feed(&mut s, &st, 0.0, 2.0, CENTRE, false);
+        assert!(st.lock().unwrap().floor.zoom.is_ok());
+        f.feed(&mut s, &st, 2.0, 2.0, CENTRE - 15_000, false);
+        let m = st.lock().unwrap();
+        let why = m.floor.zoom.as_ref().unwrap_err();
+        assert!(
+            why.starts_with("outside the tuned band after a retune"),
+            "{why}"
+        );
     }
 
     /// A zoom inside the band is published at full resolution; one reaching

@@ -637,6 +637,7 @@ impl App {
             station,
             ft8,
             doppler,
+            floor,
         ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let loaded = RadioConfig {
@@ -662,6 +663,8 @@ impl App {
                 // The terminal chooses no carriers; what the config held, or
                 // monasd wrote, goes back as it was.
                 crate::engine::boot::doppler_block(&m),
+                // The same for the floor's bin width.
+                crate::engine::boot::floor_block(&m),
             )
         };
         let engine = EngineConfig {
@@ -682,6 +685,7 @@ impl App {
             station,
             ft8,
             doppler,
+            floor,
         };
         let tui = TuiConfig {
             display: DisplayConfig {
