@@ -534,7 +534,7 @@ function momentPanel(M) {
   const when = M.gap < 1 ? "at the same moment" : `<b>${Math.round(M.gap)} s</b> later`;
   document.getElementById("mo-h").textContent = M.k > 1 ? `${M.k} CRYSTALS MATCH` : "SAME QUARTZ?";
   document.getElementById("mo-f").innerHTML = M.k > 1
-    ? `${M.k} quiet addresses of ${shortName(to)} fit this one within 30 s and 2σ: the quartz alone cannot say which.`
+    ? `${M.k} quiet ${shortName(to) === "unnamed" ? "addresses with no maker named" : shortName(to) + " addresses"} fit this one within 30 s and 2σ: the quartz alone cannot say which.`
     : `${/^[aeiou]/i.test(shortName(to)) ? "An" : "A"} ${shortName(to)} address went quiet, and this one began ${when}.<br><b>${M.sep.toFixed(1)}σ</b> apart in quartz and modulation.`;
   // The two crystals, old and new, on the panel's spectrum.
   const Wg = 880, Hg = 280, o = M.from.crystal_offset_ppm, n = to.crystal_offset_ppm;

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="pics/quartz.jpg" alt="The quartz page: a new Apple address that began as an old one went quiet, 0.6 sigma apart in quartz, everything else stepped back" width="900">
+  <img src="pics/quartz.jpg" alt="The quartz page: a new address that three quiet ones fit within 30 s and 2 sigma, so the quartz alone cannot say which: 3 CRYSTALS MATCH" width="900">
 </p>
 
 ## What you are looking at
