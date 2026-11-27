@@ -65,7 +65,6 @@ meant. This is evidence, not identification.
   them swapping addresses in the same half minute would satisfy the rule.
 - A device that advertises several sets at once rotates them together, so
   one old address can be followed by several new ones, each linked to it.
-  In the sample below that happened twice (three and four new addresses).
 - A rotation slower than 30 s, or a device out of range in between, is not
   linked at all.
 
@@ -76,21 +75,27 @@ common stretch of 10 s or more are two transmitters, because a device that
 rotates stops the old address before starting the new one. For every such
 pair, `chance.py` asks whether the rule's fifth condition would hold.
 
-In the sample recording (`fixture.json`: twenty minutes, one flat, one
-evening, 48 addresses):
+In the sample recording (`fixture.json`: fifteen minutes, one flat, one
+evening, 35 addresses, a HackRF at LNA 32 and VGA 24):
 
 | | Pairs heard together | Within 2 sigma |
 |---|---|---|
-| All companies | 25 | 0 |
-| Apple, Inc. | 19 | 0 |
+| All companies | 41 | 1 |
+| Apple, Inc. | 39 | 1 |
 
-None of 25. That is a small sample, so read it as a bound, not a rate: with
-no hit in 25 tries the chance per pair is, at 95 % confidence, below about
-12 % (the rule of three, 3/25). A room with more devices of one model would
-give a better number, and possibly a worse one.
+One in 41, about 2 %. That is a small sample, so read it as a bound, not a
+rate: with one hit in 41 tries, the chance per pair is below 13 % at 95 %
+confidence (the exact binomial bound). A room with more devices of one model would give a better number,
+and possibly a worse one.
 
-In the same recording the page linked 15 new addresses, each to exactly one
-old one.
+The recording carries **[FEED LOSS]** almost throughout: at 20 Msps this
+machine's Bluetooth decoding let some blocks go. That makes the packet counts
+lower bounds; the offset and the index are measured on each packet that did
+arrive, and are not moved by the ones that did not.
+
+In the same recording the page found three rotations: two new addresses
+each fit exactly one old one (0.5 and 1.97 sigma, 1 s and 0 s after it went
+quiet), and one fit two (**2 CRYSTALS MATCH**).
 
 Reproduce it:
 

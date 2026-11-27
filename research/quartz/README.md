@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="pics/quartz.jpg" alt="The quartz page: a new Bluetooth address linked to an old one that went quiet 2 s before, 0.5 sigma apart in quartz, everything else stepped back" width="900">
+  <img src="pics/quartz.jpg" alt="The quartz page: a new Apple address that began as an old one went quiet, 0.6 sigma apart in quartz, everything else stepped back" width="900">
 </p>
 
 ## What you are looking at
@@ -66,7 +66,7 @@ near the antenna and wait for its address to change.
 - **No dots.** Check the antenna. In a quiet room, more gain helps: in your
   copy of the config, `gain = "LNA=32,VGA=30"`.
 - **Windows.** monasd runs on Linux and macOS only.
-- **No radio at all.** Open <http://127.0.0.1:7380/?fixture> instead: twenty
+- **No radio at all.** Open <http://127.0.0.1:7380/?fixture> instead: fifteen
   minutes of my flat, anonymised, played back (add `&speed=10` if you are
   impatient). It needs only `server.py`, no monasd.
 
@@ -106,7 +106,7 @@ This is not legal advice, and the law differs from country to country.
 |---|---|
 | `index.html`, `server.py`, `config.toml` | The page, the little server that joins it to monasd, the radio's settings |
 | `METHOD.md` | How the numbers are made, the rule, and how often it would be wrong |
-| `fixture.json` | Twenty minutes of a census, anonymised |
+| `fixture.json` | Fifteen minutes of a census, anonymised |
 | `capture.py`, `anonymize.py` | How that was made, for your own |
 | `chance.py` | The method's number, from any recording |
 | `test/` | `node test/static.mjs` and `node test/replay.mjs index.html fixture.json`: PASS or FAIL |
