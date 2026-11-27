@@ -102,11 +102,30 @@ addEventListener("resize", resize); resize();
 
 // ---- What the API says, and what this page remembers of it ----
 let devices = [], testimony = null, gone = new Map(), links = [], polls = 0;
+
+// ?fixture plays a recording ({reference, polls: [{t, census}]}) by its own
+// clock instead of asking monasd; ?fixture=path plays another file, &speed=N
+// plays it N times faster.
+const QS = new URLSearchParams(location.search);
+const FIXTURE = QS.has("fixture") ? (QS.get("fixture") || "fixture.json") : null;
+const SPEED = Number(QS.get("speed")) || 1;
+let recording = null, recordingStart = 0;
+async function ask(route) {
+  if (!FIXTURE) return (await fetch(route, { cache: "no-store" })).json();
+  if (!recording) { recording = await (await fetch(FIXTURE, { cache: "no-store" })).json(); recordingStart = performance.now(); }
+  if (route === "/v1/provenance") return { reference: recording.reference };
+  const t = (performance.now() - recordingStart) / 1000 * SPEED;
+  let at = recording.polls[0];
+  for (const p of recording.polls) { if (p.t <= t) at = p; else break; }
+  return at.census;
+}
+// What a test reads; nothing on the page uses it.
+window.__quartz = { devices: () => devices, links: () => links };
 const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
 
 async function poll() {
   try {
-    const d = await (await fetch("/v1/net/census", { cache: "no-store" })).json();
+    const d = await ask("/v1/net/census");
     testimony = d.testimony || null;
     const now = performance.now();
     const fresh = (d.devices || []).filter(x => x.crystal_offset_ppm && x.modulation_index);
@@ -167,7 +186,7 @@ function meta() {
 
 async function provenance() {
   try {
-    const p = await (await fetch("/v1/provenance", { cache: "no-store" })).json();
+    const p = await ask("/v1/provenance");
     document.getElementById("ref").textContent = (p.reference || "not said").split(",")[0];
   } catch (e) {}
 }
@@ -180,7 +199,9 @@ const PW = () => W - G.l - G.r;
 const sx = v => G.l + (f(v) - f(view.x0)) / (f(view.x1) - f(view.x0)) * PW();
 const xv = x => fi(f(view.x0) + (x - G.l) / PW() * (f(view.x1) - f(view.x0)));
 const sy = v => H - G.b - (v - view.y0) / (view.y1 - view.y0) * (H - G.t - G.b);
-const shortName = d => (d.name || d.company || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
+// A device is called by its company alone: an advertised name is often a
+// person's ("X's iPhone"), and this page never shows one.
+const shortName = d => (d.company || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
 const kindWords = k => ({ RPA: "rotating address", NRPA: "rotating address", public: "fixed address", static: "fixed address" }[k] || k);
 
 // ---- Spotlight: hover wins, otherwise it walks the loudest ----
@@ -407,8 +428,8 @@ function spotlight(F) {
   const p = F.crystal_offset_ppm;
   if (lastF !== F.address) {
     lastF = F.address;
-    document.getElementById("sp-name").textContent = F.name || shortName(F);
-    document.getElementById("sp-kind").textContent = `${kindWords(F.kind)} · ${F.address.slice(-8)}`;
+    document.getElementById("sp-name").textContent = shortName(F);
+    document.getElementById("sp-kind").textContent = kindWords(F.kind);
   }
   document.getElementById("sp-big").textContent = (p.value > 0 ? "+" : "−") + Math.abs(p.value).toFixed(2);
   document.getElementById("sp-unit").innerHTML = `ppm, <b>±${(2 * p.sigma).toFixed(2)}</b> (2σ)`;

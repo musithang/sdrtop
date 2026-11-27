@@ -1,0 +1,989 @@
+{
+ "reference": "the radio's own crystal, not referenced, by its datasheet",
+ "polls": [
+  {
+   "t": 0.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:01",
+      "kind": "RPA",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 10.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:01",
+      "kind": "RPA",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 41,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 41,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 41,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 41,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 20.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:01",
+      "kind": "RPA",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 42,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 42,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 42,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 42,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 30.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 40.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 44,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 44,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 44,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 44,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 50.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 45,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 45,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 45,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 45,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 43,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  }
+ ]
+}
