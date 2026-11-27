@@ -6,10 +6,11 @@ you only want to run it, the [README](README.md) is enough.
 
 ## Two numbers per device
 
-Every Bluetooth LE device keeps time with a quartz crystal, and no two
-crystals are cut exactly alike. The error shows up on the air: the device
-transmits a little off the channel's nominal frequency, by an amount that is
-its own.
+A Bluetooth LE device keeps time with a quartz crystal, and crystals are not
+cut exactly alike. The error shows up on the air: the device transmits a
+little off the channel's nominal frequency. The amount differs from device to
+device, drifts slowly with temperature, and does not change when the device
+changes its address.
 
 - **Carrier offset, in ppm.** Monas measures it on every packet that passes
   its CRC and converts it to parts per million of the channel it was heard
@@ -20,8 +21,8 @@ its own.
   shrinks as a device keeps talking.
 - **Modulation index.** How far the transmitter swings its frequency for a
   bit, against the symbol rate, from the settled runs of bits in each packet
-  that has them. It is set by the radio chip and its tuning, not by the
-  crystal, which is why it separates devices the offset alone would not.
+  that has them. It depends mostly on the radio chip and how it is tuned,
+  not on the crystal, so it can separate devices the offset alone would not.
 
 Both come from monasd's census (`/v1/net/census`, in
 [the API reference](../../user_docs/api.md)); the terminal shows the same

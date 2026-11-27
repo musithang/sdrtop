@@ -8,8 +8,12 @@
 <h1 align="center">The flaw in the quartz</h1>
 
 <p align="center">
-  <b>Every Bluetooth device near you, placed by the error in its crystal.</b><br>
-  <sub>Phones change their Bluetooth address to stay anonymous. Their quartz cannot change.</sub>
+  <b>Bluetooth LE devices nearby, placed by the error in their crystal.</b><br>
+  <sub>A device can change its Bluetooth address. Its crystal's error does not change with it.</sub>
+</p>
+
+<p align="center">
+  <sub><b>For research and education only.</b> A measurement to look at and question, not a tool for tracking anyone.</sub>
 </p>
 
 <p align="center">
@@ -18,26 +22,28 @@
 
 ## What you are looking at
 
-Every Bluetooth LE device keeps time with a quartz crystal, and no two are
-cut exactly alike. Each one transmits a little off frequency, by an amount
-that is its own. The page places every device it hears by that error
-(across, in parts per million) and by how far it swings its frequency for a
-bit (up and down).
+A Bluetooth LE device keeps time with a quartz crystal, and crystals are not
+cut exactly alike, so each device transmits a little off frequency. The page
+places each device it hears well enough to measure by that error (across, in
+parts per million) and by how far it swings its frequency for a bit (up and
+down). Two devices can land close together; how close, and how often, is in
+[METHOD.md](METHOD.md).
 
-Phones change their address every few minutes so they cannot be followed.
-When an old address goes quiet and a new one starts on the same spot, the
-page draws a line: **NEW ADDRESS, SAME QUARTZ?** The question mark is
-honest. How honest is in [METHOD.md](METHOD.md), with a number.
+Many phones change their Bluetooth address every few minutes, so that the
+address alone is harder to follow. When an old address goes quiet and a new
+one starts close by on both axes, the page draws a line and asks
+**NEW ADDRESS, SAME QUARTZ?** It is a question, not an identification. When
+more than one quiet address fits, it says so: **3 CRYSTALS MATCH**.
 
 ## Try it
 
-You need a HackRF One with a 2.4 GHz antenna, and Python 3. Other radios
-that reach 2.4 GHz and run Monas's Bluetooth views (a PlutoSky R2, a
-PortaPack H4M in HackRF mode) should work too; I have only tried the HackRF.
+You need a HackRF One with a 2.4 GHz antenna, and Python 3. Other radios that
+reach 2.4 GHz and run Monas's Bluetooth views (a PlutoSky R2, a PortaPack H4M
+in HackRF mode) may work; I have only tried the HackRF.
 
-1. **Get monasd**, 0.8.2 or newer: the
-   [installer](../../README.md) with `--hackrf`, or from the root of this
-   repository, `cargo install --locked --path crates/monasd`.
+1. **Get monasd** 0.8.2 or newer. Until 0.8.2 is released, build it from the
+   root of this repository: `cargo install --locked --path crates/monasd`.
+   After that, the [installer](../../README.md) with `--hackrf` will do.
 2. **Start it** on a copy of the config here (monasd writes its settings back
    when it stops, so give it a file of its own):
 
@@ -53,8 +59,9 @@ PortaPack H4M in HackRF mode) should work too; I have only tried the HackRF.
    python3 -I server.py 7380
    ```
 
-The first dots appear within half a minute. Watch your own phone: put it
-near the antenna and wait for its address to change.
+In my flat the first dots came within seconds; give it half a minute. Then
+watch your own phone: keep it near the antenna and wait for its address to
+change, which can take a while.
 
 ## If it does not work
 
@@ -63,19 +70,20 @@ near the antenna and wait for its address to change.
   should list the radio.
 - **The radio is busy.** One program at a time: close SDR++, GQRX,
   `hackrf_transfer` or anything else that has it open.
-- **No dots.** Check the antenna. In a quiet room, more gain helps: in your
-  copy of the config, `gain = "LNA=32,VGA=30"`.
-- **Windows.** monasd runs on Linux and macOS only.
+- **Few or no dots.** Check the antenna. More gain can help: in your copy of
+  the config, `gain = "LNA=32,VGA=24"` is what the sample below was made
+  with.
+- **Windows.** monasd runs on Linux, and unofficially on macOS.
 - **No radio at all.** Open <http://127.0.0.1:7380/?fixture> instead: fifteen
   minutes of my flat, anonymised, played back (add `&speed=10` if you are
   impatient). It needs only `server.py`, no monasd.
 
 ## Privacy, and the law
 
-**What it reads.** Bluetooth LE advertising, which every device sends in the
-clear to anyone in range. The page uses two physical properties of each
-packet, its frequency error and its modulation index, and nothing of what the
-packet says.
+**What it reads.** Bluetooth LE advertising, which devices send in the clear
+to anyone in range. The page uses two physical properties of each packet,
+its frequency error and its modulation index, and nothing of what the packet
+says.
 
 **What it keeps from you.** monasd masks addresses at the source: it answers
 "Apple #12", not an address, and a name's length, not the name. The page
@@ -95,8 +103,8 @@ identifiable data online is not personal use. So:
   no serial number and no time of day);
 - do not post screenshots in which other people's devices can be told
   apart by more than their maker;
-- never use it to follow a person. Tracking someone without their consent
-  is against the law nearly everywhere, whatever the tool.
+- do not use it to follow a person. Tracking someone without their consent
+  is unlawful in many places, whatever the tool.
 
 This is not legal advice, and the law differs from country to country.
 
