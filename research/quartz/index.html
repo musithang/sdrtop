@@ -141,7 +141,7 @@ async function poll() {
     const answered = (d.devices || []).filter(x => x.crystal_offset_ppm && x.modulation_index);
     for (const x of answered) {
       const h = heard.get(x.address);
-      heard.set(x.address, { first: h ? h.first : T - x.first_seen_s, last: T - x.last_seen_s, d: x });
+      heard.set(x.address, { first: h ? h.first : T - x.first_seen_s, last: T - x.last_seen_s, d: x, born: h && h.born });
     }
     const inAnswer = new Set(answered.map(x => x.address));
     const live = a => inAnswer.has(a) && T - heard.get(a).last <= SILENT_S;
@@ -151,8 +151,12 @@ async function poll() {
       if (!live(a) && T - h.last <= MEMORY_S) gone.set(a, { ...h.d, goneAt: now - (T - h.last) * 1000 });
     for (const x of fresh) {
       const o = devices.find(q => q.address === x.address);
+      // A device that falls quiet and comes back keeps its first arrival, so
+      // a slow advertiser is not drawn arriving again at every packet.
+      const h = heard.get(x.address);
       Object.assign(x, o ? { _born: o._born, _px: o._px, _py: o._py, _pulses: o._pulses }
-                         : { _born: polls ? now : now - 5000, _px: null, _py: null, _pulses: [] });
+                         : { _born: h.born ?? (polls ? now : now - 5000), _px: null, _py: null, _pulses: [] });
+      h.born = x._born;
       const more = o ? Math.min(3, x.packets - o.packets) : 0;
       for (let i = 0; i < more; i++) x._pulses.push(now + i * 220);
       x._pulses = x._pulses.filter(t => now - t < 1400);
@@ -306,7 +310,8 @@ function frame(t) {
     ctx.strokeStyle = rgba(HA, a); ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(x, y, 9 * U, 0, 7); ctx.stroke(); ctx.setLineDash([]);
   }
-  const labelled = new Set();
+  // Where the link labels went, so the device labels keep off them.
+  const labelled = new Set(), taken = [legendBox(R)];
   for (const L of links) {
     const to = devices.find(d => d.address === L.to); if (!to || to._px == null) continue;
     const x0 = sx(L.from.crystal_offset_ppm.value), y0 = sy(L.from.modulation_index.value);
@@ -318,7 +323,22 @@ function frame(t) {
       ctx.font = fnt(18, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, a);
       if (!labelled.has(L.to)) {
         labelled.add(L.to);
-        ctx.fillText(L.k > 1 ? `${L.k} CRYSTALS MATCH` : "NEW ADDRESS, SAME QUARTZ?", Math.max(x0, to._px) + 16 * U, (y0 + to._py) / 2 - 8 * U);
+        // Right of the pair, else left of it, a line up or down if another
+        // label is there; left out rather than drawn over one (the line stays).
+        const text = L.k > 1 ? `${L.k} CRYSTALS MATCH` : "NEW ADDRESS, SAME QUARTZ?";
+        const tw = ctx.measureText(text).width, mid = (y0 + to._py) / 2 - 8 * U;
+        const fits = (x, y) => x > G.l + 4 * U && x + tw < G.l + PW() - 4 * U && y - 22 * U > G.t && y + 10 * U < B
+          && !taken.some(b => x - 6 * U < b.x + b.w && x + tw + 6 * U > b.x && y - 22 * U < b.y + b.h && y + 10 * U > b.y);
+        let at = null;
+        for (const dy of [0, -32, 32, -64, 64]) {
+          for (const x of [Math.max(x0, to._px) + 16 * U, Math.min(x0, to._px) - 44 * U - tw])
+            if (fits(x, mid + dy * U)) { at = [x, mid + dy * U]; break; }
+          if (at) break;
+        }
+        if (at) {
+          ctx.fillText(text, at[0], at[1]);
+          taken.push({ x: at[0] - 6 * U, y: at[1] - 22 * U, w: tw + 12 * U, h: 32 * U });
+        }
       }
     }
   }
@@ -372,7 +392,8 @@ function frame(t) {
 
   // Labels: one line, name and value, where they collide with nothing; the
   // spotlight's first, then the freshest and loudest, at most ten.
-  const boxes = devices.filter(d => d._px != null).map(d => ({ x: d._px - 16 * d._s, y: d._py - 16 * d._s, w: 32 * d._s, h: 32 * d._s }));
+  const boxes = devices.filter(d => d._px != null).map(d => ({ x: d._px - 16 * d._s, y: d._py - 16 * d._s, w: 32 * d._s, h: 32 * d._s }))
+    .concat(taken, [legendBox(R)]);
   const free = (x, y, w, h) => x > G.l + 4 && x + w < R - 4 && y > G.t + 4 && y + h < B - 4 &&
     !boxes.some(b => x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + h > b.y);
   const lab = [...devices].filter(d => d._px != null && d._A > 0.35)
@@ -414,11 +435,16 @@ function frame(t) {
 }
 
 // ---- What the marks mean ----
-function legend(R) {
-  const items = [["stays", "fixed address"], ["rotates", "rotating address"], ["packet", "a packet heard"]];
+const LEGEND = [["stays", "fixed address"], ["rotates", "rotating address"], ["packet", "a packet heard"]];
+// The legend's box, which the labels keep off as well.
+function legendBox(R) {
   ctx.font = fnt(17);
-  const w = Math.max(...items.map(i => ctx.measureText(i[1]).width)) + 64 * U, h = items.length * 30 * U + 18 * U;
-  const x0 = R - w - 14 * U, y0 = G.t + 14 * U;
+  const w = Math.max(...LEGEND.map(i => ctx.measureText(i[1]).width)) + 64 * U, h = LEGEND.length * 30 * U + 18 * U;
+  return { x: R - w - 14 * U, y: G.t + 14 * U, w, h };
+}
+function legend(R) {
+  const items = LEGEND;
+  const { x: x0, y: y0, w, h } = legendBox(R);
   ctx.fillStyle = "rgba(11,12,11,0.9)"; ctx.fillRect(x0, y0, w, h);
   ctx.strokeStyle = "#232623"; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
   items.forEach(([k, label], i) => {

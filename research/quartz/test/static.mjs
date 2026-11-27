@@ -43,6 +43,7 @@ const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e =>
 for (const f of walk(research)) {
   const rel = path.relative(research, f);
   if (/raw.*\.json$/.test(rel)) continue;
+  if (/\.(png|jpe?g|svg|ico)$/i.test(rel)) continue;
   const text = fs.readFileSync(f, "utf8");
   if (text.includes(EM_DASH)) fail.push(`${rel} has an em dash`);
   if (text.includes(NOTES)) fail.push(`${rel} points into the gitignored notes`);
