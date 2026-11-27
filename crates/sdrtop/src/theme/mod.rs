@@ -451,7 +451,7 @@ mod tests {
             assert!(d >= 18.0, "{name}: home only {d:.1} from the grey line");
             let d = ciede2000(t.map_land, t.map_night);
             assert!(d >= 6.0, "{name}: night only {d:.1} from day");
-            // Land by night is still land: at 20:48 UTC from Bonyhád the first
+            // Land by night is still land: at 20:48 UTC from central Europe the first
             // night colours sank into the black, the lit Americas were the only
             // land on the map, and home read as the middle of the ocean.
             let d = ciede2000(t.map_night, Color::Rgb(0, 0, 0));

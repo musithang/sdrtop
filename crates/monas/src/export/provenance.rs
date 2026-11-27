@@ -312,12 +312,12 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming();
         m.show_section(crate::signal::ft8::SECTION);
         m.radio.frequency = 7_074_000;
-        m.home.latitude = Some(46.2917);
-        m.home.longitude = Some(18.5254);
+        m.home.latitude = Some(47.4258);
+        m.home.longitude = Some(18.6026);
         m.home.callsign = Some("HA5ZZT".into());
         let joined = block(&m, 1_788_632_561, "sdrtop 0.0.0").join("\n");
         assert!(joined.contains("FT8 / 40 m, dial 7.074 MHz"), "{joined}");
-        assert!(joined.contains("JN96gh   HA5ZZT"), "{joined}");
+        assert!(joined.contains("JN97hk   HA5ZZT"), "{joined}");
         assert!(
             !joined.contains("NET /") && !joined.contains("addresses"),
             "{joined}"

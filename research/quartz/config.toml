@@ -1,0 +1,12 @@
+# The radio for the quartz page: a HackRF One at 20 Msps, its gains, and
+# Bluetooth addresses masked at the source, so monasd itself answers with a
+# session number ("Apple #12") instead of an address and a name's length
+# instead of the name.
+
+[radio]
+frequency_hz = 2426000000
+gain = "LNA=24,VGA=24"
+sample_rate = 20000000.0
+
+[monasd]
+addresses = "masked"

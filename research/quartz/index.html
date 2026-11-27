@@ -1,0 +1,443 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com> -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monas · Quartz</title>
+<link rel="icon" href="favicon.svg">
+<style>
+  /* Laid out for a 1920x1080 recording; --u is one unit of that, scaled to the window. */
+  :root { --ejfel: #0B0C0B; --foszfor: #E6E2D6; --vivo: #FFB547; --hamu: #6B7068; --racs: #232623; --u: 1px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--ejfel); color: var(--foszfor); overflow: hidden; }
+  body { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  #c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+
+  .head { position: fixed; top: calc(var(--u) * 52); left: calc(var(--u) * 60); pointer-events: none; }
+  .head h1 { font-weight: 500; font-size: calc(var(--u) * 64); letter-spacing: -0.01em; line-height: 1.05; }
+  .head p { margin-top: calc(var(--u) * 14); color: #A9A69C; font-size: calc(var(--u) * 26); }
+
+  .count { position: fixed; top: calc(var(--u) * 52); right: calc(var(--u) * 60); text-align: right; pointer-events: none; }
+  .count .n { font-weight: 300; font-size: calc(var(--u) * 76); line-height: 1; }
+  .count .l { margin-top: calc(var(--u) * 8); font-size: calc(var(--u) * 18); letter-spacing: 0.12em; color: #A9A69C; }
+  .count .stale { margin-top: calc(var(--u) * 6); font-size: calc(var(--u) * 16); letter-spacing: 0.12em; display: none; }
+
+  .spot { position: fixed; top: calc(var(--u) * 250); right: calc(var(--u) * 60); width: calc(var(--u) * 440); pointer-events: none; }
+  .spot .name { font-size: calc(var(--u) * 30); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spot .kind { margin-top: calc(var(--u) * 6); font-size: calc(var(--u) * 20); color: #A9A69C; }
+  .spot .big { margin-top: calc(var(--u) * 22); font-size: calc(var(--u) * 120); font-weight: 300; letter-spacing: -0.04em; line-height: 1; }
+  .spot .unit { margin-top: calc(var(--u) * 10); font-size: calc(var(--u) * 20); color: #A9A69C; }
+  .spot .unit b { color: var(--foszfor); font-weight: 400; }
+  .spot canvas { display: block; width: calc(var(--u) * 440); height: calc(var(--u) * 140); margin-top: calc(var(--u) * 26); }
+  .spot .verdict { margin-top: calc(var(--u) * 16); font-size: calc(var(--u) * 22); line-height: 1.45; color: #A9A69C; }
+  .spot .verdict b { color: var(--foszfor); font-weight: 400; }
+
+  .foot { position: fixed; left: calc(var(--u) * 60); bottom: calc(var(--u) * 44); max-width: calc(var(--u) * 1200);
+          font-size: calc(var(--u) * 18); line-height: 1.5; color: #A9A69C; pointer-events: none; }
+  .foot b { color: var(--foszfor); font-weight: 400; }
+  .powered { position: fixed; right: calc(var(--u) * 60); bottom: calc(var(--u) * 36); display: flex; align-items: center;
+             gap: calc(var(--u) * 16); padding: calc(var(--u) * 12) calc(var(--u) * 20) calc(var(--u) * 12) calc(var(--u) * 16);
+             border: 1px solid var(--racs); border-radius: calc(var(--u) * 6); background: var(--ejfel); }
+  .powered img { height: calc(var(--u) * 40); display: block; }
+  .powered .t { font-size: calc(var(--u) * 13); color: #A9A69C; letter-spacing: 0.18em; }
+  .powered .w { font-size: calc(var(--u) * 24); font-weight: 500; margin-top: calc(var(--u) * 2); }
+  .empty { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #A9A69C;
+           font-size: calc(var(--u) * 26); text-align: center; line-height: 1.7; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="head">
+  <h1>The flaw in the quartz</h1>
+  <p>Every Bluetooth device in the room, placed by the error of its crystal.</p>
+</div>
+
+<div class="count">
+  <div class="n" id="n">–</div>
+  <div class="l" id="nl">CRYSTALS</div>
+  <div class="stale" id="stale"></div>
+</div>
+
+<div class="spot" id="spot">
+  <div class="name" id="sp-name">–</div>
+  <div class="kind" id="sp-kind"></div>
+  <div class="big" id="sp-big">–</div>
+  <div class="unit" id="sp-unit">ppm</div>
+  <canvas id="g" width="880" height="280"></canvas>
+  <div class="verdict" id="sp-v"></div>
+</div>
+
+<div class="foot">Measured against this receiver's own clock (<b>HackRF + PortaPack TCXO</b>, <span id="ref">…</span>):
+the distances between crystals are the measurement, where zero sits is not.</div>
+
+<div class="powered">
+  <img src="mark.svg" alt="monas">
+  <div><div class="t">POWERED BY</div><div class="w">monasd</div></div>
+</div>
+<div class="empty" id="empty"></div>
+
+<script>
+const PH = [230,226,214], HA = [107,112,104], DIM = [169,166,156], VI = [255,181,71];
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
+// Local fonts only: JetBrains Mono if installed, the system's monospace otherwise.
+const FONT = "'JetBrains Mono', ui-monospace, monospace";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let W = 0, H = 0, U = 1, DPR = 1, grain = null;
+// A size in units of a 1080-line frame, as a canvas font.
+const fnt = (n, w = 400) => `${w} ${n * U}px ${FONT}`;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight; U = Math.min(H / 1080, W / 1920);
+  document.documentElement.style.setProperty("--u", U + "px");
+  cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const g = document.createElement("canvas"); g.width = g.height = 256;
+  const gx = g.getContext("2d"), im = gx.createImageData(256, 256);
+  for (let i = 0; i < im.data.length; i += 4) { const v = Math.random() * 255; im.data[i] = im.data[i+1] = im.data[i+2] = v; im.data[i+3] = 9; }
+  gx.putImageData(im, 0, 0); grain = ctx.createPattern(g, "repeat");
+}
+addEventListener("resize", resize); resize();
+
+// ---- What the API says, and what this page remembers of it ----
+let devices = [], testimony = null, gone = new Map(), links = [], polls = 0;
+const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
+
+async function poll() {
+  try {
+    const d = await (await fetch("/v1/net/census", { cache: "no-store" })).json();
+    testimony = d.testimony || null;
+    const now = performance.now();
+    const fresh = (d.devices || []).filter(x => x.crystal_offset_ppm && x.modulation_index);
+    const seen = new Set(fresh.map(x => x.address));
+    for (const o of devices) if (!seen.has(o.address)) gone.set(o.address, { ...o, goneAt: now });
+    for (const x of fresh) {
+      const o = devices.find(q => q.address === x.address);
+      Object.assign(x, o ? { _born: o._born, _px: o._px, _py: o._py, _pulses: o._pulses }
+                         : { _born: polls ? now : now - 5000, _px: null, _py: null, _pulses: [] });
+      const more = o ? Math.min(3, x.packets - o.packets) : 0;
+      for (let i = 0; i < more; i++) x._pulses.push(now + i * 220);
+      x._pulses = x._pulses.filter(t => now - t < 1400);
+      if (!o && (x.kind === "RPA" || x.kind === "NRPA")) linkToGhost(x, now);
+    }
+    for (const [k, g] of gone) if (now - g.goneAt > 600000) gone.delete(k);
+    devices = fresh; polls++;
+    fit(); meta();
+  } catch (e) { testimony = { absent: "monasd is not answering" }; meta(); }
+}
+
+const sep = (a, b) => Math.hypot(
+  (a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma),
+  (a.modulation_index.value - b.modulation_index.value) / Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma));
+function linkToGhost(x, now) {
+  for (const g of gone.values())
+    if ((g.kind === "RPA" || g.kind === "NRPA") && (g.company || "") === (x.company || "") && sep(g, x) <= 2)
+      links.push({ from: g, to: x.address, at: now });
+  if (links.length > 40) links = links.slice(-40);
+}
+
+function fit() {
+  if (!devices.length) return;
+  let x0 = 0, x1 = 0, y0 = 1, y1 = 0;
+  for (const d of devices) {
+    const p = d.crystal_offset_ppm, h = d.modulation_index;
+    x0 = Math.min(x0, p.value - 2 * p.sigma); x1 = Math.max(x1, p.value + 2 * p.sigma);
+    if (h.sigma < 0.004) { y0 = Math.min(y0, h.value - 2 * h.sigma); y1 = Math.max(y1, h.value + 2 * h.sigma); }
+  }
+  if (y1 < y0) { y0 = 0.495; y1 = 0.505; }
+  const mid = (y0 + y1) / 2, half = Math.max(0.005, (y1 - y0) / 2);
+  y0 = mid - half; y1 = mid + half;
+  const px = Math.max(0.6, Math.max(-x0, x1) * 0.12), py = half * 0.25;
+  Object.assign(target, { x0: x0 - px, x1: x1 + px, y0: y0 - py, y1: y1 + py });
+}
+
+function meta() {
+  const n = devices.length, rot = devices.filter(x => x.kind === "RPA" || x.kind === "NRPA").length;
+  document.getElementById("n").textContent = n;
+  document.getElementById("nl").textContent = `CRYSTALS · ${rot} ROTATING`;
+  const st = document.getElementById("stale");
+  const tags = [testimony?.stale && "[STALE]", testimony?.feed_loss && "[FEED LOSS]"].filter(Boolean);
+  st.style.display = tags.length ? "block" : "none"; st.textContent = tags.join(" ");
+  const em = document.getElementById("empty");
+  if (testimony && testimony.absent) { em.style.display = "flex"; em.textContent = testimony.absent; }
+  else if (!n) { em.style.display = "flex"; em.innerHTML = "No transmitter heard yet."; }
+  else em.style.display = "none";
+}
+
+async function provenance() {
+  try {
+    const p = await (await fetch("/v1/provenance", { cache: "no-store" })).json();
+    document.getElementById("ref").textContent = (p.reference || "not said").split(",")[0];
+  } catch (e) {}
+}
+
+// ---- Geometry, in units ----
+const M = () => ({ l: 150 * U, r: W - 1360 * U - 150 * U < 0 ? 560 * U : W - (150 + 1210) * U, t: 268 * U, b: 330 * U });
+const K = 1.0, f = v => Math.asinh(v / K), fi = u => K * Math.sinh(u);
+let G;
+const PW = () => W - G.l - G.r;
+const sx = v => G.l + (f(v) - f(view.x0)) / (f(view.x1) - f(view.x0)) * PW();
+const xv = x => fi(f(view.x0) + (x - G.l) / PW() * (f(view.x1) - f(view.x0)));
+const sy = v => H - G.b - (v - view.y0) / (view.y1 - view.y0) * (H - G.t - G.b);
+const shortName = d => (d.name || d.company || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
+const kindWords = k => ({ RPA: "rotating address", NRPA: "rotating address", public: "fixed address", static: "fixed address" }[k] || k);
+
+// ---- Spotlight: hover wins, otherwise it walks the loudest ----
+let mouse = { x: -1, y: -1 }, hover = null, focus = null, walkAt = 0, walkI = 0, pinned = null;
+addEventListener("click", () => { pinned = hover ? (pinned === hover.address ? null : hover.address) : null; });
+addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+addEventListener("mouseleave", () => { mouse.x = -1; });
+function chooseFocus(now) {
+  if (pinned && devices.some(d => d.address === pinned)) { focus = pinned; walkAt = now; return; }
+  if (hover) { focus = hover.address; walkAt = now; return; }
+  const live = [...devices].filter(d => d.last_seen_s < 20).sort((a, b) => b.packets - a.packets).slice(0, 12);
+  if (!live.length) { focus = null; return; }
+  if (!focus || !devices.some(d => d.address === focus) || now - walkAt > 6000) {
+    walkI = (walkI + 1) % live.length; focus = live[walkI].address; walkAt = now;
+  }
+}
+
+// ---- The frame ----
+function frame(t) {
+  const now = performance.now();
+  G = { l: 150 * U, r: 590 * U, t: 270 * U, b: 340 * U };
+  for (const k of ["x0", "x1", "y0", "y1"]) view[k] += (target[k] - view[k]) * 0.06;
+  ctx.fillStyle = "#0B0C0B"; ctx.fillRect(0, 0, W, H);
+  const B = H - G.b, R = W - G.r;
+
+  ctx.fillStyle = "rgba(20,21,19,1)";
+  const yb0 = Math.max(G.t, sy(0.55)), yb1 = Math.min(B, sy(0.45));
+  ctx.fillRect(G.l, yb0, PW(), yb1 - yb0);
+  ctx.lineWidth = 1; ctx.font = fnt(18);
+  for (const v of [-100,-50,-20,-10,-5,-2,-1,0,1,2,5,10,20,50,100]) {
+    if (v < view.x0 || v > view.x1) continue;
+    const x = Math.round(sx(v)) + 0.5;
+    ctx.strokeStyle = "#232623"; ctx.beginPath(); ctx.moveTo(x, G.t); ctx.lineTo(x, B); ctx.stroke();
+    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "center"; ctx.fillText((v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v), x, B + 28 * U);
+  }
+  const ys = (view.y1 - view.y0) > 0.05 ? 0.01 : (view.y1 - view.y0) > 0.02 ? 0.005 : 0.002;
+  ctx.font = fnt(16);
+  for (let v = Math.ceil(view.y0 / ys) * ys; v <= view.y1 + 1e-9; v += ys) {
+    const y = Math.round(sy(v)) + 0.5;
+    ctx.strokeStyle = "#232623"; ctx.beginPath(); ctx.moveTo(G.l, y); ctx.lineTo(R, y); ctx.stroke();
+    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "right"; ctx.fillText(v.toFixed(3), G.l - 14 * U, y + 6 * U);
+  }
+  ctx.strokeStyle = "#232623"; ctx.strokeRect(G.l + 0.5, G.t + 0.5, PW() - 1, B - G.t - 1);
+  const z = Math.round(sx(0)) + 0.5;
+  ctx.strokeStyle = rgba(PH, 0.55); ctx.setLineDash([2, 5]);
+  ctx.beginPath(); ctx.moveTo(z, G.t - 12 * U); ctx.lineTo(z, B + 170 * U); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = rgba(PH, 0.9); ctx.textAlign = "center"; ctx.font = fnt(18, 500);
+  ctx.fillText("THIS RECEIVER'S CLOCK", z, G.t - 20 * U);
+  ctx.save(); ctx.translate(G.l - 100 * U, B); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left";
+  ctx.font = fnt(16); ctx.fillStyle = rgba(DIM, 1); ctx.fillText("MODULATION INDEX h →", 0, 0); ctx.restore();
+
+  hover = null; let best = 1e9;
+  for (const d of devices) {
+    if (d._px == null) continue;
+    const dist = Math.hypot(mouse.x - d._px, mouse.y - d._py);
+    if (mouse.x >= 0 && dist < 40 * U && dist < best) { best = dist; hover = d; }
+  }
+  cv.style.cursor = hover ? "pointer" : "default";
+  chooseFocus(now);
+  const F = devices.find(d => d.address === focus);
+
+  ctx.save(); ctx.beginPath(); ctx.rect(G.l, G.t - 40 * U, PW(), B - G.t + 40 * U); ctx.clip();
+
+  for (const g of gone.values()) {
+    const a = 0.5 * (1 - (now - g.goneAt) / 600000); if (a <= 0) continue;
+    const x = sx(g.crystal_offset_ppm.value), y = sy(g.modulation_index.value);
+    ctx.strokeStyle = rgba(HA, a); ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(x, y, 9 * U, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  }
+  for (const L of links) {
+    const to = devices.find(d => d.address === L.to); if (!to || to._px == null) continue;
+    const x0 = sx(L.from.crystal_offset_ppm.value), y0 = sy(L.from.modulation_index.value);
+    const a = Math.max(0, 1 - (now - L.at) / 90000);
+    ctx.strokeStyle = rgba(PH, 0.15 + 0.45 * a); ctx.setLineDash([4, 5]); ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(to._px, to._py); ctx.stroke(); ctx.setLineDash([]);
+    if (a > 0) {
+      ctx.fillStyle = rgba(VI, a); ctx.beginPath(); ctx.arc(x0, y0, 4 * U, 0, 7); ctx.fill();
+      ctx.font = fnt(18, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, a);
+      ctx.fillText("NEW ADDRESS, SAME QUARTZ?", Math.max(x0, to._px) + 16 * U, (y0 + to._py) / 2 - 8 * U);
+    }
+  }
+
+  const order = [...devices].sort((a, b) => b.last_seen_s - a.last_seen_s);
+  for (const d of order) {
+    const p = d.crystal_offset_ppm, h = d.modulation_index;
+    const x = sx(p.value), y = sy(h.value);
+    d._px = d._px == null ? x : d._px + (x - d._px) * 0.12;
+    d._py = d._py == null ? y : d._py + (y - d._py) * 0.12;
+    const X = d._px, Y = d._py, isF = d === F;
+    const born = Math.min(1, (now - d._born) / 1200);
+    const A = Math.max(0.3, 1 - d.last_seen_s / 120) * born * (F && !isF ? 0.8 : 1);
+    const rx = Math.max(2, Math.abs(sx(p.value + 2 * p.sigma) - sx(p.value)));
+    const ry = Math.max(2, Math.min(200 * U, Math.abs(sy(h.value + 2 * h.sigma) - sy(h.value))));
+    if (born < 1) {
+      const k = 1 - Math.pow(1 - born, 3);
+      ctx.strokeStyle = rgba(PH, 0.5 * (1 - born)); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(G.l + (X - G.l) * k, Y); ctx.lineTo(X, Y);
+      ctx.moveTo(X, G.t + (Y - G.t) * k); ctx.lineTo(X, Y); ctx.stroke();
+    }
+    if (isF) {
+      const cg = ctx.createRadialGradient(X, Y, 0, X, Y, Math.max(rx, ry));
+      cg.addColorStop(0, rgba(PH, 0.08)); cg.addColorStop(1, rgba(PH, 0));
+      ctx.fillStyle = cg; ctx.beginPath(); ctx.ellipse(X, Y, rx, ry, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = rgba(PH, 0.6); ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(X, Y, rx, ry, 0, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    }
+    const s = (1 + Math.max(0, Math.min(1, ((d.best_snr_db || 10) - 6) / 30)) * 0.8) * U;
+    const dot = 5 * s, rotating = d.kind === "RPA" || d.kind === "NRPA";
+    for (const pt of d._pulses) {
+      const k = (now - pt) / 1200; if (k < 0 || k >= 1) continue;
+      const sp = 0.66, e = 1 - Math.pow(1 - k, 2);
+      ctx.lineCap = "butt"; ctx.lineWidth = 2.4 * U * (1 - k);
+      for (const r of [dot + 6 * U + e * 26 * U, dot + 14 * U + e * 44 * U]) {
+        ctx.strokeStyle = rgba(PH, 0.75 * (1 - k) * A);
+        ctx.beginPath(); ctx.arc(X, Y, r, -sp, sp); ctx.stroke();
+        ctx.beginPath(); ctx.arc(X, Y, r, Math.PI - sp, Math.PI + sp); ctx.stroke();
+      }
+    }
+    if (isF || d === hover) {
+      ctx.strokeStyle = rgba(PH, isF ? 0.85 : 0.5); ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(X, Y, dot + 10 * U, 0, 7); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(11,12,11,0.95)"; ctx.beginPath(); ctx.arc(X, Y, dot + 2.5 * U, 0, 7); ctx.fill();
+    const col = isF ? rgba(VI, 1) : rgba(PH, A);
+    if (rotating) { ctx.strokeStyle = col; ctx.lineWidth = 2.4 * U; ctx.beginPath(); ctx.arc(X, Y, dot - 1.2 * U, 0, 7); ctx.stroke(); }
+    else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X, Y, dot, 0, 7); ctx.fill(); }
+    d._A = A; d._s = s;
+  }
+
+  // Labels: one line, name and value, where they collide with nothing; the
+  // spotlight's first, then the freshest and loudest, at most ten.
+  const boxes = devices.filter(d => d._px != null).map(d => ({ x: d._px - 16 * d._s, y: d._py - 16 * d._s, w: 32 * d._s, h: 32 * d._s }));
+  const free = (x, y, w, h) => x > G.l + 4 && x + w < R - 4 && y > G.t + 4 && y + h < B - 4 &&
+    !boxes.some(b => x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + h > b.y);
+  const lab = [...devices].filter(d => d._px != null && d._A > 0.35)
+    .sort((a, b) => (a === F ? -1 : b === F ? 1 : 0) || (a.last_seen_s - b.last_seen_s) || (b.packets - a.packets));
+  let shown = 0;
+  for (const d of lab) {
+    if (shown >= 10) break;
+    const name = shortName(d).toUpperCase().slice(0, 14), p = d.crystal_offset_ppm;
+    const val = (p.value > 0 ? "+" : "−") + Math.abs(p.value).toFixed(2);
+    ctx.font = fnt(19, 500);
+    const nw = ctx.measureText(name + "  ").width;
+    ctx.font = fnt(19);
+    const w = nw + ctx.measureText(val).width + 4 * U, hh = 26 * U;
+    let at = null;
+    for (const [dx, dy] of [[24, -34], [24, 10], [-24, -34], [-24, 10], [34, -58], [-34, -58], [34, 34], [-34, 34]]) {
+      const x = dx > 0 ? d._px + dx * U : d._px + dx * U - w, y = d._py + dy * U;
+      if (free(x, y, w, hh)) { at = [x, y]; break; }
+    }
+    if (!at) continue;
+    shown++;
+    boxes.push({ x: at[0] - 6 * U, y: at[1] - 6 * U, w: w + 12 * U, h: hh + 12 * U });
+    const A = d._A, isF = d === F, right = at[0] > d._px;
+    ctx.strokeStyle = rgba(PH, (isF ? 0.8 : 0.35) * A); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(d._px + (right ? 12 : -12) * U, d._py); ctx.lineTo(right ? at[0] - 4 * U : at[0] + w + 4 * U, at[1] + 13 * U); ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.fillStyle = rgba(PH, (isF ? 1 : 0.9) * A); ctx.font = fnt(19, 500); ctx.fillText(name, at[0], at[1] + 19 * U);
+    ctx.fillStyle = rgba(isF ? VI : PH, (isF ? 1 : 0.75) * A); ctx.font = fnt(19); ctx.fillText(val, at[0] + nw, at[1] + 19 * U);
+  }
+  ctx.restore();
+  legend(R);
+  spectrum(F, B, R);
+
+  ctx.fillStyle = grain; ctx.fillRect(0, 0, W, H);
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.4, W / 2, H / 2, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.4)");
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  spotlight(F);
+  next(frame);
+}
+
+// ---- What the marks mean ----
+function legend(R) {
+  const items = [["stays", "fixed address"], ["rotates", "rotating address"], ["packet", "a packet heard"]];
+  ctx.font = fnt(17);
+  const w = Math.max(...items.map(i => ctx.measureText(i[1]).width)) + 64 * U, h = items.length * 30 * U + 18 * U;
+  const x0 = R - w - 14 * U, y0 = G.t + 14 * U;
+  ctx.fillStyle = "rgba(11,12,11,0.9)"; ctx.fillRect(x0, y0, w, h);
+  ctx.strokeStyle = "#232623"; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+  items.forEach(([k, label], i) => {
+    const cx = x0 + 26 * U, cy = y0 + 24 * U + i * 30 * U;
+    if (k === "stays") { ctx.fillStyle = rgba(PH, 1); ctx.beginPath(); ctx.arc(cx, cy, 6 * U, 0, 7); ctx.fill(); }
+    if (k === "rotates") { ctx.strokeStyle = rgba(PH, 1); ctx.lineWidth = 2.4 * U; ctx.beginPath(); ctx.arc(cx, cy, 5 * U, 0, 7); ctx.stroke(); }
+    if (k === "packet") {
+      ctx.fillStyle = rgba(PH, 1); ctx.beginPath(); ctx.arc(cx, cy, 3 * U, 0, 7); ctx.fill();
+      ctx.strokeStyle = rgba(PH, 0.85); ctx.lineWidth = 1.6 * U;
+      for (const r of [8, 13]) { ctx.beginPath(); ctx.arc(cx, cy, r * U, -0.66, 0.66); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, r * U, Math.PI - 0.66, Math.PI + 0.66); ctx.stroke(); }
+    }
+    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "left"; ctx.fillText(label, cx + 26 * U, cy + 6 * U);
+  });
+}
+
+// ---- The quartz spectrum: each crystal a peak as wide as its uncertainty ----
+function spectrum(F, B, R) {
+  const top = B + 78 * U, hgt = 120 * U, base = top + hgt;
+  ctx.font = fnt(17); ctx.textAlign = "left"; ctx.fillStyle = rgba(DIM, 1);
+  ctx.fillText("EACH CRYSTAL A PEAK, AS WIDE AS ITS UNCERTAINTY", G.l, top - 12 * U);
+  ctx.textAlign = "right"; ctx.fillText("PPM FROM THIS RECEIVER'S CLOCK →", R, top - 12 * U); ctx.textAlign = "left";
+  ctx.strokeStyle = "#232623"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.l, base + 0.5); ctx.lineTo(R, base + 0.5); ctx.stroke();
+  const n = Math.floor(R - G.l), sum = new Float32Array(n);
+  const ax = new Float64Array(n + 1);
+  for (let i = 0; i <= n; i++) ax[i] = xv(G.l + i);
+  for (const d of devices.filter(d => d._px != null)) {
+    const p = d.crystal_offset_ppm, c = Math.round(sx(p.value) - G.l);
+    const pw = Math.abs(ax[Math.min(n, Math.max(1, c + 1))] - ax[Math.min(n - 1, Math.max(0, c))]);
+    const sg = Math.max(p.sigma, pw * 1.5);
+    const i0 = Math.max(0, Math.floor(sx(p.value - 6 * sg) - G.l) - 1), i1 = Math.min(n - 1, Math.ceil(sx(p.value + 6 * sg) - G.l) + 1);
+    if (i1 < 0 || i0 > n - 1) continue;
+    const isF = d === F;
+    ctx.beginPath(); ctx.moveTo(G.l + i0, base);
+    for (let i = i0; i <= i1; i++) { const zz = (ax[i] - p.value) / sg, y = Math.exp(-0.5 * zz * zz); sum[i] += y; ctx.lineTo(G.l + i, base - y * (hgt - 8 * U)); }
+    ctx.lineTo(G.l + i1, base); ctx.closePath();
+    ctx.fillStyle = rgba(isF ? VI : PH, isF ? 0.2 : 0.05 * d._A); ctx.fill();
+    ctx.strokeStyle = rgba(isF ? VI : PH, isF ? 1 : 0.45 * d._A); ctx.lineWidth = (isF ? 2.4 : 1.4) * U; ctx.stroke();
+  }
+}
+
+// ---- The spotlight panel ----
+const g = document.getElementById("g"), gc = g.getContext("2d");
+let lastF = null;
+function spotlight(F) {
+  if (!F) return;
+  const p = F.crystal_offset_ppm;
+  if (lastF !== F.address) {
+    lastF = F.address;
+    document.getElementById("sp-name").textContent = F.name || shortName(F);
+    document.getElementById("sp-kind").textContent = `${kindWords(F.kind)} · ${F.address.slice(-8)}`;
+  }
+  document.getElementById("sp-big").textContent = (p.value > 0 ? "+" : "−") + Math.abs(p.value).toFixed(2);
+  document.getElementById("sp-unit").innerHTML = `ppm, <b>±${(2 * p.sigma).toFixed(2)}</b> (2σ)`;
+  const Wg = 880, Hg = 280; gc.clearRect(0, 0, Wg, Hg);
+  const others = devices.filter(d => d !== F).map(d => ({ d, s: sep(F, d) })).sort((a, b) => a.s - b.s);
+  const span = Math.max(8 * p.sigma, 0.25, others[0] ? Math.abs(others[0].d.crystal_offset_ppm.value - p.value) * 1.6 : 0);
+  const peak = (q, col, lw, fill) => {
+    gc.beginPath(); gc.moveTo(0, Hg - 3);
+    for (let i = 0; i <= Wg; i += 2) {
+      const v = p.value - span + i / Wg * 2 * span, zz = (v - q.value) / Math.max(q.sigma, span / 300);
+      gc.lineTo(i, Hg - 3 - Math.exp(-0.5 * zz * zz) * (Hg - 20));
+    }
+    gc.lineTo(Wg, Hg - 3);
+    if (fill) { gc.fillStyle = fill; gc.fill(); }
+    gc.strokeStyle = col; gc.lineWidth = lw; gc.stroke();
+  };
+  for (const o of others.slice(0, 6)) peak(o.d.crystal_offset_ppm, rgba(DIM, 0.8), 3, null);
+  peak(p, rgba(VI, 1), 5, rgba(VI, 0.12));
+  gc.strokeStyle = "#3a3d39"; gc.lineWidth = 3; gc.beginPath(); gc.moveTo(0, Hg - 1.5); gc.lineTo(Wg, Hg - 1.5); gc.stroke();
+  const near = others[0];
+  document.getElementById("sp-v").innerHTML = !near ? "Alone in this room's quartz." :
+    near.s <= 2 ? `Nearest crystal ${near.s.toFixed(1)}σ away: <b>could be the same device.</b>` :
+    `Nearest crystal <b>${near.s.toFixed(0)}σ</b> away: <b>told apart by its quartz alone.</b>`;
+}
+
+const next = location.search.includes("shot") ? (fn => setTimeout(() => fn(performance.now()), 16)) : requestAnimationFrame;
+poll(); provenance();
+setInterval(poll, 1000); setInterval(provenance, 5000);
+next(frame);
+</script>
+</body>
+</html>

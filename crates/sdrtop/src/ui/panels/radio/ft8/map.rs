@@ -1168,8 +1168,8 @@ pub(crate) mod tests {
         let mut out = String::from("<div class=t>");
         let night = {
             let mut m = evening();
-            m.home.latitude = Some(46.2917);
-            m.home.longitude = Some(18.5254);
+            m.home.latitude = Some(47.4258);
+            m.home.longitude = Some(18.6026);
             m.ft8.hearing = Some(1_793_393_280.0); // 2026-10-30 20:48 UTC
             m
         };
@@ -1189,7 +1189,7 @@ pub(crate) mod tests {
         for (title, m) in [
             ("best DX, long path to JA1VQD (log, night)", worked),
             ("long path to EA8ZQ (3000 km)", worked3000),
-            ("bonyhad night", night),
+            ("hatvanpuszta night", night),
             ("log", evening()),
             ("3000", {
                 let mut m = evening();
