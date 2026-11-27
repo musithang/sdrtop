@@ -584,6 +584,76 @@ mod tests {
         assert_eq!(m.floor.last_restart.as_deref(), Some("reset by command"));
     }
 
+    /// **What it costs**, as a share of one core per second of input: the
+    /// frames (decode, window, transform, sums) and the products published
+    /// after each frame (floor, lines, grids, spread, cells), separately,
+    /// with the memory the worker holds. Thirty seconds of noise with a
+    /// 60-tooth comb at +6 dB. Run in a release build:
+    /// `cargo test -p monas --release floor_costs -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn floor_costs_this_much_per_second_of_input() {
+        use crate::signal::floor::testing::comb;
+        for (rate, bin_hz) in [
+            (192_000.0, 1.0),
+            (192_000.0, 0.25),
+            (768_000.0, 1.0),
+            (768_000.0, 0.25),
+        ] {
+            let setting = FloorSetting { bin_hz, zoom: None };
+            let d = derive(&setting, rate).unwrap();
+            let mut run = Run::new(d.clone(), CENTRE);
+            let n = rate as usize;
+            let sigma = 0.01f32;
+            let amp = (sigma as f64 * (1.5 * 4.0 / n as f64).sqrt()) as f32;
+            // Teeth on whole hertz repeat every second: one second of comb.
+            let mut phases = vec![0.0; 60];
+            let teeth = comb(rate, 1000.0, -30_000.0, amp, 0, n, &mut phases);
+            let geometry = int32_geometry();
+            let mut iq = Vec::new();
+            let mut seed = 5u64;
+            let (mut t_frames, mut t_products, mut published) = (0.0, 0.0, 0u32);
+            let seconds = 30;
+            for _ in 0..seconds {
+                let bytes = int32_bytes(&add(noise(n, sigma, &mut seed), &teeth), 8_388_608.0);
+                for chunk in bytes.chunks(16_384 * 8) {
+                    let started = Instant::now();
+                    crate::signal::demod::decode(chunk, geometry, usize::MAX, &mut iq);
+                    let Run { frames, sums, .. } = &mut run;
+                    let done = frames.push(&iq, false, sums);
+                    t_frames += started.elapsed().as_secs_f64();
+                    if done > 0 {
+                        let started = Instant::now();
+                        let p = products(&mut run, None);
+                        t_products += started.elapsed().as_secs_f64();
+                        published += 1;
+                        std::hint::black_box(p.lines.len());
+                    }
+                }
+            }
+            let p = products(&mut run, None);
+            // What the worker holds: the two sums, first_over, the frame's
+            // window, its samples and the transform's scratch; and, while the
+            // products are made, mean, floor and x.
+            let held = d.bins * (8 + 8 + 4) + d.frame_len * (4 + 8 + 8);
+            let transient = d.bins * 3 * 8;
+            eprintln!(
+                "COST {:>7.0} S/s at {:>4} Hz: frames {:.2} %, products {:.2} % of one core \
+                 ({:.1} ms each, {published} published); {} lines, {} grids; \
+                 holds {:.1} MB, {:.1} MB more while publishing",
+                rate,
+                bin_hz,
+                100.0 * t_frames / seconds as f64,
+                100.0 * t_products / seconds as f64,
+                1000.0 * t_products / published.max(1) as f64,
+                p.lines.len(),
+                p.grids.len(),
+                held as f64 / 1e6,
+                transient as f64 / 1e6,
+            );
+        }
+    }
+
     /// A zoom the command accepted, left outside the band by a later retune,
     /// is answered as that rather than dropped in silence.
     #[test]
