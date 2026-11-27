@@ -20,7 +20,7 @@ const fx = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const fail = [];
 
 // Run the page's script in a fresh context for `seconds` of simulated time.
-function run({ search, fetchImpl, seconds }) {
+function run({ search, fetchImpl, seconds, during = [] }) {
   const drawn = [];
   let now = 0;
   const stub = new Proxy(function () {}, {
@@ -44,6 +44,7 @@ function run({ search, fetchImpl, seconds }) {
     return e;
   };
   const els = {};
+  const listeners = {};
   const timers = [];
   let frames = [];
   let fetches = 0;
@@ -55,7 +56,7 @@ function run({ search, fetchImpl, seconds }) {
       documentElement: { style: { setProperty() {} } },
     },
     innerWidth: 1920, innerHeight: 1080, devicePixelRatio: 1,
-    addEventListener() {},
+    addEventListener: (type, fn) => (listeners[type] ??= []).push(fn),
     location: { search },
     performance: { now: () => now },
     setInterval: (fn, ms) => timers.push({ fn, ms, next: ms }),
@@ -78,7 +79,11 @@ function run({ search, fetchImpl, seconds }) {
   };
   return (async () => {
     await new Promise(r => setImmediate(r));
-    while (now < seconds * 1000) { now += 250; await step(); }
+    while (now < seconds * 1000) {
+      now += 250;
+      for (const d of during) if (!d.done && now >= d.at) { d.done = true; d.fn(context.__quartz, listeners, drawn); }
+      await step();
+    }
     return { drawn, els, fetches, q: context.__quartz };
   })();
 }
@@ -182,6 +187,33 @@ if (q && q.label) {
     if (!q.label(d).toUpperCase().startsWith(v.toUpperCase().slice(0, 10))) fail.push(`${JSON.stringify(v)} labelled ${JSON.stringify(q.label(d))}`);
   }
 } else if (q) fail.push("window.__quartz.label is not there");
+
+// 4c. A moment holds the stage only until the viewer looks elsewhere:
+// pointing at another device ends it, and the link keeps its small label
+// beside the point.
+if (counts.size && q && !q.moment) fail.push("window.__quartz.moment is not there");
+if (counts.size && q && q.moment) {
+  let started = -1, checked = false, ended = null, labelAfter = false, mark = 0;
+  const probe = [];
+  for (let at = 1000; at < span * 1000; at += 1000) probe.push({ at, fn: (Q, L, drawn) => {
+    if (started < 0 && Q.moment()) {
+      started = at;
+      const other = Q.devices().find(d => d.address !== Q.moment().to && d._px != null);
+      if (other) for (const f of L.mousemove || []) f({ clientX: other._px, clientY: other._py });
+      mark = drawn.length;
+    } else if (started > 0 && !checked && at >= started + 2000) {
+      checked = true;
+      ended = Q.moment();
+      labelAfter = drawn.slice(mark).some(t => t === "NEW ADDRESS, SAME QUARTZ?" || /CRYSTALS MATCH$/.test(t));
+    }
+  } });
+  await run({ search: `?fixture=${path.relative(base, path.resolve(fixturePath))}`, fetchImpl: serveFixture, seconds: span, during: probe });
+  if (started < 0) fail.push("no moment began");
+  else {
+    if (ended) fail.push("pointing at another device did not end the moment");
+    if (!labelAfter) fail.push("after the moment the link lost its label beside the point");
+  }
+}
 
 // 5. A monasd that does not answer is said so, and the page keeps asking.
 const dead = await run({ search: "", fetchImpl: async () => { throw new Error("refused"); }, seconds: 6 });

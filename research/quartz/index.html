@@ -137,7 +137,7 @@ async function ask(route) {
   return at.census;
 }
 // What a test reads; nothing on the page uses it.
-window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d) };
+window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()) };
 const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
 
 // When each address was first and last heard, on the stream's clock (the
@@ -331,6 +331,9 @@ function frame(t) {
   chooseFocus(now);
   // While a moment holds the stage, everything but its two addresses steps
   // back, and the new address is the one in focus.
+  // Looking elsewhere ends it: pointing at or pinning another device hands
+  // the stage back, and the link keeps its small label beside the point.
+  if (moment && ((hover && hover.address !== moment.to) || (pinned && pinned !== moment.to))) moment = null;
   const M = activeMoment(now);
   const F = devices.find(d => d.address === (M ? M.to : focus));
 
