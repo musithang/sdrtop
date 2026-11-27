@@ -109,28 +109,46 @@ let devices = [], testimony = null, gone = new Map(), links = [], polls = 0;
 const QS = new URLSearchParams(location.search);
 const FIXTURE = QS.has("fixture") ? (QS.get("fixture") || "fixture.json") : null;
 const SPEED = Number(QS.get("speed")) || 1;
-let recording = null, recordingStart = 0;
+let recording = null, recordingStart = 0, askT = 0;
 async function ask(route) {
-  if (!FIXTURE) return (await fetch(route, { cache: "no-store" })).json();
+  if (!FIXTURE) { askT = performance.now() / 1000; return (await fetch(route, { cache: "no-store" })).json(); }
   if (!recording) { recording = await (await fetch(FIXTURE, { cache: "no-store" })).json(); recordingStart = performance.now(); }
   if (route === "/v1/provenance") return { reference: recording.reference };
   const t = (performance.now() - recordingStart) / 1000 * SPEED;
   let at = recording.polls[0];
   for (const p of recording.polls) { if (p.t <= t) at = p; else break; }
+  askT = at.t;
   return at.census;
 }
 // What a test reads; nothing on the page uses it.
-window.__quartz = { devices: () => devices, links: () => links };
+window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d) };
 const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
+
+// When each address was first and last heard, on the stream's clock (the
+// census gives both as ages in seconds), and its latest reading.
+const heard = new Map();
+// A rotating address counts as gone once silent this long; a new one is its
+// successor only if it started within SWAP_S of the old one falling silent;
+// a gone address is remembered for MEMORY_S.
+const SILENT_S = 20, SWAP_S = 30, MEMORY_S = 600;
+const rotating = d => d.kind === "RPA" || d.kind === "NRPA";
 
 async function poll() {
   try {
     const d = await ask("/v1/net/census");
     testimony = d.testimony || null;
-    const now = performance.now();
-    const fresh = (d.devices || []).filter(x => x.crystal_offset_ppm && x.modulation_index);
-    const seen = new Set(fresh.map(x => x.address));
-    for (const o of devices) if (!seen.has(o.address)) gone.set(o.address, { ...o, goneAt: now });
+    const now = performance.now(), T = askT;
+    const answered = (d.devices || []).filter(x => x.crystal_offset_ppm && x.modulation_index);
+    for (const x of answered) {
+      const h = heard.get(x.address);
+      heard.set(x.address, { first: h ? h.first : T - x.first_seen_s, last: T - x.last_seen_s, d: x });
+    }
+    const inAnswer = new Set(answered.map(x => x.address));
+    const live = a => inAnswer.has(a) && T - heard.get(a).last <= SILENT_S;
+    const fresh = answered.filter(x => live(x.address));
+    gone = new Map();
+    for (const [a, h] of heard)
+      if (!live(a) && T - h.last <= MEMORY_S) gone.set(a, { ...h.d, goneAt: now - (T - h.last) * 1000 });
     for (const x of fresh) {
       const o = devices.find(q => q.address === x.address);
       Object.assign(x, o ? { _born: o._born, _px: o._px, _py: o._py, _pulses: o._pulses }
@@ -138,10 +156,9 @@ async function poll() {
       const more = o ? Math.min(3, x.packets - o.packets) : 0;
       for (let i = 0; i < more; i++) x._pulses.push(now + i * 220);
       x._pulses = x._pulses.filter(t => now - t < 1400);
-      if (!o && (x.kind === "RPA" || x.kind === "NRPA")) linkToGhost(x, now);
     }
-    for (const [k, g] of gone) if (now - g.goneAt > 600000) gone.delete(k);
     devices = fresh; polls++;
+    relink(T, now, live);
     fit(); meta();
   } catch (e) { testimony = { absent: "monasd is not answering" }; meta(); }
 }
@@ -149,11 +166,22 @@ async function poll() {
 const sep = (a, b) => Math.hypot(
   (a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma),
   (a.modulation_index.value - b.modulation_index.value) / Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma));
-function linkToGhost(x, now) {
-  for (const g of gone.values())
-    if ((g.kind === "RPA" || g.kind === "NRPA") && (g.company || "") === (x.company || "") && sep(g, x) <= 2)
-      links.push({ from: g, to: x.address, at: now });
-  if (links.length > 40) links = links.slice(-40);
+// Every new rotating address with the silent ones it could have replaced:
+// the same company, started within SWAP_S of the old one's last packet,
+// within 2 combined sigma on both axes. k is how many qualify: one is drawn
+// as NEW ADDRESS, SAME QUARTZ?, several as "k CRYSTALS MATCH".
+function relink(T, now, live) {
+  const before = new Map(links.map(L => [L.from.address + ">" + L.to, L.at]));
+  const next = [];
+  for (const [xa, x] of heard) {
+    if (!rotating(x.d) || !live(xa) || x.first < T - MEMORY_S) continue;
+    const c = [];
+    for (const [ga, g] of heard)
+      if (ga !== xa && rotating(g.d) && !live(ga) && (g.d.company || "") === (x.d.company || "")
+          && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2) c.push(g.d);
+    for (const g of c) next.push({ from: g, to: xa, k: c.length, at: before.get(g.address + ">" + xa) ?? now });
+  }
+  links = next.slice(-40);
 }
 
 function fit() {
@@ -201,7 +229,14 @@ const xv = x => fi(f(view.x0) + (x - G.l) / PW() * (f(view.x1) - f(view.x0)));
 const sy = v => H - G.b - (v - view.y0) / (view.y1 - view.y0) * (H - G.t - G.b);
 // A device is called by its company alone: an advertised name is often a
 // person's ("X's iPhone"), and this page never shows one.
-const shortName = d => (d.company || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
+// The vendor a masked or registrant-form address names ("GREE ... #13",
+// "Apple·mfr #4", "Apple ..ee:ff"), never its session number or its bytes.
+const vendorOf = a => {
+  const m = /^(.*?)(·\w+)?\s+(#\d+|#-|\.\.[0-9a-f]{2}:[0-9a-f]{2})$/i.exec(a || "");
+  if (!m || /^(RPA|NRPA|static|public)$/i.test(m[1]) || /([0-9a-f]{2}:){2}/i.test(m[1])) return null;
+  return m[1];
+};
+const shortName = d => (d.company || d.vendor || vendorOf(d.address) || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
 const kindWords = k => ({ RPA: "rotating address", NRPA: "rotating address", public: "fixed address", static: "fixed address" }[k] || k);
 
 // ---- Spotlight: hover wins, otherwise it walks the loudest ----
@@ -271,16 +306,20 @@ function frame(t) {
     ctx.strokeStyle = rgba(HA, a); ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(x, y, 9 * U, 0, 7); ctx.stroke(); ctx.setLineDash([]);
   }
+  const labelled = new Set();
   for (const L of links) {
     const to = devices.find(d => d.address === L.to); if (!to || to._px == null) continue;
     const x0 = sx(L.from.crystal_offset_ppm.value), y0 = sy(L.from.modulation_index.value);
-    const a = Math.max(0, 1 - (now - L.at) / 90000);
+    const a = Math.max(0, 1 - (now - L.at) / 90000) * (L.k > 1 ? 0.6 : 1);
     ctx.strokeStyle = rgba(PH, 0.15 + 0.45 * a); ctx.setLineDash([4, 5]); ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(to._px, to._py); ctx.stroke(); ctx.setLineDash([]);
     if (a > 0) {
       ctx.fillStyle = rgba(VI, a); ctx.beginPath(); ctx.arc(x0, y0, 4 * U, 0, 7); ctx.fill();
       ctx.font = fnt(18, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, a);
-      ctx.fillText("NEW ADDRESS, SAME QUARTZ?", Math.max(x0, to._px) + 16 * U, (y0 + to._py) / 2 - 8 * U);
+      if (!labelled.has(L.to)) {
+        labelled.add(L.to);
+        ctx.fillText(L.k > 1 ? `${L.k} CRYSTALS MATCH` : "NEW ADDRESS, SAME QUARTZ?", Math.max(x0, to._px) + 16 * U, (y0 + to._py) / 2 - 8 * U);
+      }
     }
   }
 

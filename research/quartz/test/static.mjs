@@ -8,6 +8,8 @@
 //   node test/static.mjs        (from research/quartz/)
 import fs from "fs";
 import path from "path";
+import os from "os";
+import { execFileSync } from "child_process";
 
 const here = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const research = path.resolve(here, "..");
@@ -47,6 +49,49 @@ for (const f of walk(research)) {
   if (/\.(py|mjs|html)$/.test(f) && !text.split("\n").slice(0, 3).some(l => l.includes("SPDX-License-Identifier: GPL-3.0-or-later")))
     fail.push(`${rel} has no SPDX header in its first three lines`);
 }
+
+// A recording that leaves this folder: only the kept fields, every address a
+// token, and nothing anywhere shaped like an address, a name or a place.
+const KEPT = new Set(["address", "vendor", "kind", "company", "company_id", "tx_power_dbm", "packets", "crc_failed",
+  "crc_pass_pct", "best_snr_db", "mean_snr_db", "crystal_offset_ppm", "modulation_index", "first_seen_s", "last_seen_s"]);
+function checkRecording(label, text) {
+  let rec;
+  try { rec = JSON.parse(text); } catch { fail.push(`${label} is not JSON`); return; }
+  for (const p of rec.polls || []) {
+    if ("at_unix_ms" in (p.census?.testimony || {})) fail.push(`${label} keeps a wall-clock time`);
+    for (const d of p.census?.devices || []) {
+      for (const k of Object.keys(d)) if (!KEPT.has(k)) fail.push(`${label} keeps a device's ${k}`);
+      if (!/^d\d{3}$/.test(d.address)) fail.push(`${label} keeps an address ${JSON.stringify(d.address)}`);
+    }
+  }
+  const strings = [];
+  (function walk(v) {
+    if (typeof v === "string") strings.push(v);
+    else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x);
+  })(rec);
+  for (const s of strings) {
+    if (/([0-9a-f]{2}:){2,}|\.\.[0-9a-f]{2}|#\d+/i.test(s)) fail.push(`${label} holds an address form ${JSON.stringify(s)}`);
+    if (/\b(lat|lon)\w*\b.*\d{1,3}\.\d+/i.test(s)) fail.push(`${label} holds a coordinate ${JSON.stringify(s)}`);
+    if (/name/i.test(s)) fail.push(`${label} holds a name ${JSON.stringify(s)}`);
+  }
+}
+checkRecording("fixture.json", read("fixture.json"));
+// The anonymiser itself, on every address form monasd can answer with.
+try {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "quartz-")), "anon.json");
+  execFileSync("python3", ["-I", path.join(here, "anonymize.py"), path.join(here, "test/anon_input.json"), out]);
+  checkRecording("anonymize.py's output", fs.readFileSync(out, "utf8"));
+  const tokens = new Set(JSON.parse(fs.readFileSync(out, "utf8")).polls.flatMap(p => p.census.devices.map(d => d.address)));
+  if (tokens.size !== 3) fail.push(`anonymize.py gave ${tokens.size} tokens for 3 addresses`);
+  const anon = JSON.parse(fs.readFileSync(out, "utf8"));
+  const vendors = new Set(anon.polls.flatMap(p => p.census.devices.map(d => d.vendor)).filter(Boolean));
+  if ([...vendors].join() !== "Apple") fail.push(`anonymize.py kept vendors ${JSON.stringify([...vendors])}, wanted only "Apple"`);
+  if (/\d\.\d{6,}/.test(fs.readFileSync(out, "utf8"))) fail.push("anonymize.py left a number unrounded");
+  const thin = path.join(path.dirname(out), "thin.json");
+  execFileSync("python3", ["-I", path.join(here, "anonymize.py"), "--every", "2", path.join(here, "test/anon_input.json"), thin]);
+  const ts = JSON.parse(fs.readFileSync(thin, "utf8")).polls.map(p => p.t);
+  if (ts.join() !== "0,2") fail.push(`anonymize.py --every 2 kept polls at ${ts}, wanted 0,2`);
+} catch (e) { fail.push(`anonymize.py did not run: ${String(e.message).split("\n")[0]}`); }
 
 console.log(fail.length ? "FAIL\n" + fail.join("\n") : "PASS");
 process.exit(fail.length ? 1 : 0);

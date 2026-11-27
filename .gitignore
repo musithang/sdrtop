@@ -31,3 +31,7 @@ design_docs/
 
 # npm, when a tool gets installed into the tree by accident
 node_modules/
+
+# A raw census capture holds addresses as monasd showed them; only its
+# anonymised form (research/quartz/fixture.json) is kept.
+research/quartz/raw*.json

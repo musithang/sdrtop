@@ -117,31 +117,59 @@ else for (const d of q.devices()) if (!d.crystal_offset_ppm || !d.modulation_ind
 if (devs.some(d => !d.company && d.crystal_offset_ppm && d.modulation_index) && !played.drawn.some(s => s.includes("UNNAMED")))
   fail.push("a device with no company was not labelled UNNAMED");
 
-// 4. The links are exactly the rule's: both rotating, the same company, one
-// gone and one new, within 2 combined sigma on both axes.
+// 4. The links are exactly the rule's. A rotating address that fell silent
+// (gone from the answer, or not heard for over 20 s) and a new one of the
+// same company that started within 30 s of it, within 2 combined sigma on
+// both axes; one match reads NEW ADDRESS, SAME QUARTZ?, several read
+// "N CRYSTALS MATCH". Counted for new addresses first heard in the last
+// 600 s, at the end of the recording.
+const SILENT_S = 20, SWAP_S = 30, MEMORY_S = 600;
 const rotating = d => d.kind === "RPA" || d.kind === "NRPA";
 const sep = (a, b) => Math.hypot(
   (a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma),
   (a.modulation_index.value - b.modulation_index.value) / Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma));
-const want = new Set();
-let prev = new Map(), gone = new Map();
+const heard = new Map();
+let T = 0, inLast = new Set();
 for (const p of fx.polls) {
+  T = p.t;
   const fresh = (p.census.devices || []).filter(d => d.crystal_offset_ppm && d.modulation_index);
-  const seen = new Set(fresh.map(d => d.address));
-  for (const [a, d] of prev) if (!seen.has(a)) gone.set(a, d);
+  inLast = new Set(fresh.map(d => d.address));
   for (const d of fresh) {
-    if (prev.has(d.address) || !rotating(d)) continue;
-    for (const g of gone.values())
-      if (rotating(g) && (g.company || "") === (d.company || "") && sep(g, d) <= 2) want.add(`${g.address} -> ${d.address}`);
+    const h = heard.get(d.address);
+    heard.set(d.address, { first: h ? h.first : T - d.first_seen_s, last: T - d.last_seen_s, d });
   }
-  prev = new Map(fresh.map(d => [d.address, d]));
+}
+const want = new Set(), counts = new Map();
+for (const [xa, x] of heard) {
+  // The new address must itself be live: a link to a point no longer drawn says nothing.
+  if (!rotating(x.d) || x.first < T - MEMORY_S || !inLast.has(xa) || T - x.last > SILENT_S) continue;
+  const c = [...heard].filter(([ga, g]) => ga !== xa && rotating(g.d)
+    && (g.d.company || "") === (x.d.company || "")
+    && (!inLast.has(ga) || T - g.last > SILENT_S)
+    && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2);
+  for (const [ga] of c) want.add(`${ga} -> ${xa}`);
+  if (c.length) counts.set(xa, c.length);
 }
 if (q) {
   const got = new Set(q.links().map(l => `${l.from.address} -> ${l.to}`));
   if ([...want].sort().join() !== [...got].sort().join())
-    fail.push(`links ${JSON.stringify([...got])}, the rule gives ${JSON.stringify([...want])}`);
-  if (want.size && !played.drawn.includes("NEW ADDRESS, SAME QUARTZ?")) fail.push("a link was not labelled NEW ADDRESS, SAME QUARTZ?");
+    fail.push(`links ${JSON.stringify([...got].sort())}, the rule gives ${JSON.stringify([...want].sort())}`);
+  for (const k of new Set(counts.values())) {
+    const label = k === 1 ? "NEW ADDRESS, SAME QUARTZ?" : `${k} CRYSTALS MATCH`;
+    if (!played.drawn.includes(label)) fail.push(`a link was not labelled ${label}`);
+  }
 }
+
+// 4b. A device with no company is called by the vendor its address's own
+// prefix names, never by the session number or the bytes.
+const vendorOf = d => d.vendor || ((/^(.*?)(·\w+)?\s+(#\d+|#-|\.\.[0-9a-f]{2}:[0-9a-f]{2})$/i.exec(d.address) || [])[1]);
+if (q && q.label) {
+  for (const d of devs) {
+    const v = vendorOf(d);
+    if (d.company || !v || /^(RPA|NRPA|static|public)$/i.test(v)) continue;
+    if (!q.label(d).toUpperCase().startsWith(v.toUpperCase().slice(0, 10))) fail.push(`${JSON.stringify(v)} labelled ${JSON.stringify(q.label(d))}`);
+  }
+} else if (q) fail.push("window.__quartz.label is not there");
 
 // 5. A monasd that does not answer is said so, and the page keeps asking.
 const dead = await run({ search: "", fetchImpl: async () => { throw new Error("refused"); }, seconds: 6 });

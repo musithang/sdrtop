@@ -1,0 +1,314 @@
+{
+ "reference": "the radio's own crystal, not referenced, station at lat 12.34 lon 56.78",
+ "polls": [
+  {
+   "t": 0.0,
+   "census": {
+    "testimony": {
+     "at_unix_ms": 1795800000000,
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:ff",
+      "kind": "RPA",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": "Apple, Inc.",
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.123456789,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     },
+     {
+      "address": "Apple #12",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": "Apple, Inc.",
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.1,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     }
+    ]
+   }
+  },
+  {
+   "t": 1.0,
+   "census": {
+    "testimony": {
+     "at_unix_ms": 1795800000001,
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "Apple ..ee:ff",
+      "kind": "RPA",
+      "name": "name, 15 chars",
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": "Apple, Inc.",
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.1,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     },
+     {
+      "address": "Apple #12",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": "Apple, Inc.",
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.1,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     }
+    ]
+   }
+  },
+  {
+   "t": 2.0,
+   "census": {
+    "testimony": {
+     "at_unix_ms": 1795800000002,
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "Apple #12",
+      "kind": "RPA",
+      "name": "Anna AirPods",
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": "Apple, Inc.",
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.1,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     },
+     {
+      "address": "Apple #12",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": "Apple, Inc.",
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.1,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     }
+    ]
+   }
+  }
+ ]
+}
