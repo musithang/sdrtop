@@ -10,7 +10,7 @@ repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "sdrtop's engine with no screen: an HTTP and WebSocket API to the radio and its measurements."
-readme = "../../README.md"
+readme = "README.md"
 keywords = ["sdr", "hackrf", "rtl-sdr", "soapysdr", "tui"]
 categories = ["command-line-utilities", "hardware-support", "science"]
 
