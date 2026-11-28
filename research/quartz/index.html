@@ -54,8 +54,18 @@
   .powered img { height: calc(var(--u) * 40); display: block; }
   .powered .t { font-size: calc(var(--u) * 13); color: #A9A69C; letter-spacing: 0.18em; }
   .powered .w { font-size: calc(var(--u) * 24); font-weight: 500; margin-top: calc(var(--u) * 2); }
-  .empty { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #A9A69C;
-           font-size: calc(var(--u) * 26); text-align: center; line-height: 1.7; pointer-events: none; }
+  /* What to do when there is nothing to show: a card over the plot. */
+  .empty { position: fixed; left: calc(var(--u) * 150); top: calc(var(--u) * 270); width: calc(var(--u) * 1180);
+           height: calc(var(--u) * 470); display: none; align-items: center; justify-content: center; pointer-events: none; }
+  .empty .card { pointer-events: auto; max-width: calc(var(--u) * 860); padding: calc(var(--u) * 36) calc(var(--u) * 44);
+                 background: rgba(11,12,11,0.94); border: 1px solid var(--racs); }
+  .empty .t { color: var(--foszfor); font-size: calc(var(--u) * 34); font-weight: 500; margin-bottom: calc(var(--u) * 16); }
+  .empty .b { color: #A9A69C; font-size: calc(var(--u) * 22); line-height: 1.65; }
+  .empty .b p + p { margin-top: calc(var(--u) * 14); }
+  .empty code { color: var(--foszfor); background: #151715; border: 1px solid var(--racs); padding: 0.1em 0.45em; white-space: nowrap; }
+  .empty a, .empty q { color: var(--foszfor); }
+  .spot.is-empty { visibility: hidden; }
+  #prov { display: none; }
 </style>
 </head>
 <body>
@@ -86,14 +96,14 @@
   <div class="verdict" id="sp-v"></div>
 </div>
 
-<div class="foot">Measured against this receiver's own clock (<b id="dev">…</b>, <span id="ref">…</span>):
+<div class="foot">Measured against this receiver's own clock<span id="prov"> (<b id="dev"></b>, <span id="ref"></span>)</span>:
 the distances between crystals are the measurement, where zero sits is not.</div>
 
 <div class="powered">
   <img src="mark.svg" alt="monas">
   <div><div class="t">POWERED BY</div><div class="w">monasd</div></div>
 </div>
-<div class="empty" id="empty"></div>
+<div class="empty" id="empty"><div class="card"><div class="t" id="em-t"></div><div class="b" id="em-b"></div></div></div>
 
 <script>
 const PH = [230,226,214], HA = [107,112,104], DIM = [169,166,156], VI = [255,181,71];
@@ -209,8 +219,12 @@ async function poll() {
     regroup(T, live);
     fit(); meta();
   } catch (e) {
-    testimony = { absent: !FIXTURE ? "monasd is not answering"
-      : !FIXTURE_OK ? "This page plays recordings from its own folder only."
+    if (!FIXTURE) {
+      // server.py knows whether it started monasd and how that went.
+      let st = {};
+      try { const r = await fetch("/quartz/status"); if (r.ok) st = (await r.json()) || {}; } catch (e2) {}
+      testimony = { down: st };
+    } else testimony = { absent: !FIXTURE_OK ? "This page plays recordings from its own folder only."
       : "The recording could not be read." };
     meta();
   }
@@ -259,6 +273,8 @@ function windowed(rs, t0, t1) {
 // grown from the most packets down, a member joining only if it is close to
 // every one already in, never by a chain.
 let groups = [];
+// When each group was first drawn, so a new one is named for a few seconds.
+const groupDebut = new Map();
 function regroup(T, live) {
   const close = (x, y) => {
     const lo = Math.max(x.first, y.first), hi = Math.min(x.last, y.last);
@@ -309,13 +325,18 @@ function fit() {
   for (const d of devices) {
     const p = d.crystal_offset_ppm, h = d.modulation_index;
     x0 = Math.min(x0, p.value - 2 * p.sigma); x1 = Math.max(x1, p.value + 2 * p.sigma);
-    if (h.sigma < 0.004) { y0 = Math.min(y0, h.value - 2 * h.sigma); y1 = Math.max(y1, h.value + 2 * h.sigma); }
+    // A wide index still has its point: the point is in, its spread need not be.
+    const e = h.sigma < 0.004 ? 2 * h.sigma : 0;
+    y0 = Math.min(y0, h.value - e); y1 = Math.max(y1, h.value + e);
   }
   if (y1 < y0) { y0 = 0.495; y1 = 0.505; }
   const mid = (y0 + y1) / 2, half = Math.max(0.005, (y1 - y0) / 2);
   y0 = mid - half; y1 = mid + half;
   const px = Math.max(0.6, Math.max(-x0, x1) * 0.12), py = half * 0.25;
-  Object.assign(target, { x0: x0 - px, x1: x1 + px, y0: y0 - py, y1: y1 + py });
+  // And at least 40 px clear of every edge, in the plot's own scale.
+  const a = f(x0 - px), b = f(x1 + px), mx = (b - a) * 40 / Math.max(200, W - 740 * U);
+  const lo = y0 - py, hi = y1 + py, my = (hi - lo) * 40 / Math.max(200, H - 610 * U);
+  Object.assign(target, { x0: fi(a - mx), x1: fi(b + mx), y0: lo - my, y1: hi + my });
 }
 
 function meta() {
@@ -325,10 +346,33 @@ function meta() {
   const st = document.getElementById("stale");
   const tags = [testimony?.stale && "[STALE]", testimony?.feed_loss && "[FEED LOSS]"].filter(Boolean);
   st.style.display = tags.length ? "block" : "none"; st.textContent = tags.join(" ");
+  document.getElementById("spot").classList.toggle("is-empty", !n);
+  const c = card(n);
   const em = document.getElementById("empty");
-  if (testimony && testimony.absent) { em.style.display = "flex"; em.textContent = testimony.absent; }
-  else if (!n) { em.style.display = "flex"; em.innerHTML = "No transmitter heard yet."; }
-  else em.style.display = "none";
+  em.style.display = c ? "flex" : "none";
+  if (c) { document.getElementById("em-t").textContent = c.t; document.getElementById("em-b").innerHTML = c.b; }
+}
+
+// When there is nothing to draw, what to do about it.
+const REC = `<p>No radio at hand? <a href="?fixture&amp;speed=10">Watch the recording</a>.</p>`;
+const LIVE = "<code>python3 -I server.py --live</code>";
+function card(n) {
+  const d = testimony && testimony.down;
+  if (d) {
+    if (d.monasd === "not installed") return { t: "monasd is not installed",
+      b: `<p>Install it with <code>cargo install monasd --locked</code>, then start this page again with ${LIVE}.</p>${REC}` };
+    if (d.monasd === "stopped") return { t: "monasd stopped",
+      b: `<p>Its last words: <q>${esc(d.last || "nothing")}</q></p>` + (/no radio/i.test(d.last || "")
+        ? `<p>Plug the HackRF in, and run ${LIVE} again.</p>` : `<p>The terminal where server.py runs has the whole log.</p>`) + REC };
+    if (d.live && d.monasd === "running") return { t: "Starting monasd",
+      b: "<p>The radio is opening. The first dots come within seconds.</p>" };
+    return { t: "Waiting for monasd",
+      b: `<p>Nothing answers on 127.0.0.1:7373. With a HackRF plugged in, start this page with ${LIVE}: it starts monasd for you.</p>${REC}` };
+  }
+  if (testimony && testimony.absent) return FIXTURE ? { t: testimony.absent, b: "" }
+    : { t: "No census from monasd", b: `<p><q>${esc(testimony.absent)}</q></p><p>The census needs <code>--mode net_census</code>; ${LIVE} starts monasd that way.</p>` };
+  if (!n) return { t: "Listening", b: "<p>No transmitter heard yet. Give it half a minute.</p>" };
+  return null;
 }
 
 async function provenance() {
@@ -337,6 +381,7 @@ async function provenance() {
     document.getElementById("ref").textContent = (p.reference || "not said").split(",")[0];
     // The radio by its name only: its serial number names one unit.
     document.getElementById("dev").textContent = (p.device || "the receiver").split(/\s+serial\s/)[0].trim();
+    document.getElementById("prov").style.display = "inline";
   } catch (e) {}
 }
 
@@ -480,7 +525,7 @@ function frame(t) {
   const M = activeMoment(now);
   const F = devices.find(d => d.address === (M ? M.to : focus));
 
-  ctx.save(); ctx.beginPath(); ctx.rect(G.l, G.t - 40 * U, PW(), B - G.t + 40 * U); ctx.clip();
+  ctx.save(); ctx.beginPath(); ctx.rect(G.l, G.t, PW(), B - G.t); ctx.clip();
 
   const back = a => (M && a !== M.to && a !== M.from.address ? 0.3 : 1);
   for (const g of gone.values()) {
@@ -489,8 +534,14 @@ function frame(t) {
     ctx.strokeStyle = rgba(HA, a); ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(x, y, 9 * U, 0, 7); ctx.stroke(); ctx.setLineDash([]);
   }
-  // Where the link labels went, so the device labels keep off them.
+  // One voice at a time: a sentence about the points is said for the moment,
+  // or else for the point in focus, or for a group the first seconds after
+  // it forms. The rest keep their lines and rings and say nothing.
+  const speaker = M ? M.to : F ? F.address : null;
+  let spoken = false;
+  // Where the labels went, and where the points are, so labels keep off both.
   const labelled = new Set(), taken = [legendBox(R)];
+  const marks = devices.filter(d => d._px != null).map(d => ({ x: d._px - 22 * U, y: d._py - 22 * U, w: 44 * U, h: 44 * U }));
   for (const L of links) {
     const to = devices.find(d => d.address === L.to); if (!to || to._px == null) continue;
     const x0 = sx(L.from.crystal_offset_ppm.value), y0 = sy(L.from.modulation_index.value);
@@ -503,22 +554,23 @@ function frame(t) {
     if (a > 0) {
       ctx.fillStyle = rgba(VI, a); ctx.beginPath(); ctx.arc(x0, y0, 4 * U, 0, 7); ctx.fill();
       ctx.font = fnt(18, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, a);
-      if (!labelled.has(L.to) && (!M || isM)) {
+      if (!labelled.has(L.to) && !spoken && L.to === speaker) {
         labelled.add(L.to);
         // Right of the pair, else left of it, a line up or down if another
         // label is there; left out rather than drawn over one (the line stays).
         const text = L.k > 1 ? `${L.k} CRYSTALS MATCH` : "NEW ADDRESS, SAME QUARTZ?";
         const tw = ctx.measureText(text).width, mid = (y0 + to._py) / 2 - 8 * U;
+        const hit = (x, y) => b => x - 6 * U < b.x + b.w && x + tw + 6 * U > b.x && y - 22 * U < b.y + b.h && y + 10 * U > b.y;
         const fits = (x, y) => x > G.l + 4 * U && x + tw < G.l + PW() - 4 * U && y - 22 * U > G.t && y + 10 * U < B
-          && !taken.some(b => x - 6 * U < b.x + b.w && x + tw + 6 * U > b.x && y - 22 * U < b.y + b.h && y + 10 * U > b.y);
+          && !taken.some(hit(x, y)) && !marks.some(hit(x, y));
         let at = null;
-        for (const dy of [0, -32, 32, -64, 64]) {
-          for (const x of [Math.max(x0, to._px) + 16 * U, Math.min(x0, to._px) - 44 * U - tw])
+        for (const dy of [0, -32, 32, -64, 64, -96, 96]) {
+          for (const x of [Math.max(x0, to._px) + 30 * U, Math.min(x0, to._px) - 30 * U - tw])
             if (fits(x, mid + dy * U)) { at = [x, mid + dy * U]; break; }
           if (at) break;
         }
         if (at) {
-          ctx.fillText(text, at[0], at[1]);
+          ctx.fillText(text, at[0], at[1]); spoken = true;
           taken.push({ x: at[0] - 6 * U, y: at[1] - 22 * U, w: tw + 12 * U, h: 32 * U });
         }
       }
@@ -535,7 +587,8 @@ function frame(t) {
     const a = M ? 0.15 : 0.7;
     ctx.strokeStyle = rgba(PH, a); ctx.setLineDash([4, 5]); ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke(); ctx.setLineDash([]);
-    if (M) continue;
+    const key = [...g].sort().join(" "), debut = groupDebut.get(key) ?? (groupDebut.set(key, now), now);
+    if (M || spoken || !(g.includes(speaker) || now - debut < 8000)) continue;
     ctx.font = fnt(16, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, 0.85);
     const text = `${pts.length} ADDRESSES, ONE QUARTZ?`, tw = ctx.measureText(text).width;
     // Beside the ring if there is room, else above or below it, farther out
@@ -547,14 +600,13 @@ function frame(t) {
       const inside = box.x > G.l && box.x + box.w < G.l + PW() && box.y > G.t && box.y + box.h < B;
       // Clear of other labels and of every point and its packet rings.
       const hits = b => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y;
-      const marks = devices.filter(d => d._px != null).map(d => ({ x: d._px - 34 * U, y: d._py - 34 * U, w: 68 * U, h: 68 * U }));
       if (inside && !taken.some(hits) && !marks.some(hits)) {
         const ty = y < cy ? y + 6 * U : y - 20 * U, ry = y < cy ? cy - r : cy + r;
         if (Math.abs(ty - ry) > 14 * U) {
           ctx.strokeStyle = rgba(PH, 0.4); ctx.lineWidth = 1;
           ctx.beginPath(); ctx.moveTo(cx, ry); ctx.lineTo(Math.max(x, Math.min(cx, x + tw)), ty); ctx.stroke();
         }
-        ctx.fillText(text, x, y); taken.push(box); break;
+        ctx.fillText(text, x, y); taken.push(box); spoken = true; break;
       }
     }
   }
@@ -565,6 +617,12 @@ function frame(t) {
     const x = sx(p.value), y = sy(h.value);
     d._px = d._px == null ? x : d._px + (x - d._px) * 0.12;
     d._py = d._py == null ? y : d._py + (y - d._py) * 0.12;
+    // While the view is still easing toward the room, a point waits at the
+    // edge rather than slipping off it; zoomed in, what is outside is outside.
+    if (!zoomed) {
+      d._px = Math.max(G.l + 16 * U, Math.min(R - 16 * U, d._px));
+      d._py = Math.max(G.t + 16 * U, Math.min(B - 16 * U, d._py));
+    }
     const X = d._px, Y = d._py, isF = d === F;
     const born = Math.min(1, (now - d._born) / 1200);
     const A = Math.max(0.3, 1 - d.last_seen_s / 120) * born * (F && !isF && !M ? 0.8 : 1) * back(d.address);
@@ -616,7 +674,7 @@ function frame(t) {
     .sort((a, b) => (a === F ? -1 : b === F ? 1 : 0) || (a.last_seen_s - b.last_seen_s) || (b.packets - a.packets));
   let shown = 0;
   for (const d of lab) {
-    if (shown >= 7) break;
+    if (shown >= 5) break;
     const name = shortName(d).toUpperCase().slice(0, 14), p = d.crystal_offset_ppm;
     const val = (p.value > 0 ? "+" : "−") + Math.abs(p.value).toFixed(2);
     ctx.font = fnt(19, 500);
@@ -639,7 +697,8 @@ function frame(t) {
     ctx.fillStyle = rgba(isF ? VI : PH, (isF ? 1 : 0.75) * A); ctx.font = fnt(19); ctx.fillText(val, at[0] + nw, at[1] + 19 * U);
   }
   ctx.restore();
-  legend(R);
+  // With nothing on the plot the card speaks there, and the legend waits.
+  if (devices.length) legend(R);
   spectrum(F, B, R);
 
   ctx.fillStyle = grain; ctx.fillRect(0, 0, W, H);

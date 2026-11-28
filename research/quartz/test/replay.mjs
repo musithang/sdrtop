@@ -21,7 +21,9 @@ const fail = [];
 
 // Run the page's script in a fresh context for `seconds` of simulated time.
 function run({ search, fetchImpl, seconds, during = [] }) {
-  const drawn = [], html = [];
+  // drawn: every text that reaches the screen; painted: the canvas's alone,
+  // cut into frames at frameAt.
+  const drawn = [], html = [], painted = [], frameAt = [];
   let now = 0;
   const stub = new Proxy(function () {}, {
     get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : stub),
@@ -30,14 +32,16 @@ function run({ search, fetchImpl, seconds, during = [] }) {
   });
   const ctx = new Proxy({}, {
     get: (t, k) => {
-      if (k === "fillText" || k === "strokeText") return s => drawn.push(String(s));
+      if (k === "fillText" || k === "strokeText") return s => { drawn.push(String(s)); painted.push(String(s)); };
       if (k === "measureText") return s => ({ width: String(s).length * 10 });
       return stub;
     },
     set: () => true,
   });
   const element = () => {
-    const e = { style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, getContext: () => ctx, width: 0, height: 0 };
+    const cls = new Set();
+    const e = { style: { setProperty() {} }, getContext: () => ctx, width: 0, height: 0,
+      classList: { toggle: (c, on) => (on ?? !cls.has(c)) ? cls.add(c) : cls.delete(c), add: c => cls.add(c), remove: c => cls.delete(c), has: c => cls.has(c) } };
     let text = "", inner = "";
     Object.defineProperty(e, "textContent", { get: () => text, set: v => { text = String(v); drawn.push(text); } });
     Object.defineProperty(e, "innerHTML", { get: () => inner, set: v => { inner = String(v); drawn.push(inner); html.push(inner); } });
@@ -75,7 +79,7 @@ function run({ search, fetchImpl, seconds, during = [] }) {
       await t.fn();
     }
     const due = frames; frames = [];
-    for (const f of due) f(now);
+    for (const f of due) { frameAt.push(painted.length); f(now); }
     await new Promise(r => setImmediate(r));
   };
   return (async () => {
@@ -85,7 +89,8 @@ function run({ search, fetchImpl, seconds, during = [] }) {
       for (const d of during) if (!d.done && now >= d.at) { d.done = true; d.fn(context.__quartz, listeners, drawn); }
       await step();
     }
-    return { drawn, html, els, fetches, asked, q: context.__quartz };
+    frameAt.push(painted.length);
+    return { drawn, html, els, fetches, asked, q: context.__quartz, painted, frameAt };
   })();
 }
 
@@ -96,8 +101,13 @@ const serveFixture = async url => {
 const span = Math.max(...fx.polls.map(p => p.t)) + 15;
 // The page's links, sampled every second of the playback.
 const seen = new Map(), seenGroups = new Set();
+// Every point the page has placed, checked against the plot's edges
+// (150..1330 by 270..740 at 1920x1080) each half second.
+const outside = [];
 const sample = [];
-for (let at = 1000; at <= span * 1000; at += 1000) sample.push({ at, fn: Q => {
+for (let at = 500; at <= span * 1000; at += 500) sample.push({ at, fn: Q => {
+  for (const d of Q ? Q.devices() : []) if (d._px != null && !(d._px >= 158 && d._px <= 1322 && d._py >= 278 && d._py <= 732))
+    outside.push(`${d.address} at ${Math.round(d._px)},${Math.round(d._py)} (${at} ms)`);
   for (const L of Q ? Q.links() : []) seen.set(`${L.from.address} -> ${L.to}`, L.k);
   for (const g of Q && Q.groups ? Q.groups() : []) seenGroups.add([...g].sort().join(" + "));
 } });
@@ -240,6 +250,22 @@ if (q) {
   }
 }
 
+// 3c. One thing speaks at a time: in any frame at most one sentence about the
+// points (a swap, a match or a group) and at most five names; and no point is
+// drawn off the plot.
+{
+  const say = /^(NEW ADDRESS, SAME QUARTZ\?|\d+ CRYSTALS MATCH|\d+ ADDRESSES, ONE QUARTZ\?)$/, value = /^[+−]\d+\.\d{2}$/;
+  let worstSay = 0, worstNames = 0;
+  for (let i = 0; i + 1 < played.frameAt.length; i++) {
+    const f = played.painted.slice(played.frameAt[i], played.frameAt[i + 1]);
+    worstSay = Math.max(worstSay, f.filter(t => say.test(t)).length);
+    worstNames = Math.max(worstNames, f.filter(t => value.test(t)).length);
+  }
+  if (worstSay > 1) fail.push(`a frame carried ${worstSay} sentences about the points`);
+  if (worstNames > 5) fail.push(`a frame carried ${worstNames} names`);
+  if (outside.length) fail.push(`points drawn off the plot: ${outside.slice(0, 3).join("; ")}${outside.length > 3 ? ` and ${outside.length - 3} more` : ""}`);
+}
+
 // 4a. The parallel groups are exactly the rule's, and are said on the plot.
 if (q) {
   if (!q.groups) fail.push("window.__quartz.groups is not there");
@@ -262,23 +288,27 @@ if (q && q.label) {
 } else if (q) fail.push("window.__quartz.label is not there");
 
 // 4c. A moment holds the stage only until the viewer looks elsewhere:
-// pointing at another device ends it, and the link keeps its small label
-// beside the point.
+// pointing at another device ends it, and pointing back at the new address
+// brings the link's small label beside it.
 if (counts.size && q && !q.moment) fail.push("window.__quartz.moment is not there");
 if (counts.size && q && q.moment) {
-  let started = -1, checked = false, ended = null, labelAfter = false, mark = 0;
+  let started = -1, checked = false, ended = null, labelAfter = false, mark = 0, to = null;
   const probe = [];
   for (let at = 1000; at < span * 1000; at += 1000) probe.push({ at, fn: (Q, L, drawn) => {
     if (started < 0 && Q.moment()) {
-      started = at;
+      started = at; to = Q.moment().to;
       // A point on the plot (150..1330 by 270..740 at 1920x1080): one the
       // view has not caught up with yet is clipped, and cannot be pointed at.
       const other = Q.devices().find(d => d.address !== Q.moment().to && d._px > 160 && d._px < 1320 && d._py > 280 && d._py < 730);
       if (other) for (const f of L.mousemove || []) f({ clientX: other._px, clientY: other._py });
       mark = drawn.length;
-    } else if (started > 0 && !checked && at >= started + 2000) {
+    } else if (started > 0 && ended === null && at >= started + 2000) {
+      ended = Q.moment() || false;
+      const back = Q.devices().find(d => d.address === to);
+      if (back) for (const f of L.mousemove || []) f({ clientX: back._px, clientY: back._py });
+      mark = drawn.length;
+    } else if (started > 0 && !checked && at >= started + 4000) {
       checked = true;
-      ended = Q.moment();
       labelAfter = drawn.slice(mark).some(t => t === "NEW ADDRESS, SAME QUARTZ?" || /CRYSTALS MATCH$/.test(t));
     }
   } });
@@ -286,7 +316,7 @@ if (counts.size && q && q.moment) {
   if (started < 0) fail.push("no moment began");
   else {
     if (ended) fail.push("pointing at another device did not end the moment");
-    if (!labelAfter) fail.push("after the moment the link lost its label beside the point");
+    if (!labelAfter) fail.push("pointed at again, the new address did not show its link's label");
   }
 }
 
@@ -317,7 +347,7 @@ if (q) {
 // 5b. server.py up and monasd down: server.py answers 502 with an error body,
 // which is monasd not answering too, not an empty room.
 const proxyOnly = await run({ search: "", fetchImpl: async () => ({ ok: false, status: 502, json: async () => ({ error: "<urlopen error [Errno 111] Connection refused>" }) }), seconds: 6 });
-if (!proxyOnly.drawn.includes("monasd is not answering")) fail.push("a 502 from server.py was not said as monasd not answering");
+if (!proxyOnly.drawn.includes("Waiting for monasd")) fail.push("a 502 from server.py was not said as monasd not answering");
 
 // 5c. ?fixture= plays files from the page's own folder only: anything with a
 // scheme or a host is refused, never fetched.
@@ -329,7 +359,33 @@ for (const bad of ["data:application/json,{}", "//example.org/x.json", "https://
 
 // 5. A monasd that does not answer is said so, and the page keeps asking.
 const dead = await run({ search: "", fetchImpl: async () => { throw new Error("refused"); }, seconds: 6 });
-if (!dead.drawn.includes("monasd is not answering")) fail.push("an unanswering monasd was not said so");
+// It says what to do, from what server.py knows: started without --live,
+// monasd not installed, or monasd stopped (its last words, as text); and
+// always the recording to watch instead. The panel and the footer have
+// nothing to show and show nothing.
+if (!dead.drawn.includes("Waiting for monasd")) fail.push("an unanswering monasd was not said so");
+{
+  const body = dead.html.join("\n");
+  if (!body.includes("python3 -I server.py --live")) fail.push("waiting for monasd, the page did not give the command that starts it");
+  if (!body.includes('href="?fixture&amp;speed=10"')) fail.push("waiting for monasd, the page did not offer the recording");
+  if (dead.drawn.some(t => /…/.test(t))) fail.push("waiting for monasd, a placeholder (…) was shown");
+  if (/>…</.test(fs.readFileSync(htmlPath, "utf8"))) fail.push("the page carries a placeholder (…) before anything is known");
+  if (!dead.els.spot || !dead.els.spot.classList.has("is-empty")) fail.push("waiting for monasd, the spotlight panel was not left empty");
+}
+for (const [status, want, title] of [
+  [{ live: false }, "python3 -I server.py --live", "Waiting for monasd"],
+  [{ live: true, monasd: "not installed" }, "cargo install monasd --locked", "monasd is not installed"],
+  [{ live: true, monasd: "stopped", last: "monasd: no radio found. <b>x</b>" }, "no radio found. &lt;b&gt;x&lt;/b&gt;", "monasd stopped"],
+]) {
+  const r = await run({ search: "", seconds: 4, fetchImpl: async url => {
+    if (String(url).startsWith("/quartz/status")) return { ok: true, status: 200, json: async () => status };
+    throw new Error("refused");
+  } });
+  const body = r.html.join("\n");
+  if (!r.drawn.includes(title)) fail.push(`server.py said ${JSON.stringify(status)}, the page did not title it ${JSON.stringify(title)}`);
+  if (!body.includes(want)) fail.push(`server.py said ${JSON.stringify(status)}, the page did not say ${JSON.stringify(want)}`);
+  if (/<b>x/.test(body)) fail.push("monasd's last words reached the page as markup");
+}
 if (dead.fetches < 5) fail.push(`the page stopped asking: ${dead.fetches} requests in 6 s`);
 
 console.log(fail.length ? "FAIL\n" + [...new Set(fail)].join("\n") : `PASS (${want.size} link${want.size === 1 ? "" : "s"} over the playback)`);

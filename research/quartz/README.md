@@ -48,12 +48,12 @@ You need only Python 3 and a copy of this repository:
 
 ```sh
 cd research/quartz
-python3 -I server.py 7380
+python3 -I server.py
 ```
 
-and open <http://127.0.0.1:7380/?fixture&speed=10>: fifteen minutes of my
-flat, anonymised, played back ten times faster. No radio, no monasd. Leave
-off `&speed=10` to watch it in real time.
+and open <http://127.0.0.1:7380/?fixture&speed=10> (it prints that too):
+fifteen minutes of my flat, anonymised, played back ten times faster. No
+radio, no monasd. Leave off `&speed=10` to watch it in real time.
 
 ## Try it with a radio
 
@@ -64,22 +64,15 @@ in HackRF mode) may work; I have only tried the HackRF.
 1. **Get monasd** 0.8.2 or newer: `cargo install monasd --locked`, or the
    [installer](../../README.md) with `--hackrf`, which also puts in
    libhackrf.
-2. **Start it** from this folder (`research/quartz`), on a copy of the config
-   here (monasd writes its settings back when it stops, so give it a file of
-   its own):
+2. **Plug the HackRF in, and start the page live** from this folder:
 
    ```sh
    cd research/quartz
-   cp config.toml ~/quartz.toml
-   monasd --config ~/quartz.toml --device hackrf --mode net_census
+   python3 -I server.py --live
    ```
 
-3. **Start the page** in a second terminal, from this folder, and open
-   <http://127.0.0.1:7380/>:
-
-   ```sh
-   python3 -I server.py 7380
-   ```
+   It starts monasd for you, on a copy of `config.toml` in a folder of its
+   own, and Ctrl-C stops both. Open <http://127.0.0.1:7380/>.
 
 In my flat the first dots came within seconds; give it half a minute. Then
 watch your own phone: keep it near the antenna and wait for its address to
@@ -88,20 +81,22 @@ to move, double-click to see the whole room again.
 
 ## If it does not work
 
-- **monasd finds no radio.** It needs libhackrf: the installer's `--hackrf`
-  puts it in. If you have your distribution's HackRF tools, `hackrf_info`
-  should list the radio.
+- **monasd stopped: no radio found.** Is the HackRF plugged in? It also needs
+  libhackrf: the installer's `--hackrf` puts it in. If you have your
+  distribution's HackRF tools, `hackrf_info` should list the radio. The page
+  and the terminal both say what monasd said last.
 - **The radio is busy.** One program at a time: close SDR++, GQRX,
   `hackrf_transfer` or anything else that has it open.
-- **Few or no dots.** Check the antenna. More gain can help: in your copy of
-  the config, `gain = "LNA=32,VGA=24"` is what the sample below was made
+- **Few or no dots.** Check the antenna. More gain can help: in
+  `config.toml`, `gain = "LNA=32,VGA=24"` is what the sample below was made
   with.
 - **Windows.** monasd runs on Linux, and unofficially on macOS. The
   [recording](#no-radio-watch-the-recording) plays anywhere Python does.
 
 ## Your own recording
 
-With monasd running as above, from this folder:
+With `server.py --live` running as above, from this folder in a second
+terminal:
 
 ```sh
 python3 -I capture.py raw.json 15
