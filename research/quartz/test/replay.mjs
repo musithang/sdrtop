@@ -271,7 +271,9 @@ if (counts.size && q && q.moment) {
   for (let at = 1000; at < span * 1000; at += 1000) probe.push({ at, fn: (Q, L, drawn) => {
     if (started < 0 && Q.moment()) {
       started = at;
-      const other = Q.devices().find(d => d.address !== Q.moment().to && d._px != null);
+      // A point on the plot (150..1330 by 270..740 at 1920x1080): one the
+      // view has not caught up with yet is clipped, and cannot be pointed at.
+      const other = Q.devices().find(d => d.address !== Q.moment().to && d._px > 160 && d._px < 1320 && d._py > 280 && d._py < 730);
       if (other) for (const f of L.mousemove || []) f({ clientX: other._px, clientY: other._py });
       mark = drawn.length;
     } else if (started > 0 && !checked && at >= started + 2000) {
@@ -285,6 +287,30 @@ if (counts.size && q && q.moment) {
   else {
     if (ended) fail.push("pointing at another device did not end the moment");
     if (!labelAfter) fail.push("after the moment the link lost its label beside the point");
+  }
+}
+
+// 4d. The mouse wheel zooms about the pointer and the view stays where it
+// was put; the x axis then reads in decimals; a double click hands the view
+// back to the fit.
+if (q) {
+  if (!q.view) fail.push("window.__quartz.view is not there");
+  else {
+    let before = null, zoomed = null, back = null, mark = 0, decimals = 0;
+    const span = v => v.x1 - v.x0;
+    const probes = [
+      { at: 20000, fn: (Q, L) => { before = Q.view(); for (let i = 0; i < 6; i++) for (const f of L.wheel || []) f({ clientX: 960, clientY: 500, deltaY: -400, preventDefault() {} }); } },
+      { at: 30000, fn: (Q, L, drawn) => { zoomed = Q.view(); mark = drawn.length; } },
+      { at: 32000, fn: (Q, L, drawn) => { decimals = drawn.slice(mark).filter(t => /^[+−]?\d+\.\d+$/.test(t)).length; for (const f of L.dblclick || []) f({}); } },
+      { at: 45000, fn: Q => { back = Q.view(); } },
+    ];
+    await run({ search: `?fixture=${path.relative(base, path.resolve(fixturePath))}`, fetchImpl: serveFixture, seconds: 46, during: probes });
+    if (!before || !zoomed || !back) fail.push("the zoom scenario did not run");
+    else {
+      if (!(span(zoomed) < 0.5 * span(before))) fail.push(`the wheel did not zoom: x span ${span(before).toFixed(2)} -> ${span(zoomed).toFixed(2)}`);
+      if (decimals < 3) fail.push(`zoomed in, the x axis drew ${decimals} decimal labels`);
+      if (!(span(back) > 0.8 * span(before))) fail.push(`a double click did not hand the view back: ${span(back).toFixed(2)} against ${span(before).toFixed(2)}`);
+    }
   }
 }
 

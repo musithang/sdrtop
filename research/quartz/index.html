@@ -150,7 +150,7 @@ async function ask(route) {
   return at.census;
 }
 // What a test reads; nothing on the page uses it.
-window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()), sep: (a, b) => sep(a, b), groups: () => groups };
+window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()), sep: (a, b) => sep(a, b), groups: () => groups, view: () => ({ ...view }) };
 const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
 
 // When each address was first and last heard, on the stream's clock (the
@@ -200,8 +200,8 @@ async function poll() {
       Object.assign(x, o ? { _born: o._born, _px: o._px, _py: o._py, _pulses: o._pulses }
                          : { _born: h.born ?? (polls ? now : now - 5000), _px: null, _py: null, _pulses: [] });
       h.born = x._born;
-      const more = o ? Math.min(3, x.packets - o.packets) : 0;
-      for (let i = 0; i < more; i++) x._pulses.push(now + i * 220);
+      // One pulse a poll at most: news that it was heard, not a count.
+      if (o && x.packets > o.packets) x._pulses.push(now);
       x._pulses = x._pulses.filter(t => now - t < 1400);
     }
     devices = fresh; polls++;
@@ -301,8 +301,10 @@ function relink(T, now, live) {
   links = next.slice(-40);
 }
 
+// Zoomed by the wheel, the view stays where it was put until a double click.
+let zoomed = false;
 function fit() {
-  if (!devices.length) return;
+  if (!devices.length || zoomed) return;
   let x0 = 0, x1 = 0, y0 = 1, y1 = 0;
   for (const d of devices) {
     const p = d.crystal_offset_ppm, h = d.modulation_index;
@@ -363,8 +365,49 @@ const kindWords = k => ({ RPA: "rotating address", NRPA: "rotating address", pub
 
 // ---- Spotlight: hover wins, otherwise it walks the loudest ----
 let mouse = { x: -1, y: -1 }, hover = null, focus = null, walkAt = 0, walkI = 0, pinned = null;
-addEventListener("click", () => { pinned = hover ? (pinned === hover.address ? null : hover.address) : null; });
-addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+let drag = null;
+addEventListener("click", () => {
+  if (drag && drag.moved) { drag = null; return; }
+  drag = null;
+  pinned = hover ? (pinned === hover.address ? null : hover.address) : null;
+});
+addEventListener("mousemove", e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  // Dragging a zoomed plot moves it; the view follows the hand at once.
+  if (drag && zoomed) {
+    const du = (e.clientX - drag.x) / PW() * (f(target.x1) - f(target.x0));
+    const dv = (e.clientY - drag.y) / (H - G.t - G.b) * (target.y1 - target.y0);
+    if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 4) drag.moved = true;
+    target.x0 = fi(f(target.x0) - du); target.x1 = fi(f(target.x1) - du);
+    target.y0 += dv; target.y1 += dv; Object.assign(view, target);
+    drag.x = e.clientX; drag.y = e.clientY;
+  }
+});
+addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, moved: false }; });
+addEventListener("mouseup", () => { if (drag && !drag.moved) drag = null; });
+// The wheel zooms about the pointer, in the plot's own scale; out past the
+// whole room it hands the view back to the fit.
+addEventListener("wheel", e => {
+  if (!G || e.clientX < G.l || e.clientX > G.l + PW() || e.clientY < G.t || e.clientY > H - G.b) return;
+  e.preventDefault();
+  const z = Math.exp(Math.max(-1, Math.min(1, e.deltaY * 0.0015)));
+  // The first turn starts from what is on the screen, not from the fit the
+  // view is still easing toward.
+  if (!zoomed) Object.assign(target, view);
+  // The point under the pointer, read in the view being zoomed toward, so
+  // that turns of the wheel in quick succession stay on it.
+  const u = f(target.x0) + (e.clientX - G.l) / PW() * (f(target.x1) - f(target.x0));
+  const v = target.y0 + (H - G.b - e.clientY) / (H - G.t - G.b) * (target.y1 - target.y0);
+  const u0 = u - (u - f(target.x0)) * z, u1 = u + (f(target.x1) - u) * z;
+  const v0 = v - (v - target.y0) * z, v1 = v + (target.y1 - v) * z;
+  if (u1 - u0 < 0.01 || v1 - v0 < 0.0004) return;
+  zoomed = true;
+  Object.assign(target, { x0: fi(u0), x1: fi(u1), y0: v0, y1: v1 });
+  const was = { ...target }; zoomed = false; fit();
+  if (f(was.x1) - f(was.x0) >= f(target.x1) - f(target.x0)) return;
+  zoomed = true; Object.assign(target, was);
+}, { passive: false });
+addEventListener("dblclick", () => { zoomed = false; drag = null; fit(); });
 addEventListener("mouseleave", () => { mouse.x = -1; });
 function chooseFocus(now) {
   if (pinned && devices.some(d => d.address === pinned)) { focus = pinned; walkAt = now; return; }
@@ -388,35 +431,46 @@ function frame(t) {
   const yb0 = Math.max(G.t, sy(0.55)), yb1 = Math.min(B, sy(0.45));
   ctx.fillRect(G.l, yb0, PW(), yb1 - yb0);
   ctx.lineWidth = 1; ctx.font = fnt(18);
-  for (const v of [-100,-50,-20,-10,-5,-2,-1,0,1,2,5,10,20,50,100]) {
+  // Wide, the fixed ppm steps of the stretched scale; zoomed in, even steps
+  // with as many decimals as they need.
+  const nice = (span, n) => { const s = span / n, e = Math.pow(10, Math.floor(Math.log10(s))); return e * ([1, 2, 5, 10].find(m => m * e >= s)); };
+  const dec = s => Math.max(0, -Math.floor(Math.log10(s) + 1e-9));
+  const xspan = view.x1 - view.x0, xs = xspan < 6 ? nice(xspan, 8) : 0;
+  const xticks = xs ? Array.from({ length: Math.floor(view.x1 / xs) - Math.ceil(view.x0 / xs) + 1 }, (_, i) => (Math.ceil(view.x0 / xs) + i) * xs)
+    : [-100, -50, -20, -10, -5, -2, -1, 0, 1, 2, 5, 10, 20, 50, 100];
+  for (const v of xticks) {
     if (v < view.x0 || v > view.x1) continue;
-    const x = Math.round(sx(v)) + 0.5;
+    const x = Math.round(sx(v)) + 0.5, txt = xs ? Math.abs(v).toFixed(dec(xs)) : String(Math.abs(v));
     ctx.strokeStyle = "#232623"; ctx.beginPath(); ctx.moveTo(x, G.t); ctx.lineTo(x, B); ctx.stroke();
-    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "center"; ctx.fillText((v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v), x, B + 28 * U);
+    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "center"; ctx.fillText((v > 1e-9 ? "+" : v < -1e-9 ? "−" : "") + txt, x, B + 28 * U);
   }
-  const ys = (view.y1 - view.y0) > 0.05 ? 0.01 : (view.y1 - view.y0) > 0.02 ? 0.005 : 0.002;
+  const ys = nice(view.y1 - view.y0, 6), ydec = Math.max(3, dec(ys));
   ctx.font = fnt(16);
   for (let v = Math.ceil(view.y0 / ys) * ys; v <= view.y1 + 1e-9; v += ys) {
     const y = Math.round(sy(v)) + 0.5;
     ctx.strokeStyle = "#232623"; ctx.beginPath(); ctx.moveTo(G.l, y); ctx.lineTo(R, y); ctx.stroke();
-    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "right"; ctx.fillText(v.toFixed(3), G.l - 14 * U, y + 6 * U);
+    ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "right"; ctx.fillText(v.toFixed(ydec), G.l - 14 * U, y + 6 * U);
   }
   ctx.strokeStyle = "#232623"; ctx.strokeRect(G.l + 0.5, G.t + 0.5, PW() - 1, B - G.t - 1);
   const z = Math.round(sx(0)) + 0.5;
   ctx.strokeStyle = rgba(PH, 0.55); ctx.setLineDash([2, 5]);
   ctx.beginPath(); ctx.moveTo(z, G.t - 12 * U); ctx.lineTo(z, B + 170 * U); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = rgba(PH, 0.9); ctx.textAlign = "center"; ctx.font = fnt(18, 500);
-  ctx.fillText("THIS RECEIVER'S CLOCK", z, G.t - 20 * U);
+  if (z > G.l && z < R) ctx.fillText("THIS RECEIVER'S CLOCK", z, G.t - 20 * U);
+  if (zoomed) {
+    ctx.font = fnt(16); ctx.textAlign = "left"; ctx.fillStyle = rgba(DIM, 1);
+    ctx.fillText("ZOOMED · DRAG TO MOVE · DOUBLE-CLICK FOR THE WHOLE ROOM", G.l, G.t - 20 * U);
+  }
   ctx.save(); ctx.translate(G.l - 100 * U, B); ctx.rotate(-Math.PI / 2); ctx.textAlign = "left";
   ctx.font = fnt(16); ctx.fillStyle = rgba(DIM, 1); ctx.fillText("MODULATION INDEX h →", 0, 0); ctx.restore();
 
   hover = null; let best = 1e9;
   for (const d of devices) {
-    if (d._px == null) continue;
+    if (d._px == null || d._px < G.l || d._px > R || d._py < G.t || d._py > B) continue;
     const dist = Math.hypot(mouse.x - d._px, mouse.y - d._py);
     if (mouse.x >= 0 && dist < 40 * U && dist < best) { best = dist; hover = d; }
   }
-  cv.style.cursor = hover ? "pointer" : "default";
+  cv.style.cursor = hover ? "pointer" : drag && drag.moved ? "grabbing" : zoomed ? "grab" : "default";
   chooseFocus(now);
   // While a moment holds the stage, everything but its two addresses steps
   // back, and the new address is the one in focus.
@@ -518,7 +572,7 @@ function frame(t) {
     const ry = Math.max(2, Math.min(200 * U, Math.abs(sy(h.value + 2 * h.sigma) - sy(h.value))));
     if (born < 1) {
       const k = 1 - Math.pow(1 - born, 3);
-      ctx.strokeStyle = rgba(PH, 0.5 * (1 - born)); ctx.lineWidth = 1.2;
+      ctx.strokeStyle = rgba(PH, 0.25 * (1 - born)); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(G.l + (X - G.l) * k, Y); ctx.lineTo(X, Y);
       ctx.moveTo(X, G.t + (Y - G.t) * k); ctx.lineTo(X, Y); ctx.stroke();
     }
@@ -535,8 +589,8 @@ function frame(t) {
       const k = (now - pt) / 1200; if (k < 0 || k >= 1) continue;
       const sp = 0.66, e = 1 - Math.pow(1 - k, 2);
       ctx.lineCap = "butt"; ctx.lineWidth = 2.4 * U * (1 - k);
-      for (const r of [dot + 6 * U + e * 26 * U, dot + 14 * U + e * 44 * U]) {
-        ctx.strokeStyle = rgba(PH, 0.75 * (1 - k) * A);
+      for (const r of [dot + 8 * U + e * 30 * U]) {
+        ctx.strokeStyle = rgba(PH, 0.45 * (1 - k) * A * (M && !isF ? 0.3 : 1));
         ctx.beginPath(); ctx.arc(X, Y, r, -sp, sp); ctx.stroke();
         ctx.beginPath(); ctx.arc(X, Y, r, Math.PI - sp, Math.PI + sp); ctx.stroke();
       }
@@ -562,7 +616,7 @@ function frame(t) {
     .sort((a, b) => (a === F ? -1 : b === F ? 1 : 0) || (a.last_seen_s - b.last_seen_s) || (b.packets - a.packets));
   let shown = 0;
   for (const d of lab) {
-    if (shown >= 10) break;
+    if (shown >= 7) break;
     const name = shortName(d).toUpperCase().slice(0, 14), p = d.crystal_offset_ppm;
     const val = (p.value > 0 ? "+" : "−") + Math.abs(p.value).toFixed(2);
     ctx.font = fnt(19, 500);
@@ -617,7 +671,7 @@ function legend(R) {
     if (k === "packet") {
       ctx.fillStyle = rgba(PH, 1); ctx.beginPath(); ctx.arc(cx, cy, 3 * U, 0, 7); ctx.fill();
       ctx.strokeStyle = rgba(PH, 0.85); ctx.lineWidth = 1.6 * U;
-      for (const r of [8, 13]) { ctx.beginPath(); ctx.arc(cx, cy, r * U, -0.66, 0.66); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, r * U, Math.PI - 0.66, Math.PI + 0.66); ctx.stroke(); }
+      for (const r of [10]) { ctx.beginPath(); ctx.arc(cx, cy, r * U, -0.66, 0.66); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, r * U, Math.PI - 0.66, Math.PI + 0.66); ctx.stroke(); }
     }
     ctx.fillStyle = rgba(DIM, 1); ctx.textAlign = "left"; ctx.fillText(label, cx + 26 * U, cy + 6 * U);
   });

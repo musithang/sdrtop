@@ -70,7 +70,8 @@ in HackRF mode) may work; I have only tried the HackRF.
 
 In my flat the first dots came within seconds; give it half a minute. Then
 watch your own phone: keep it near the antenna and wait for its address to
-change, which can take a while.
+change, which can take a while. Where the dots crowd, the mouse wheel zooms in; drag
+to move, double-click to see the whole room again.
 
 ## If it does not work
 
