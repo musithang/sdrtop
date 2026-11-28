@@ -48,9 +48,9 @@ You need a HackRF One with a 2.4 GHz antenna, and Python 3. Other radios that
 reach 2.4 GHz and run Monas's Bluetooth views (a PlutoSky R2, a PortaPack H4M
 in HackRF mode) may work; I have only tried the HackRF.
 
-1. **Get monasd** 0.8.2 or newer. Until 0.8.2 is released, build it from the
-   root of this repository: `cargo install --locked --path crates/monasd`.
-   After that, the [installer](../../README.md) with `--hackrf` will do.
+1. **Get monasd** 0.8.2 or newer: the [installer](../../README.md) with
+   `--hackrf` puts it in, or build it from the root of this repository with
+   `cargo install --locked --path crates/monasd`.
 2. **Start it** from this folder (`research/quartz`), on a copy of the config
    here (monasd writes its settings back when it stops, so give it a file of
    its own):

@@ -13,7 +13,7 @@
      {
       "address": "aa:bb:cc:dd:ee:01",
       "kind": "RPA",
-      "name": "Viktor's iPhone",
+      "name": "Alex's iPhone",
       "name_complete": true,
       "tx_power_dbm": null,
       "company_id": null,
@@ -518,7 +518,7 @@
      {
       "address": "aa:bb:cc:dd:ee:01",
       "kind": "RPA",
-      "name": "Viktor's iPhone",
+      "name": "Alex's iPhone",
       "name_complete": true,
       "tx_power_dbm": null,
       "company_id": null,
@@ -1023,7 +1023,7 @@
      {
       "address": "aa:bb:cc:dd:ee:01",
       "kind": "RPA",
-      "name": "Viktor's iPhone",
+      "name": "Alex's iPhone",
       "name_complete": true,
       "tx_power_dbm": null,
       "company_id": null,
