@@ -12,6 +12,16 @@ field falls back to a default rather than refusing to start.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-28
+
+monasd can log the 2.4 GHz band unattended, and has two new lab modes, `lab_doppler` and `lab_floor`, each with its own API route. Config files carry over unchanged; two optional blocks are added.
+
+### Added
+
+- `job = "occupancy"` in `[monasd]`: logs the 2.4 GHz band, one JSON line per MHz per minute, one file per UTC day (about 25 MB a day). Cells nobody looked at are `null`; blind stretches are `gap` lines with their reason. A full disk stops the log, not monasd.
+- `lab_doppler` mode: a narrowband spectrogram of one to four carriers, with the differential between two of them. `GET /v1/doppler`, the `doppler` command, the `[doppler]` config block.
+- `lab_floor` mode: a long exposure in fine bins (0.25 to 10 Hz), with the floor, its depth, the lines standing above it and the grids they fall on. `GET /v1/floor`, the `floor` and `floor_reset` commands, the `[floor]` config block.
+
 ## [0.8.1] - 2026-11-24
 
 **monasd serves the measurements.**
@@ -1607,7 +1617,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/musithang/sdrtop/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/musithang/sdrtop/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/musithang/sdrtop/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/musithang/sdrtop/compare/v0.7.3...v0.7.4
