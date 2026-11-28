@@ -42,7 +42,20 @@ The effect is known: it was studied on 647 devices at UC San Diego in 2022
 (the paper is linked in [METHOD.md](METHOD.md#not-a-new-idea)). This page
 lets you see it with a radio on your desk.
 
-## Try it
+## No radio? Watch the recording
+
+You need only Python 3 and a copy of this repository:
+
+```sh
+cd research/quartz
+python3 -I server.py 7380
+```
+
+and open <http://127.0.0.1:7380/?fixture&speed=10>: fifteen minutes of my
+flat, anonymised, played back ten times faster. No radio, no monasd. Leave
+off `&speed=10` to watch it in real time.
+
+## Try it with a radio
 
 You need a HackRF One with a 2.4 GHz antenna, and Python 3. Other radios that
 reach 2.4 GHz and run Monas's Bluetooth views (a PlutoSky R2, a PortaPack H4M
@@ -83,10 +96,8 @@ to move, double-click to see the whole room again.
 - **Few or no dots.** Check the antenna. More gain can help: in your copy of
   the config, `gain = "LNA=32,VGA=24"` is what the sample below was made
   with.
-- **Windows.** monasd runs on Linux, and unofficially on macOS.
-- **No radio at all.** Open <http://127.0.0.1:7380/?fixture> instead: fifteen
-  minutes of my flat, anonymised, played back (add `&speed=10` if you are
-  impatient). It needs only `server.py`, no monasd.
+- **Windows.** monasd runs on Linux, and unofficially on macOS. The
+  [recording](#no-radio-watch-the-recording) plays anywhere Python does.
 
 ## Your own recording
 
