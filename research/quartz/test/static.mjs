@@ -97,12 +97,16 @@ try {
   if (ts.join() !== "0,2") fail.push(`anonymize.py --every 2 kept polls at ${ts}, wanted 0,2`);
 } catch (e) { fail.push(`anonymize.py did not run: ${String(e.message).split("\n")[0]}`); }
 
-// The chance figure the method quotes, on the hand-made recording: two pairs
-// of different same-company rotating devices heard together for 10 s or
-// more, one of them within 2 sigma.
+// The chance figure the method quotes, on the hand-made recording: ten pairs
+// of same-company changeable addresses heard together for 10 s or more (four
+// Apple: ee:01/ee:04, ee:02/ee:03, ee:02/ee:05, ee:03/ee:05; six Garmin among
+// 9a:01..04), six of them within 2 sigma (12.30/12.31 and 12.32/12.30 ppm;
+// Garmin 7.00/7.01, 7.00/7.02, 7.01/7.02 and 7.02/7.04, while 7.04 is 2.1
+// sigma or more from 7.00 and 7.01); the zero-sigma pair is no measurement
+// and is left out.
 try {
   const out = execFileSync("python3", ["-I", path.join(here, "chance.py"), path.join(here, "test/tiny.json")], { encoding: "utf8" });
-  if (!out.includes("pairs 2, within 2 sigma 1")) fail.push(`chance.py on tiny.json said: ${out.trim().split("\n")[0]}`);
+  if (!out.includes("pairs 10, within 2 sigma 6")) fail.push(`chance.py on tiny.json said: ${out.trim().split("\n")[0]}`);
 } catch (e) { fail.push(`chance.py did not run: ${String(e.message).split("\n")[0]}`); }
 
 console.log(fail.length ? "FAIL\n" + fail.join("\n") : "PASS");

@@ -150,7 +150,7 @@ async function ask(route) {
   return at.census;
 }
 // What a test reads; nothing on the page uses it.
-window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()), sep: (a, b) => sep(a, b) };
+window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()), sep: (a, b) => sep(a, b), groups: () => groups };
 const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
 
 // When each address was first and last heard, on the stream's clock (the
@@ -159,8 +159,17 @@ const heard = new Map();
 // A rotating address counts as gone once silent this long; a new one is its
 // successor only if it started within SWAP_S of the old one falling silent;
 // a gone address is remembered for MEMORY_S.
-const SILENT_S = 20, SWAP_S = 30, MEMORY_S = 600;
+// Two addresses are compared as they were heard at the swap, the old one's
+// last WINDOW_S against the new one's first: over minutes a crystal drifts
+// (a phone warming), by more than a whole life's average can carry.
+const SILENT_S = 20, SWAP_S = 30, MEMORY_S = 600, WINDOW_S = 60;
+// A window with fewer packets than this is no measurement: its sigma would be
+// wide enough to match anything.
+const MIN_PACKETS = 10;
 const rotating = d => d.kind === "RPA" || d.kind === "NRPA";
+// Addresses a device can change: the rotating ones, and static random
+// addresses, which some devices change too.
+const changeable = d => rotating(d) || d.kind === "static";
 
 async function poll() {
   try {
@@ -170,7 +179,12 @@ async function poll() {
     const answered = (d.devices || []).filter(x => x.crystal_offset_ppm && x.modulation_index);
     for (const x of answered) {
       const h = heard.get(x.address);
-      heard.set(x.address, { first: h ? h.first : T - x.first_seen_s, last: T - x.last_seen_s, d: x, born: h && h.born });
+      const at = T - x.last_seen_s, rs = h ? h.rs : [];
+      // The census's running means, one each time the packet count moved, for
+      // the windows the rule compares.
+      if (!rs.length || rs[rs.length - 1].n !== x.packets) rs.push({ at, n: x.packets, d: x });
+      while (rs.length > 2 && rs[1].at < T - MEMORY_S - WINDOW_S) rs.shift();
+      heard.set(x.address, { first: h ? h.first : T - x.first_seen_s, last: at, d: x, born: h && h.born, rs });
     }
     const inAnswer = new Set(answered.map(x => x.address));
     const live = a => inAnswer.has(a) && T - heard.get(a).last <= SILENT_S;
@@ -192,6 +206,7 @@ async function poll() {
     }
     devices = fresh; polls++;
     relink(T, now, live);
+    regroup(T, live);
     fit(); meta();
   } catch (e) {
     testimony = { absent: !FIXTURE ? "monasd is not answering"
@@ -204,6 +219,7 @@ async function poll() {
 // How far apart two readings are, in combined sigma on both axes. A reading
 // with no uncertainty on an axis cannot be compared on it: never within 2.
 const sep = (a, b) => {
+  if (!a || !b) return Infinity;
   const sp = Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma);
   const sh = Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma);
   if (!(sp > 0) || !(sh > 0)) return Infinity;
@@ -220,18 +236,64 @@ const MOMENT_MS = 15000;
 let moment = null;
 const activeMoment = now => moment && now - moment.at < MOMENT_MS && devices.some(d => d.address === moment.to) ? moment : null;
 
+// The mean of the packets heard between t0 and t1, as a reading: the census
+// gives running means, so the one before t0 is taken out of the one at t1.
+function windowed(rs, t0, t1) {
+  let a = null, e = null;
+  for (const r of rs) { if (r.at <= t0) a = r; if (r.at <= t1) e = r; }
+  if (!e) return null;
+  const p = e.d.crystal_offset_ppm, h = e.d.modulation_index;
+  if (!a || a.n >= e.n) return e.n >= MIN_PACKETS ? e.d : null;
+  const k = e.n - a.n, f = Math.sqrt(e.n / k);
+  if (k < MIN_PACKETS) return null;
+  return {
+    crystal_offset_ppm: { value: (p.value * e.n - a.d.crystal_offset_ppm.value * a.n) / k, sigma: p.sigma * f },
+    modulation_index: { value: (h.value * e.n - a.d.modulation_index.value * a.n) / k, sigma: h.sigma * f },
+  };
+}
+
+// Parallel addresses: one device can advertise under several addresses at
+// once. Live changeable addresses of one company, heard together for 10 s or
+// more, every pair within 2 sigma over all the time they shared (one device's
+// drift moves both alike, so nothing is gained by narrowing it), are a group:
+// grown from the most packets down, a member joining only if it is close to
+// every one already in, never by a chain.
+let groups = [];
+function regroup(T, live) {
+  const close = (x, y) => {
+    const lo = Math.max(x.first, y.first), hi = Math.min(x.last, y.last);
+    if (hi - lo < 10) return false;
+    return sep(windowed(x.rs, lo, hi), windowed(y.rs, lo, hi)) <= 2;
+  };
+  const cand = [...heard].filter(([a, h]) => changeable(h.d) && live(a))
+    .sort(([a, x], [b, y]) => (y.d.packets - x.d.packets) || (a < b ? -1 : 1));
+  const used = new Set(), next = [];
+  for (const [a, x] of cand) {
+    if (used.has(a)) continue;
+    const g = [[a, x]];
+    for (const [b, y] of cand)
+      if (b !== a && !used.has(b) && (y.d.company || "") === (x.d.company || "") && g.every(([, m]) => close(m, y))) g.push([b, y]);
+    if (g.length > 1) { for (const [m] of g) used.add(m); next.push(g.map(([m]) => m)); }
+  }
+  groups = next;
+}
+
 function relink(T, now, live) {
   const before = new Map(links.map(L => [L.from.address + ">" + L.to, L.at]));
   const next = [];
   for (const [xa, x] of heard) {
-    if (!rotating(x.d) || !live(xa) || x.first < T - MEMORY_S) continue;
+    if (!changeable(x.d) || !live(xa) || x.first < T - MEMORY_S) continue;
+    const xw = windowed(x.rs, x.first, x.first + WINDOW_S);
     const c = [];
-    for (const [ga, g] of heard)
-      if (ga !== xa && rotating(g.d) && !live(ga) && (g.d.company || "") === (x.d.company || "")
-          && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2) c.push(g.d);
-    for (const g of c) {
+    for (const [ga, g] of heard) {
+      if (ga === xa || !changeable(g.d) || live(ga) || (g.d.company || "") !== (x.d.company || "")) continue;
+      if (x.first - g.last < -2 || x.first - g.last > SWAP_S) continue;
+      const s = sep(windowed(g.rs, g.last - WINDOW_S, g.last), xw);
+      if (s <= 2) c.push({ g: g.d, s });
+    }
+    for (const { g, s } of c) {
       const key = g.address + ">" + xa, fresh = !before.has(key);
-      const L = { from: g, to: xa, k: c.length, sep: sep(g, x.d), gap: x.first - heard.get(g.address).last, at: before.get(key) ?? now };
+      const L = { from: g, to: xa, k: c.length, sep: s, gap: x.first - heard.get(g.address).last, at: before.get(key) ?? now };
       next.push(L);
       if (fresh && polls > 1) moment = L;
     }
@@ -297,7 +359,7 @@ const vendorOf = a => {
   return m[1];
 };
 const shortName = d => (d.company || d.vendor || vendorOf(d.address) || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
-const kindWords = k => ({ RPA: "rotating address", NRPA: "rotating address", public: "fixed address", static: "fixed address" }[k] || k);
+const kindWords = k => ({ RPA: "rotating address", NRPA: "rotating address", public: "fixed address", static: "random address" }[k] || k);
 
 // ---- Spotlight: hover wins, otherwise it walks the loudest ----
 let mouse = { x: -1, y: -1 }, hover = null, focus = null, walkAt = 0, walkI = 0, pinned = null;
@@ -405,6 +467,40 @@ function frame(t) {
           ctx.fillText(text, at[0], at[1]);
           taken.push({ x: at[0] - 6 * U, y: at[1] - 22 * U, w: tw + 12 * U, h: 32 * U });
         }
+      }
+    }
+  }
+
+  // Each group of parallel addresses: a faint ring around its points, and
+  // its count beside it where nothing else is.
+  for (const g of groups) {
+    const pts = g.map(a => devices.find(d => d.address === a)).filter(d => d && d._px != null);
+    if (pts.length < 2) continue;
+    const cx = pts.reduce((s, d) => s + d._px, 0) / pts.length, cy = pts.reduce((s, d) => s + d._py, 0) / pts.length;
+    const r = Math.max(...pts.map(d => Math.hypot(d._px - cx, d._py - cy))) + 26 * U;
+    const a = M ? 0.15 : 0.7;
+    ctx.strokeStyle = rgba(PH, a); ctx.setLineDash([4, 5]); ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    if (M) continue;
+    ctx.font = fnt(16, 500); ctx.textAlign = "left"; ctx.fillStyle = rgba(PH, 0.85);
+    const text = `${pts.length} ADDRESSES, ONE QUARTZ?`, tw = ctx.measureText(text).width;
+    // Beside the ring if there is room, else above or below it, farther out
+    // step by step, with a thin line back to the ring.
+    const spots = [[cx + r + 10 * U, cy - r * 0.7], [cx - r - 10 * U - tw, cy - r * 0.7]];
+    for (const d of [10, 50, 90, 130, 170]) spots.push([cx - tw / 2, cy - r - d * U], [cx - tw / 2, cy + r + (d + 14) * U]);
+    for (const [x, y] of spots) {
+      const box = { x: x - 6 * U, y: y - 20 * U, w: tw + 12 * U, h: 28 * U };
+      const inside = box.x > G.l && box.x + box.w < G.l + PW() && box.y > G.t && box.y + box.h < B;
+      // Clear of other labels and of every point and its packet rings.
+      const hits = b => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y;
+      const marks = devices.filter(d => d._px != null).map(d => ({ x: d._px - 34 * U, y: d._py - 34 * U, w: 68 * U, h: 68 * U }));
+      if (inside && !taken.some(hits) && !marks.some(hits)) {
+        const ty = y < cy ? y + 6 * U : y - 20 * U, ry = y < cy ? cy - r : cy + r;
+        if (Math.abs(ty - ry) > 14 * U) {
+          ctx.strokeStyle = rgba(PH, 0.4); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(cx, ry); ctx.lineTo(Math.max(x, Math.min(cx, x + tw)), ty); ctx.stroke();
+        }
+        ctx.fillText(text, x, y); taken.push(box); break;
       }
     }
   }
@@ -615,7 +711,9 @@ function spotlight(F) {
   peak(p, rgba(VI, 1), 5, rgba(VI, 0.12));
   gc.strokeStyle = "#3a3d39"; gc.lineWidth = 3; gc.beginPath(); gc.moveTo(0, Hg - 1.5); gc.lineTo(Wg, Hg - 1.5); gc.stroke();
   const near = others[0];
-  document.getElementById("sp-v").innerHTML = !near ? "Alone in this room's quartz." :
+  const grp = groups.find(g => g.includes(F.address));
+  document.getElementById("sp-v").innerHTML = grp ? `Heard at the same time as ${grp.length - 1} other address${grp.length > 2 ? "es" : ""} within 2σ: <b>one device, several addresses?</b>` :
+    !near ? "Alone in this room's quartz." :
     !isFinite(near.s) ? "No uncertainty given: cannot be compared." :
     near.s <= 2 ? `Nearest crystal ${near.s.toFixed(1)}σ away: <b>could be the same device.</b>` :
     `Nearest crystal <b>${near.s.toFixed(0)}σ</b> away: <b>told apart by its quartz alone.</b>`;

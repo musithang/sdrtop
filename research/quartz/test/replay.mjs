@@ -95,10 +95,11 @@ const serveFixture = async url => {
 };
 const span = Math.max(...fx.polls.map(p => p.t)) + 15;
 // The page's links, sampled every second of the playback.
-const seen = new Map();
+const seen = new Map(), seenGroups = new Set();
 const sample = [];
 for (let at = 1000; at <= span * 1000; at += 1000) sample.push({ at, fn: Q => {
   for (const L of Q ? Q.links() : []) seen.set(`${L.from.address} -> ${L.to}`, L.k);
+  for (const g of Q && Q.groups ? Q.groups() : []) seenGroups.add([...g].sort().join(" + "));
 } });
 const played = await run({ search: `?fixture=${path.relative(base, path.resolve(fixturePath))}`, fetchImpl: serveFixture, seconds: span, during: sample });
 
@@ -147,35 +148,77 @@ if (q && q.sep) {
 if (devs.some(d => !d.company && d.crystal_offset_ppm && d.modulation_index) && !played.drawn.some(s => s.includes("UNNAMED")))
   fail.push("a device with no company was not labelled UNNAMED");
 
-// 4. The links are exactly the rule's. A rotating address that fell silent
-// (gone from the answer, or not heard for over 20 s) and a new one of the
-// same company that started within 30 s of it, within 2 combined sigma on
-// both axes; one match reads NEW ADDRESS, SAME QUARTZ?, several read
-// "N CRYSTALS MATCH". Counted for new addresses first heard in the last
-// 600 s, at the end of the recording.
-const SILENT_S = 20, SWAP_S = 30, MEMORY_S = 600;
-const rotating = d => d.kind === "RPA" || d.kind === "NRPA";
-const sep = (a, b) => Math.hypot(
-  (a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma),
-  (a.modulation_index.value - b.modulation_index.value) / Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma));
-// At every poll, as the page relinks: each live rotating address first heard
-// in the last 600 s, with the quiet ones it could have replaced. Collected
-// over the whole recording.
-const heard = new Map(), want = new Map();
+// 4. The links are exactly the rule's. An address that can change (RPA, NRPA
+// or static random) and fell silent (gone from the answer, or not heard for
+// over 20 s), and a new one of the same company that started within 30 s of
+// it, compared as they were heard at the swap: the old one's last minute
+// against the new one's first, within 2 combined sigma on both axes. One
+// match reads NEW ADDRESS, SAME QUARTZ?, several "N CRYSTALS MATCH".
+// Collected at every poll over the whole recording.
+const SILENT_S = 20, SWAP_S = 30, MEMORY_S = 600, WINDOW_S = 60, MIN_PACKETS = 10;
+const changeable = d => d.kind === "RPA" || d.kind === "NRPA" || d.kind === "static";
+const sepOf = (a, b) => {
+  if (!a || !b) return Infinity;
+  const sp = Math.hypot(a.sp, b.sp), sh = Math.hypot(a.sh, b.sh);
+  if (!(sp > 0) || !(sh > 0)) return Infinity;
+  return Math.hypot((a.mp - b.mp) / sp, (a.mh - b.mh) / sh);
+};
+// The mean of the packets heard between t0 and t1, from the census's running
+// means: the reading before t0 taken out of the one at t1.
+const windowed = (rs, t0, t1) => {
+  const upTo = t => { let r = null; for (const x of rs) if (x.at <= t) r = x; return r; };
+  const e = upTo(t1); if (!e) return null;
+  const a = upTo(t0);
+  const p = e.d.crystal_offset_ppm, h = e.d.modulation_index;
+  // A window with fewer than MIN_PACKETS packets is no measurement: its sigma
+  // would be wide enough to match anything.
+  if (!a || a.n >= e.n) return e.n >= MIN_PACKETS ? { mp: p.value, sp: p.sigma, mh: h.value, sh: h.sigma } : null;
+  const k = e.n - a.n, f = Math.sqrt(e.n / k);
+  if (k < MIN_PACKETS) return null;
+  return {
+    mp: (p.value * e.n - a.d.crystal_offset_ppm.value * a.n) / k, sp: p.sigma * f,
+    mh: (h.value * e.n - a.d.modulation_index.value * a.n) / k, sh: h.sigma * f,
+  };
+};
+const heard = new Map(), want = new Map(), wantGroups = new Set();
 for (const p of fx.polls) {
   const T = p.t;
   const fresh = (p.census.devices || []).filter(d => d.crystal_offset_ppm && d.modulation_index);
   const inAnswer = new Set(fresh.map(d => d.address));
   for (const d of fresh) {
     const h = heard.get(d.address);
-    heard.set(d.address, { first: h ? h.first : T - d.first_seen_s, last: T - d.last_seen_s, d });
+    const at = T - d.last_seen_s;
+    const rs = h ? h.rs : [];
+    if (!rs.length || rs[rs.length - 1].n !== d.packets) rs.push({ at, n: d.packets, d });
+    heard.set(d.address, { first: h ? h.first : T - d.first_seen_s, last: at, d, rs });
   }
   const live = a => inAnswer.has(a) && T - heard.get(a).last <= SILENT_S;
+  // Parallel addresses: live changeable addresses of one company, heard
+  // together for 10 s or more, every pair within 2 sigma over all the time
+  // they shared (one device's drift moves both alike). Grown from the most
+  // packets down, a member joining only if it is close to every one already in.
+  const close = (x, y) => {
+    const lo = Math.max(x.first, y.first), hi = Math.min(x.last, y.last);
+    if (hi - lo < 10) return false;
+    return sepOf(windowed(x.rs, lo, hi), windowed(y.rs, lo, hi)) <= 2;
+  };
+  const cand = [...heard].filter(([a, h]) => changeable(h.d) && live(a))
+    .sort(([a, x], [b, y]) => (y.d.packets - x.d.packets) || (a < b ? -1 : 1));
+  const used = new Set();
+  for (const [a, x] of cand) {
+    if (used.has(a)) continue;
+    const g = [[a, x]];
+    for (const [b, y] of cand)
+      if (b !== a && !used.has(b) && (y.d.company || "") === (x.d.company || "") && g.every(([, m]) => close(m, y))) g.push([b, y]);
+    if (g.length > 1) { for (const [m] of g) used.add(m); wantGroups.add(g.map(([m]) => m).sort().join(" + ")); }
+  }
   for (const [xa, x] of heard) {
-    if (!rotating(x.d) || !live(xa) || x.first < T - MEMORY_S) continue;
-    const c = [...heard].filter(([ga, g]) => ga !== xa && rotating(g.d) && !live(ga)
+    if (!changeable(x.d) || !live(xa) || x.first < T - MEMORY_S) continue;
+    const xw = windowed(x.rs, x.first, x.first + WINDOW_S);
+    const c = [...heard].filter(([ga, g]) => ga !== xa && changeable(g.d) && !live(ga)
       && (g.d.company || "") === (x.d.company || "")
-      && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2);
+      && x.first - g.last >= -2 && x.first - g.last <= SWAP_S
+      && sepOf(windowed(g.rs, g.last - WINDOW_S, g.last), xw) <= 2);
     for (const [ga] of c) if (!want.has(`${ga} -> ${xa}`)) want.set(`${ga} -> ${xa}`, c.length);
   }
 }
@@ -194,6 +237,16 @@ if (q) {
     if (!played.drawn.some(t => t === "SAME QUARTZ?" || /^\d+ CRYSTALS MATCH$/.test(t))) fail.push("the moment's heading was never shown");
     if (!played.drawn.some(t => /\d(\.\d)?σ<\/b> apart/.test(t))) fail.push("the moment never said how far apart in quartz");
     if (!played.drawn.some(t => /later|same moment|within 30 s/.test(t))) fail.push("the moment never said when the new address began");
+  }
+}
+
+// 4a. The parallel groups are exactly the rule's, and are said on the plot.
+if (q) {
+  if (!q.groups) fail.push("window.__quartz.groups is not there");
+  else {
+    const got = [...seenGroups].sort(), wanted = [...wantGroups].sort();
+    if (got.join() !== wanted.join()) fail.push(`groups ${JSON.stringify(got)}, the rule gives ${JSON.stringify(wanted)}`);
+    if (wanted.length && !played.drawn.some(t => /^\d+ ADDRESSES, ONE QUARTZ\?$/.test(t))) fail.push("a group was never labelled N ADDRESSES, ONE QUARTZ?");
   }
 }
 

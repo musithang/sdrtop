@@ -316,6 +316,192 @@
       "advertising": {},
       "first_seen_s": 0.0,
       "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 10,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.0,
+       "sigma": 0.015811388300841896
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00031622776601683794
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
      }
     ]
    }
@@ -635,6 +821,192 @@
       "advertising": {},
       "first_seen_s": 10.0,
       "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 20,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.0,
+       "sigma": 0.011180339887498949
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00022360679774997895
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
      }
     ]
    }
@@ -947,6 +1319,192 @@
       "modulation_index": {
        "value": 0.5,
        "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 30,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.200000000000001,
+       "sigma": 0.009128709291752768
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00018257418583505537
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
       },
       "pdu_types": [
        "ADV_IND"
@@ -1297,6 +1855,192 @@
       "modulation_index": {
        "value": 0.5,
        "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.3,
+       "sigma": 0.007905694150420948
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00015811388300841897
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
       },
       "pdu_types": [
        "ADV_IND"
@@ -1685,6 +2429,192 @@
       "advertising": {},
       "first_seen_s": 40.0,
       "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 50,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.36,
+       "sigma": 0.007071067811865475
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0001414213562373095
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
      }
     ]
    }
@@ -2059,6 +2989,192 @@
       "modulation_index": {
        "value": 0.5,
        "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 60,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.4,
+       "sigma": 0.006454972243679028
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00012909944487358055
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
       },
       "pdu_types": [
        "ADV_IND"
@@ -2477,6 +3593,2832 @@
       ],
       "advertising": {},
       "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 10.0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.005,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.4981,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 9.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 70,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.428571428571429,
+       "sigma": 0.005976143046671968
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00011952286093343937
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 70.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 40.0
+     },
+     {
+      "address": "11:22:33:44:55:67",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.02,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4802,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:05",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "GREE ELECTRIC APPLIANCES, INC. OF ZHUHAI #13",
+      "kind": "public",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -11.15,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.4964,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.505,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "ee:ee:ee:ee:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "<img src=x onerror=alert(1)>",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -8.01,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4901,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 20.0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.005,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.4981,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 19.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 80,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.45,
+       "sigma": 0.005590169943749474
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00011180339887498948
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 80.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 50.0
+     },
+     {
+      "address": "11:22:33:44:55:67",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.02,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4802,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:05",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "GREE ELECTRIC APPLIANCES, INC. OF ZHUHAI #13",
+      "kind": "public",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -11.15,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.4964,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.505,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "ee:ee:ee:ee:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "<img src=x onerror=alert(1)>",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -8.01,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4901,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 30.0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.005,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.4981,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 29.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 80,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.45,
+       "sigma": 0.005590169943749474
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00011180339887498948
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 10.0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 10,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.6,
+       "sigma": 0.015811388300841896
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00031622776601683794
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 9.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 80.0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 90.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 60.0
+     },
+     {
+      "address": "11:22:33:44:55:67",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.02,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4802,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:05",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "GREE ELECTRIC APPLIANCES, INC. OF ZHUHAI #13",
+      "kind": "public",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -11.15,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.4964,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.505,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "ee:ee:ee:ee:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "<img src=x onerror=alert(1)>",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -8.01,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4901,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 40.0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.005,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.4981,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 39.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 80,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.45,
+       "sigma": 0.005590169943749474
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00011180339887498948
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 20.0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 20,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.6,
+       "sigma": 0.011180339887498949
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00022360679774997895
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 19.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 90.0,
+      "last_seen_s": 0
+     }
+    ]
+   }
+  },
+  {
+   "t": 100.0,
+   "census": {
+    "testimony": {
+     "stale": false,
+     "feed_loss": false,
+     "absent": null
+    },
+    "devices": [
+     {
+      "address": "aa:bb:cc:dd:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.32,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:03",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 30.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5005,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "99:88:77:66:55:44",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Google LLC",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.31,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5002,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 70.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "11:22:33:44:55:66",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.48,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 70.0
+     },
+     {
+      "address": "11:22:33:44:55:67",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Samsung Electronics Co. Ltd.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -20.02,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4802,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "aa:bb:cc:dd:ee:05",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Apple, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 12.3,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "de:ad:be:ef:00:01",
+      "kind": "public",
+      "name": "Kitchen Speaker",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 5.0,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.51,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "GREE ELECTRIC APPLIANCES, INC. OF ZHUHAI #13",
+      "kind": "public",
+      "name": null,
+      "name_complete": false,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -11.15,
+       "sigma": 0.1
+      },
+      "modulation_index": {
+       "value": 0.4964,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "77:66:55:44:33:22",
+      "kind": "static",
+      "name": "Nameless Tag",
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Tile, Inc.",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": null,
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.002
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": null,
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.505,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "ee:ee:ee:ee:ee:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "<img src=x onerror=alert(1)>",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -8.01,
+       "sigma": 0.05
+      },
+      "modulation_index": {
+       "value": 0.4901,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.498,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 50.0
+     },
+     {
+      "address": "cc:cc:cc:cc:cc:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Bose Corporation",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": -6.005,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.4981,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 49.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 80,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.45,
+       "sigma": 0.005590169943749474
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00011180339887498948
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 30.0
+     },
+     {
+      "address": "dd:dd:dd:dd:dd:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Nordic Semiconductor ASA",
+      "packets": 30,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 10.6,
+       "sigma": 0.009128709291752768
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.00018257418583505537
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 29.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:01",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.0,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:02",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.01,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:03",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.02,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "9a:9a:9a:9a:9a:04",
+      "kind": "RPA",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Garmin International",
+      "packets": 40,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 7.04,
+       "sigma": 0.01
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0005
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 100.0,
       "last_seen_s": 0
      }
     ]

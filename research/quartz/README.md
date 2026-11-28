@@ -33,7 +33,10 @@ Many phones change their Bluetooth address every few minutes, so that the
 address alone is harder to follow. When an old address goes quiet and a new
 one starts close by on both axes, the page draws a line and asks
 **NEW ADDRESS, SAME QUARTZ?** It is a question, not an identification. When
-more than one quiet address fits, it says so: **3 CRYSTALS MATCH**.
+more than one quiet address fits, it says so: **3 CRYSTALS MATCH**. And
+when several addresses are heard at once on what looks like one quartz (a
+phone can advertise under more than one), it rings them:
+**3 ADDRESSES, ONE QUARTZ?**
 
 The effect is known: it was studied on 647 devices at UC San Diego in 2022
 (the paper is linked in [METHOD.md](METHOD.md#not-a-new-idea)). This page
