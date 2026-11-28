@@ -50,21 +50,27 @@ same amount. So the page's x axis is **relative**, as
 [the NET trust page](../../user_docs/net-trust.md#what-an-offset-is-worth)
 explains. It cannot say how far off a device is in absolute terms. It does
 not need to: "same quartz?" compares two devices heard by the same radio in
-the same session, and the radio's error cancels in the difference.
+the same session, and the radio's error cancels in the difference, as far as
+it stays put. It does not quite: the old address's reading is averaged over
+its whole life and the new one's comes up to 30 s later, and an
+unreferenced receiver drifts a little with its own temperature in between.
+That drift is not in the sigma.
 
 ## The rule
 
 Phones and many other devices change their Bluetooth address every few
 minutes (a resolvable or non-resolvable private address, RPA or NRPA), so
-that the address cannot be used to follow them. The crystal does not change.
+that the address alone is harder to follow. The crystal's error does not
+change with the address.
 The page draws a dashed line from an old address to a new one when all of
 this holds:
 
 1. Both addresses are rotating ones (RPA or NRPA).
 2. Both carry the same company in their advertising data (or both none).
 3. The old one has fallen silent: not heard for over 20 s.
-4. The new one started within 30 s of the old one's last packet. A rotation
-   is a swap: the old address stops and the new one starts.
+4. The new one started within 30 s of the old one's last packet, or up to
+   2 s before it (the census gives times in whole seconds). A rotation is a
+   swap: the old address stops and the new one starts.
 5. Their offsets and indices are within 2 combined sigma, on both axes
    together: `hypot(Δppm / σppm, Δindex / σindex) <= 2`, each σ the two
    devices' sigmas combined.
@@ -100,8 +106,10 @@ evening, 35 addresses, a HackRF at LNA 32 and VGA 24):
 
 One in 41, about 2 %. That is a small sample, so read it as a bound, not a
 rate: with one hit in 41 tries, the chance per pair is below 13 % at 95 %
-confidence (the exact binomial bound). A room with more devices of one model would give a better number,
-and possibly a worse one.
+confidence (the exact binomial bound). The bound treats the pairs as
+independent, and they are not quite: the 41 pairs are made of 22 rotating
+addresses, each in several. A room with more devices of one model would give
+a better number, and possibly a worse one.
 
 The recording carries **[FEED LOSS]** almost throughout: at 20 Msps this
 machine's Bluetooth decoding let some blocks go. That makes the packet counts
@@ -118,4 +126,5 @@ Reproduce it:
 python3 -I chance.py fixture.json
 ```
 
-Run it on your own capture (see the README) to get your room's number.
+Run it on your own recording (the README says how to make one) to get your
+room's number.

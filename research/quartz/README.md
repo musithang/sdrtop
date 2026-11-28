@@ -48,10 +48,12 @@ in HackRF mode) may work; I have only tried the HackRF.
 1. **Get monasd** 0.8.2 or newer. Until 0.8.2 is released, build it from the
    root of this repository: `cargo install --locked --path crates/monasd`.
    After that, the [installer](../../README.md) with `--hackrf` will do.
-2. **Start it** on a copy of the config here (monasd writes its settings back
-   when it stops, so give it a file of its own):
+2. **Start it** from this folder (`research/quartz`), on a copy of the config
+   here (monasd writes its settings back when it stops, so give it a file of
+   its own):
 
    ```sh
+   cd research/quartz
    cp config.toml ~/quartz.toml
    monasd --config ~/quartz.toml --device hackrf --mode net_census
    ```
@@ -82,6 +84,21 @@ change, which can take a while.
   minutes of my flat, anonymised, played back (add `&speed=10` if you are
   impatient). It needs only `server.py`, no monasd.
 
+## Your own recording
+
+With monasd running as above, from this folder:
+
+```sh
+python3 -I capture.py raw.json 15
+python3 -I anonymize.py --every 5 raw.json mine.json
+rm raw.json
+```
+
+`raw.json` holds what monasd showed (masked addresses included), so it is
+yours alone; `mine.json` is the anonymised one. Play it with
+<http://127.0.0.1:7380/?fixture=mine.json>, and get its number with
+`python3 -I chance.py mine.json`.
+
 ## Privacy, and the law
 
 **What it reads.** Bluetooth LE advertising, which devices send in the clear
@@ -103,10 +120,13 @@ narrowly (Ryneš, C-212/13; Buivids, C-345/17): putting other people's
 identifiable data online is not personal use. So:
 
 - watch your own devices;
-- share a capture only after `anonymize.py` (it keeps no address, no name,
-  no serial number and no time of day);
-- do not post screenshots in which other people's devices can be told
-  apart by more than their maker;
+- share a capture only after `anonymize.py`. It keeps no address, no name,
+  no serial number and no time of day, but it does keep each device's
+  crystal offset and modulation index: the very fingerprint this page is
+  about. Share one of your own devices, or think before you share your
+  neighbours';
+- do not post screenshots or captures of other people's devices together
+  with where and when they were made;
 - do not use it to follow a person. Tracking someone without their consent
   is unlawful in many places, whatever the tool.
 

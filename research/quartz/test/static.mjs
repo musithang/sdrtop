@@ -72,7 +72,7 @@ function checkRecording(label, text) {
   })(rec);
   for (const s of strings) {
     if (/serial|[0-9a-f]{12,}/i.test(s)) fail.push(`${label} holds a serial number ${JSON.stringify(s)}`);
-    if (/([0-9a-f]{2}:){2,}|\.\.[0-9a-f]{2}|#\d+/i.test(s)) fail.push(`${label} holds an address form ${JSON.stringify(s)}`);
+    if (/([0-9a-f]{2}:){2,}|\.\.[0-9a-f]{2}|#\d+|\b[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}\b/i.test(s)) fail.push(`${label} holds an address form ${JSON.stringify(s)}`);
     if (/\b(lat|lon)\w*\b.*\d{1,3}\.\d+/i.test(s)) fail.push(`${label} holds a coordinate ${JSON.stringify(s)}`);
     if (/name/i.test(s)) fail.push(`${label} holds a name ${JSON.stringify(s)}`);
   }
@@ -84,7 +84,7 @@ try {
   execFileSync("python3", ["-I", path.join(here, "anonymize.py"), path.join(here, "test/anon_input.json"), out]);
   checkRecording("anonymize.py's output", fs.readFileSync(out, "utf8"));
   const tokens = new Set(JSON.parse(fs.readFileSync(out, "utf8")).polls.flatMap(p => p.census.devices.map(d => d.address)));
-  if (tokens.size !== 3) fail.push(`anonymize.py gave ${tokens.size} tokens for 3 addresses`);
+  if (tokens.size !== 4) fail.push(`anonymize.py gave ${tokens.size} tokens for 4 addresses`);
   const anon = JSON.parse(fs.readFileSync(out, "utf8"));
   const vendors = new Set(anon.polls.flatMap(p => p.census.devices.map(d => d.vendor)).filter(Boolean));
   if ([...vendors].join() !== "Apple") fail.push(`anonymize.py kept vendors ${JSON.stringify([...vendors])}, wanted only "Apple"`);

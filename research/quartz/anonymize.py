@@ -29,7 +29,11 @@ VENDOR = re.compile(r"^(.*?)(·\w+)?\s+(#\d+|#-|\.\.[0-9a-f]{2}:[0-9a-f]{2})$", 
 
 def vendor_of(address):
     m = VENDOR.match(address or "")
-    if not m or re.fullmatch(r"RPA|NRPA|static|public", m.group(1), re.I) or re.search(r"([0-9a-f]{2}:){2}", m.group(1), re.I):
+    # An unlisted prefix comes as its bytes ("1C-2B-3D #12"): part of an
+    # address, not a maker.
+    if (not m or re.fullmatch(r"RPA|NRPA|static|public", m.group(1), re.I)
+            or re.search(r"([0-9a-f]{2}:){2}", m.group(1), re.I)
+            or re.fullmatch(r"[0-9a-f]{2}(-[0-9a-f]{2}){2}", m.group(1), re.I)):
         return None
     return m.group(1)
 

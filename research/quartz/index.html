@@ -63,7 +63,7 @@
 
 <div class="head">
   <h1>The flaw in the quartz</h1>
-  <p>Every Bluetooth device in the room, placed by the error of its crystal.</p>
+  <p>Bluetooth LE devices nearby, placed by the error of their crystal.</p>
 </div>
 
 <div class="count">
@@ -124,11 +124,24 @@ let devices = [], testimony = null, gone = new Map(), links = [], polls = 0;
 // plays it N times faster.
 const QS = new URLSearchParams(location.search);
 const FIXTURE = QS.has("fixture") ? (QS.get("fixture") || "fixture.json") : null;
+// A recording is played from this page's own folder only: a path with a
+// scheme, a host or a way up would let a link feed it someone else's file.
+const FIXTURE_OK = !FIXTURE || /^[\w.-]+(\/[\w.-]+)*$/.test(FIXTURE) && !FIXTURE.split("/").includes("..");
 const SPEED = Number(QS.get("speed")) || 1;
 let recording = null, recordingStart = 0, askT = 0;
+// An answer that is not one: server.py says 502 with an error when monasd
+// is not there, and that is no census.
+async function answer(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  const j = await r.json();
+  if (j && j.error) throw new Error(`${url}: ${j.error}`);
+  return j;
+}
 async function ask(route) {
-  if (!FIXTURE) { askT = performance.now() / 1000; return (await fetch(route, { cache: "no-store" })).json(); }
-  if (!recording) { recording = await (await fetch(FIXTURE, { cache: "no-store" })).json(); recordingStart = performance.now(); }
+  if (!FIXTURE) { askT = performance.now() / 1000; return answer(route); }
+  if (!FIXTURE_OK) throw new Error("refused");
+  if (!recording) { recording = await answer(FIXTURE); recordingStart = performance.now(); }
   if (route === "/v1/provenance") return { reference: recording.reference, device: recording.device };
   const t = (performance.now() - recordingStart) / 1000 * SPEED;
   let at = recording.polls[0];
@@ -180,7 +193,12 @@ async function poll() {
     devices = fresh; polls++;
     relink(T, now, live);
     fit(); meta();
-  } catch (e) { testimony = { absent: "monasd is not answering" }; meta(); }
+  } catch (e) {
+    testimony = { absent: !FIXTURE ? "monasd is not answering"
+      : !FIXTURE_OK ? "This page plays recordings from its own folder only."
+      : "The recording could not be read." };
+    meta();
+  }
 }
 
 const sep = (a, b) => Math.hypot(
@@ -264,9 +282,12 @@ const sy = v => H - G.b - (v - view.y0) / (view.y1 - view.y0) * (H - G.t - G.b);
 // person's ("X's iPhone"), and this page never shows one.
 // The vendor a masked or registrant-form address names ("GREE ... #13",
 // "Apple·mfr #4", "Apple ..ee:ff"), never its session number or its bytes.
+// An unlisted prefix comes as its bytes ("1C-2B-3D #12"): that is part of an
+// address, not a maker.
 const vendorOf = a => {
   const m = /^(.*?)(·\w+)?\s+(#\d+|#-|\.\.[0-9a-f]{2}:[0-9a-f]{2})$/i.exec(a || "");
-  if (!m || /^(RPA|NRPA|static|public)$/i.test(m[1]) || /([0-9a-f]{2}:){2}/i.test(m[1])) return null;
+  if (!m || /^(RPA|NRPA|static|public)$/i.test(m[1]) || /([0-9a-f]{2}:){2}/i.test(m[1])
+      || /^[0-9a-f]{2}(-[0-9a-f]{2}){2}$/i.test(m[1])) return null;
   return m[1];
 };
 const shortName = d => (d.company || d.vendor || vendorOf(d.address) || "unnamed").replace(/,? (Inc\.|Co\. Ltd\.|Corporation|Electronics.*|Semiconductor.*)$/, "");
@@ -527,6 +548,8 @@ function spectrum(F, B, R) {
 
 // ---- A rotation found, told in the panel ----
 let lastM = null;
+// A maker's name comes from the air or a recording: written as text, never as markup.
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 function momentPanel(M) {
   if (lastM === M) return;
   lastM = M;
@@ -534,8 +557,8 @@ function momentPanel(M) {
   const when = M.gap < 1 ? "at the same moment" : `<b>${Math.round(M.gap)} s</b> later`;
   document.getElementById("mo-h").textContent = M.k > 1 ? `${M.k} CRYSTALS MATCH` : "SAME QUARTZ?";
   document.getElementById("mo-f").innerHTML = M.k > 1
-    ? `${M.k} quiet ${shortName(to) === "unnamed" ? "addresses with no maker named" : shortName(to) + " addresses"} fit this one within 30 s and 2σ: the quartz alone cannot say which.`
-    : `${/^[aeiou]/i.test(shortName(to)) ? "An" : "A"} ${shortName(to)} address went quiet, and this one began ${when}.<br><b>${M.sep.toFixed(1)}σ</b> apart in quartz and modulation.`;
+    ? `${M.k} quiet ${shortName(to) === "unnamed" ? "addresses with no maker named" : esc(shortName(to)) + " addresses"} fit this one within 30 s and 2σ: the quartz alone cannot say which.`
+    : `${/^[aeiou]/i.test(shortName(to)) ? "An" : "A"} ${esc(shortName(to))} address went quiet, and this one began ${when}.<br><b>${M.sep.toFixed(1)}σ</b> apart in quartz and modulation.`;
   // The two crystals, old and new, on the panel's spectrum.
   const Wg = 880, Hg = 280, o = M.from.crystal_offset_ppm, n = to.crystal_offset_ppm;
   const span = Math.max(6 * Math.max(o.sigma, n.sigma), Math.abs(o.value - n.value) * 2, 0.1), c = (o.value + n.value) / 2;

@@ -21,7 +21,7 @@ const fail = [];
 
 // Run the page's script in a fresh context for `seconds` of simulated time.
 function run({ search, fetchImpl, seconds, during = [] }) {
-  const drawn = [];
+  const drawn = [], html = [];
   let now = 0;
   const stub = new Proxy(function () {}, {
     get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : stub),
@@ -38,9 +38,9 @@ function run({ search, fetchImpl, seconds, during = [] }) {
   });
   const element = () => {
     const e = { style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, getContext: () => ctx, width: 0, height: 0 };
-    let text = "", html = "";
+    let text = "", inner = "";
     Object.defineProperty(e, "textContent", { get: () => text, set: v => { text = String(v); drawn.push(text); } });
-    Object.defineProperty(e, "innerHTML", { get: () => html, set: v => { html = String(v); drawn.push(html); } });
+    Object.defineProperty(e, "innerHTML", { get: () => inner, set: v => { inner = String(v); drawn.push(inner); html.push(inner); } });
     return e;
   };
   const els = {};
@@ -48,6 +48,7 @@ function run({ search, fetchImpl, seconds, during = [] }) {
   const timers = [];
   let frames = [];
   let fetches = 0;
+  const asked = [];
   const context = {
     document: {
       getElementById: id => (els[id] ??= element()),
@@ -62,7 +63,7 @@ function run({ search, fetchImpl, seconds, during = [] }) {
     setInterval: (fn, ms) => timers.push({ fn, ms, next: ms }),
     setTimeout: (fn, ms) => timers.push({ fn, ms, next: now + ms, once: true }),
     requestAnimationFrame: fn => frames.push(fn),
-    fetch: async url => { fetches++; return fetchImpl(url); },
+    fetch: async url => { fetches++; asked.push(String(url)); return fetchImpl(url); },
     URLSearchParams, Math, JSON, Map, Set, Promise, console,
   };
   context.window = context;
@@ -84,16 +85,22 @@ function run({ search, fetchImpl, seconds, during = [] }) {
       for (const d of during) if (!d.done && now >= d.at) { d.done = true; d.fn(context.__quartz, listeners, drawn); }
       await step();
     }
-    return { drawn, els, fetches, q: context.__quartz };
+    return { drawn, html, els, fetches, asked, q: context.__quartz };
   })();
 }
 
 const serveFixture = async url => {
   const file = path.resolve(base, url.split("?")[0]);
-  return { json: async () => JSON.parse(fs.readFileSync(file, "utf8")) };
+  return { ok: true, status: 200, json: async () => JSON.parse(fs.readFileSync(file, "utf8")) };
 };
 const span = Math.max(...fx.polls.map(p => p.t)) + 15;
-const played = await run({ search: `?fixture=${path.relative(base, path.resolve(fixturePath))}`, fetchImpl: serveFixture, seconds: span });
+// The page's links, sampled every second of the playback.
+const seen = new Map();
+const sample = [];
+for (let at = 1000; at <= span * 1000; at += 1000) sample.push({ at, fn: Q => {
+  for (const L of Q ? Q.links() : []) seen.set(`${L.from.address} -> ${L.to}`, L.k);
+} });
+const played = await run({ search: `?fixture=${path.relative(base, path.resolve(fixturePath))}`, fetchImpl: serveFixture, seconds: span, during: sample });
 
 // 1. Nothing personal reaches the screen.
 const devs = fx.polls.flatMap(p => p.census.devices || []);
@@ -111,7 +118,12 @@ for (const s of played.drawn) {
   for (const w of words) if (low.includes(w)) fail.push(`a word of a name, ${JSON.stringify(w)}, drawn: ${JSON.stringify(s)}`);
   if (s.includes("NaN")) fail.push(`NaN drawn: ${JSON.stringify(s)}`);
   if (/serial|[0-9a-f]{12,}/i.test(s)) fail.push(`a serial number drawn: ${JSON.stringify(s)}`);
+  if (/\b[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}\b/i.test(s)) fail.push(`an address prefix drawn as a maker: ${JSON.stringify(s)}`);
 }
+
+// Markup in a recording stays text: what is written as HTML holds no tag
+// but the page's own <b> and <br>.
+for (const s of played.html) if (/<(?!\/?b>|br>)/i.test(s)) fail.push(`markup from a recording reached the page: ${JSON.stringify(s)}`);
 
 // 1b. The receiver is named as the recording names it, its serial cut off.
 if (fx.device && !played.drawn.includes(fx.device.split(/\s+serial\s/)[0].trim()))
@@ -138,32 +150,32 @@ const rotating = d => d.kind === "RPA" || d.kind === "NRPA";
 const sep = (a, b) => Math.hypot(
   (a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma),
   (a.modulation_index.value - b.modulation_index.value) / Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma));
-const heard = new Map();
-let T = 0, inLast = new Set();
+// At every poll, as the page relinks: each live rotating address first heard
+// in the last 600 s, with the quiet ones it could have replaced. Collected
+// over the whole recording.
+const heard = new Map(), want = new Map();
 for (const p of fx.polls) {
-  T = p.t;
+  const T = p.t;
   const fresh = (p.census.devices || []).filter(d => d.crystal_offset_ppm && d.modulation_index);
-  inLast = new Set(fresh.map(d => d.address));
+  const inAnswer = new Set(fresh.map(d => d.address));
   for (const d of fresh) {
     const h = heard.get(d.address);
     heard.set(d.address, { first: h ? h.first : T - d.first_seen_s, last: T - d.last_seen_s, d });
   }
+  const live = a => inAnswer.has(a) && T - heard.get(a).last <= SILENT_S;
+  for (const [xa, x] of heard) {
+    if (!rotating(x.d) || !live(xa) || x.first < T - MEMORY_S) continue;
+    const c = [...heard].filter(([ga, g]) => ga !== xa && rotating(g.d) && !live(ga)
+      && (g.d.company || "") === (x.d.company || "")
+      && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2);
+    for (const [ga] of c) if (!want.has(`${ga} -> ${xa}`)) want.set(`${ga} -> ${xa}`, c.length);
+  }
 }
-const want = new Set(), counts = new Map();
-for (const [xa, x] of heard) {
-  // The new address must itself be live: a link to a point no longer drawn says nothing.
-  if (!rotating(x.d) || x.first < T - MEMORY_S || !inLast.has(xa) || T - x.last > SILENT_S) continue;
-  const c = [...heard].filter(([ga, g]) => ga !== xa && rotating(g.d)
-    && (g.d.company || "") === (x.d.company || "")
-    && (!inLast.has(ga) || T - g.last > SILENT_S)
-    && x.first - g.last >= -2 && x.first - g.last <= SWAP_S && sep(g.d, x.d) <= 2);
-  for (const [ga] of c) want.add(`${ga} -> ${xa}`);
-  if (c.length) counts.set(xa, c.length);
-}
+const counts = new Map([...want].map(([k, n]) => [k.split(" -> ")[1], n]));
 if (q) {
-  const got = new Set(q.links().map(l => `${l.from.address} -> ${l.to}`));
-  if ([...want].sort().join() !== [...got].sort().join())
-    fail.push(`links ${JSON.stringify([...got].sort())}, the rule gives ${JSON.stringify([...want].sort())}`);
+  const got = [...seen.keys()].sort(), wanted = [...want.keys()].sort();
+  if (wanted.join() !== got.join())
+    fail.push(`links ${JSON.stringify(got)}, the rule gives ${JSON.stringify(wanted)}`);
   for (const k of new Set(counts.values())) {
     const label = k === 1 ? "NEW ADDRESS, SAME QUARTZ?" : `${k} CRYSTALS MATCH`;
     if (!played.drawn.includes(label)) fail.push(`a link was not labelled ${label}`);
@@ -183,7 +195,7 @@ const vendorOf = d => d.vendor || ((/^(.*?)(·\w+)?\s+(#\d+|#-|\.\.[0-9a-f]{2}:[
 if (q && q.label) {
   for (const d of devs) {
     const v = vendorOf(d);
-    if (d.company || !v || /^(RPA|NRPA|static|public)$/i.test(v)) continue;
+    if (d.company || !v || /^(RPA|NRPA|static|public)$/i.test(v) || /^[0-9a-f]{2}(-[0-9a-f]{2}){2}$/i.test(v)) continue;
     if (!q.label(d).toUpperCase().startsWith(v.toUpperCase().slice(0, 10))) fail.push(`${JSON.stringify(v)} labelled ${JSON.stringify(q.label(d))}`);
   }
 } else if (q) fail.push("window.__quartz.label is not there");
@@ -215,10 +227,23 @@ if (counts.size && q && q.moment) {
   }
 }
 
+// 5b. server.py up and monasd down: server.py answers 502 with an error body,
+// which is monasd not answering too, not an empty room.
+const proxyOnly = await run({ search: "", fetchImpl: async () => ({ ok: false, status: 502, json: async () => ({ error: "<urlopen error [Errno 111] Connection refused>" }) }), seconds: 6 });
+if (!proxyOnly.drawn.includes("monasd is not answering")) fail.push("a 502 from server.py was not said as monasd not answering");
+
+// 5c. ?fixture= plays files from the page's own folder only: anything with a
+// scheme or a host is refused, never fetched.
+for (const bad of ["data:application/json,{}", "//example.org/x.json", "https://example.org/x.json"]) {
+  const r = await run({ search: `?fixture=${encodeURIComponent(bad)}`, fetchImpl: serveFixture, seconds: 3 });
+  if (r.asked.some(u => u.includes(":") || u.startsWith("//"))) fail.push(`?fixture=${bad} was fetched`);
+  if (!r.drawn.some(t => /own folder/.test(t))) fail.push(`?fixture=${bad} was not refused in words`);
+}
+
 // 5. A monasd that does not answer is said so, and the page keeps asking.
 const dead = await run({ search: "", fetchImpl: async () => { throw new Error("refused"); }, seconds: 6 });
 if (!dead.drawn.includes("monasd is not answering")) fail.push("an unanswering monasd was not said so");
 if (dead.fetches < 5) fail.push(`the page stopped asking: ${dead.fetches} requests in 6 s`);
 
-console.log(fail.length ? "FAIL\n" + [...new Set(fail)].join("\n") : `PASS (${want.size} link${want.size === 1 ? "" : "s"})`);
+console.log(fail.length ? "FAIL\n" + [...new Set(fail)].join("\n") : `PASS (${want.size} link${want.size === 1 ? "" : "s"} over the playback)`);
 process.exit(fail.length ? 1 : 0);

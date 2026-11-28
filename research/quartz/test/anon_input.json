@@ -100,6 +100,51 @@
       },
       "first_seen_s": 1795800000,
       "last_seen_s": 1795800042
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": null,
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.123456789,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
      }
     ]
    }
@@ -203,6 +248,51 @@
       },
       "first_seen_s": 1795800000,
       "last_seen_s": 1795800042
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": null,
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.123456789,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
      }
     ]
    }
@@ -280,6 +370,51 @@
       },
       "crystal_offset_ppm": {
        "value": 3.1,
+       "sigma": 0.07
+      },
+      "modulation_index": {
+       "value": 0.501,
+       "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND",
+       "SCAN_RSP"
+      ],
+      "advertising": {
+       "status": "estimated",
+       "interval_ms": {
+        "value": 152.5,
+        "sigma": 0.3
+       },
+       "events": 40,
+       "channel": 37,
+       "delay": "uniform",
+       "delay_width_ms": 10.0,
+       "grid": "off",
+       "grid_steps": null,
+       "grid_off_ms": null
+      },
+      "first_seen_s": 1795800000,
+      "last_seen_s": 1795800042
+     },
+     {
+      "address": "1C-2B-3D #12",
+      "kind": "public",
+      "name": "Viktor's iPhone",
+      "name_complete": true,
+      "tx_power_dbm": 4,
+      "company_id": 76,
+      "company": null,
+      "packets": 12,
+      "crc_failed": 1,
+      "crc_pass_pct": 92.3,
+      "best_snr_db": 21.0,
+      "mean_snr_db": {
+       "value": 14.0,
+       "sigma": 0.4
+      },
+      "crystal_offset_ppm": {
+       "value": 3.123456789,
        "sigma": 0.07
       },
       "modulation_index": {
