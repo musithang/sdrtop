@@ -150,7 +150,7 @@ async function ask(route) {
   return at.census;
 }
 // What a test reads; nothing on the page uses it.
-window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()) };
+window.__quartz = { devices: () => devices, links: () => links, label: d => shortName(d), moment: () => activeMoment(performance.now()), sep: (a, b) => sep(a, b) };
 const view = { x0: -6, x1: 2, y0: 0.47, y1: 0.53 }, target = { ...view };
 
 // When each address was first and last heard, on the stream's clock (the
@@ -201,9 +201,15 @@ async function poll() {
   }
 }
 
-const sep = (a, b) => Math.hypot(
-  (a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma),
-  (a.modulation_index.value - b.modulation_index.value) / Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma));
+// How far apart two readings are, in combined sigma on both axes. A reading
+// with no uncertainty on an axis cannot be compared on it: never within 2.
+const sep = (a, b) => {
+  const sp = Math.hypot(a.crystal_offset_ppm.sigma, b.crystal_offset_ppm.sigma);
+  const sh = Math.hypot(a.modulation_index.sigma, b.modulation_index.sigma);
+  if (!(sp > 0) || !(sh > 0)) return Infinity;
+  return Math.hypot((a.crystal_offset_ppm.value - b.crystal_offset_ppm.value) / sp,
+                    (a.modulation_index.value - b.modulation_index.value) / sh);
+};
 // Every new rotating address with the silent ones it could have replaced:
 // the same company, started within SWAP_S of the old one's last packet,
 // within 2 combined sigma on both axes. k is how many qualify: one is drawn
@@ -610,6 +616,7 @@ function spotlight(F) {
   gc.strokeStyle = "#3a3d39"; gc.lineWidth = 3; gc.beginPath(); gc.moveTo(0, Hg - 1.5); gc.lineTo(Wg, Hg - 1.5); gc.stroke();
   const near = others[0];
   document.getElementById("sp-v").innerHTML = !near ? "Alone in this room's quartz." :
+    !isFinite(near.s) ? "No uncertainty given: cannot be compared." :
     near.s <= 2 ? `Nearest crystal ${near.s.toFixed(1)}σ away: <b>could be the same device.</b>` :
     `Nearest crystal <b>${near.s.toFixed(0)}σ</b> away: <b>told apart by its quartz alone.</b>`;
 }

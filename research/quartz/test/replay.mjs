@@ -116,7 +116,7 @@ for (const s of played.drawn) {
   for (const a of addresses) if (a.length > 3 && low.includes(a.toLowerCase())) fail.push(`address ${a} drawn: ${JSON.stringify(s)}`);
   for (const n of names) if (low.includes(n.toLowerCase())) fail.push(`name ${JSON.stringify(n)} drawn: ${JSON.stringify(s)}`);
   for (const w of words) if (low.includes(w)) fail.push(`a word of a name, ${JSON.stringify(w)}, drawn: ${JSON.stringify(s)}`);
-  if (s.includes("NaN")) fail.push(`NaN drawn: ${JSON.stringify(s)}`);
+  if (s.includes("NaN") || s.includes("Infinity")) fail.push(`a non-number drawn: ${JSON.stringify(s)}`);
   if (/serial|[0-9a-f]{12,}/i.test(s)) fail.push(`a serial number drawn: ${JSON.stringify(s)}`);
   if (/\b[0-9a-f]{2}-[0-9a-f]{2}-[0-9a-f]{2}\b/i.test(s)) fail.push(`an address prefix drawn as a maker: ${JSON.stringify(s)}`);
 }
@@ -134,6 +134,14 @@ const q = played.q;
 if (!q) fail.push("window.__quartz is not there");
 else for (const d of q.devices()) if (!d.crystal_offset_ppm || !d.modulation_index)
   fail.push(`${d.address} drawn without an offset or an index`);
+
+// 2b. Two readings with no uncertainty cannot be compared: their distance is
+// infinite (never within 2 sigma), not NaN.
+if (q && q.sep) {
+  const z = { crystal_offset_ppm: { value: 1, sigma: 0 }, modulation_index: { value: 0.5, sigma: 0 } };
+  const d = q.sep(z, { ...z });
+  if (!(d === Infinity)) fail.push(`two zero-sigma readings are ${d} sigma apart, wanted Infinity`);
+} else if (q) fail.push("window.__quartz.sep is not there");
 
 // 3. A device with no company is labelled UNNAMED, whatever it is called.
 if (devs.some(d => !d.company && d.crystal_offset_ppm && d.modulation_index) && !played.drawn.some(s => s.includes("UNNAMED")))

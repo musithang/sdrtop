@@ -57,9 +57,11 @@ def anonymize(rec, every=0.0):
         return tokens[address]
 
     polls, step = [], None
+    # Times from the first poll, whatever clock the recording came with.
+    t0 = (rec.get("polls") or [{}])[0].get("t") or 0
     for p in rec.get("polls", []):
         if every:
-            k = int((p.get("t") or 0) // every)
+            k = int(((p.get("t") or 0) - t0) // every)
             if k == step:
                 continue
             step = k
@@ -73,7 +75,7 @@ def anonymize(rec, every=0.0):
                 kept["vendor"] = v
             kept.update({k: rounded(d[k]) for k in KEPT if k in d})
             devices.append(kept)
-        polls.append({"t": p.get("t"), "census": {"testimony": testimony, "devices": devices}})
+        polls.append({"t": round((p.get("t") or 0) - t0, 3), "census": {"testimony": testimony, "devices": devices}})
     reference = (rec.get("reference") or "not said").split(",")[0]
     # The radio by its name only, whatever the capture kept: a serial number
     # names one unit.

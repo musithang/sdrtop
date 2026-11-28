@@ -24,17 +24,24 @@ provenance = ask("/v1/provenance")
 reference = provenance.get("reference") or "not said"
 # The radio by its name only: its serial number names one unit.
 device = (provenance.get("device") or "").split("  serial")[0].strip() or None
+# What was captured is written however the capture ends: at its time, at
+# Ctrl-C, or at an error, so a long capture is never lost at its last minute.
 polls, start = [], time.monotonic()
-while time.monotonic() - start < minutes * 60:
-    t = time.monotonic()
-    try:
-        polls.append({"t": round(t - start, 3), "census": ask("/v1/net/census")})
-    except OSError as e:
-        print("skipped a poll:", e, file=sys.stderr)
-    if len(polls) % 60 == 0 and polls:
-        n = len({d.get("address") for p in polls for d in p["census"].get("devices", [])})
-        print(f"{len(polls)} polls, {n} addresses so far", file=sys.stderr)
-    time.sleep(max(0.0, 1.0 - (time.monotonic() - t)))
-with open(out, "w") as f:
-    json.dump({"reference": reference, "device": device, "polls": polls}, f)
-print(f"{len(polls)} polls written to {out}; anonymize it before sharing")
+try:
+    while time.monotonic() - start < minutes * 60:
+        t = time.monotonic()
+        try:
+            polls.append({"t": round(t - start, 3), "census": ask("/v1/net/census")})
+            if len(polls) % 60 == 0:
+                n = len({d.get("address") for p in polls for d in p["census"].get("devices", [])})
+                print(f"{len(polls)} polls, {n} addresses so far", file=sys.stderr)
+        except (OSError, ValueError) as e:
+            # No answer, or one that is not a census: skipped, not fatal.
+            print("skipped a poll:", e, file=sys.stderr)
+        time.sleep(max(0.0, 1.0 - (time.monotonic() - t)))
+except KeyboardInterrupt:
+    print("stopped early", file=sys.stderr)
+finally:
+    with open(out, "w") as f:
+        json.dump({"reference": reference, "device": device, "polls": polls}, f)
+    print(f"{len(polls)} polls written to {out}; anonymize it before sharing")

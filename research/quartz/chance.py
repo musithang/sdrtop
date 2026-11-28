@@ -31,10 +31,14 @@ for p in rec["polls"]:
 
 
 def sep(a, b):
+    """Combined-sigma distance, or None when an axis has no uncertainty to
+    compare by (a reading with sigma 0 is not a measurement)."""
     p, q = a["crystal_offset_ppm"], b["crystal_offset_ppm"]
     h, k = a["modulation_index"], b["modulation_index"]
-    return math.hypot((p["value"] - q["value"]) / math.hypot(p["sigma"], q["sigma"]),
-                      (h["value"] - k["value"]) / math.hypot(h["sigma"], k["sigma"]))
+    sp, sh = math.hypot(p["sigma"], q["sigma"]), math.hypot(h["sigma"], k["sigma"])
+    if not (sp > 0 and sh > 0):
+        return None
+    return math.hypot((p["value"] - q["value"]) / sp, (h["value"] - k["value"]) / sh)
 
 
 rotating = [(a, h) for a, h in heard.items() if h["d"]["kind"] in ("RPA", "NRPA")]
@@ -46,8 +50,11 @@ for i, (a, x) in enumerate(rotating):
             continue
         if min(x["last"], y["last"]) - max(x["first"], y["first"]) < 10:
             continue
+        s = sep(x["d"], y["d"])
+        if s is None:
+            continue
         pairs[company] += 1
-        within[company] += sep(x["d"], y["d"]) <= 2
+        within[company] += s <= 2
 
 n, m = sum(pairs.values()), sum(within.values())
 print(f"pairs {n}, within 2 sigma {m}, share {m / n:.3f}" if n else "pairs 0, within 2 sigma 0")

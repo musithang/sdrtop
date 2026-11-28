@@ -254,6 +254,68 @@
       "advertising": {},
       "first_seen_s": 0.0,
       "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 0.0,
+      "last_seen_s": 0
      }
     ]
    }
@@ -511,6 +573,68 @@
       "advertising": {},
       "first_seen_s": 10.0,
       "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 10.0,
+      "last_seen_s": 0
      }
     ]
    }
@@ -761,6 +885,68 @@
       "modulation_index": {
        "value": 0.49,
        "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
       },
       "pdu_types": [
        "ADV_IND"
@@ -1049,6 +1235,68 @@
       "modulation_index": {
        "value": 0.49,
        "sigma": 0.001
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 30.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
       },
       "pdu_types": [
        "ADV_IND"
@@ -1375,6 +1623,68 @@
       "advertising": {},
       "first_seen_s": 0.0,
       "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 40.0,
+      "last_seen_s": 0
      }
     ]
    }
@@ -1693,6 +2003,68 @@
       ],
       "advertising": {},
       "first_seen_s": 10.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 50.0,
       "last_seen_s": 0
      }
     ]
@@ -2043,6 +2415,68 @@
       ],
       "advertising": {},
       "first_seen_s": 20.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:01",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 1000,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
+      "last_seen_s": 0
+     },
+     {
+      "address": "00:00:00:00:00:02",
+      "kind": "static",
+      "name": null,
+      "name_complete": true,
+      "tx_power_dbm": null,
+      "company_id": null,
+      "company": "Zero, Inc.",
+      "packets": 999,
+      "crc_failed": 0,
+      "crc_pass_pct": 100.0,
+      "best_snr_db": 20.0,
+      "mean_snr_db": {
+       "value": 15.0,
+       "sigma": 0.5
+      },
+      "crystal_offset_ppm": {
+       "value": 20.0,
+       "sigma": 0.0
+      },
+      "modulation_index": {
+       "value": 0.5,
+       "sigma": 0.0
+      },
+      "pdu_types": [
+       "ADV_IND"
+      ],
+      "advertising": {},
+      "first_seen_s": 60.0,
       "last_seen_s": 0
      }
     ]

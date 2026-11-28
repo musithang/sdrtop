@@ -80,7 +80,9 @@ function checkRecording(label, text) {
 checkRecording("fixture.json", read("fixture.json"));
 // The anonymiser itself, on every address form monasd can answer with.
 try {
-  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "quartz-")), "anon.json");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quartz-"));
+  process.on("exit", () => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, "anon.json");
   execFileSync("python3", ["-I", path.join(here, "anonymize.py"), path.join(here, "test/anon_input.json"), out]);
   checkRecording("anonymize.py's output", fs.readFileSync(out, "utf8"));
   const tokens = new Set(JSON.parse(fs.readFileSync(out, "utf8")).polls.flatMap(p => p.census.devices.map(d => d.address)));

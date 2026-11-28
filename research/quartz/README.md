@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="pics/quartz.jpg" alt="The quartz page: a new address that three quiet ones fit within 30 s and 2 sigma, so the quartz alone cannot say which: 3 CRYSTALS MATCH" width="900">
+  <img src="pics/quartz.jpg" alt="The quartz page: a new address that two quiet ones fit within 30 s and 2 sigma, so the quartz alone cannot say which: 2 CRYSTALS MATCH" width="900">
 </p>
 
 ## What you are looking at
@@ -95,7 +95,8 @@ rm raw.json
 ```
 
 `raw.json` holds what monasd showed (masked addresses included), so it is
-yours alone; `mine.json` is the anonymised one. Play it with
+yours alone; `mine.json` is the anonymised one. Ctrl-C ends a capture early
+and keeps what it has. Play it with
 <http://127.0.0.1:7380/?fixture=mine.json>, and get its number with
 `python3 -I chance.py mine.json`.
 
@@ -141,4 +142,4 @@ This is not legal advice, and the law differs from country to country.
 | `fixture.json` | Fifteen minutes of a census, anonymised |
 | `capture.py`, `anonymize.py` | How that was made, for your own |
 | `chance.py` | The method's number, from any recording |
-| `test/` | `node test/static.mjs` and `node test/replay.mjs index.html fixture.json`: PASS or FAIL |
+| `test/` | `node test/static.mjs`, `node test/scripts.mjs` and `node test/replay.mjs index.html fixture.json`: PASS or FAIL |
