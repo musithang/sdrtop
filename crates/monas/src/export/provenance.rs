@@ -312,6 +312,7 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming();
         m.show_section(crate::signal::ft8::SECTION);
         m.radio.frequency = 7_074_000;
+        // Alcsútdoboz, where Hatvanpuszta is: a place for a test, not anyone's station.
         m.home.latitude = Some(47.4258);
         m.home.longitude = Some(18.6026);
         m.home.callsign = Some("HA5ZZT".into());

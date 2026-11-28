@@ -1168,6 +1168,7 @@ pub(crate) mod tests {
         let mut out = String::from("<div class=t>");
         let night = {
             let mut m = evening();
+            // Alcsútdoboz, where Hatvanpuszta is.
             m.home.latitude = Some(47.4258);
             m.home.longitude = Some(18.6026);
             m.ft8.hearing = Some(1_793_393_280.0); // 2026-10-30 20:48 UTC
